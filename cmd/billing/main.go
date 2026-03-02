@@ -26,6 +26,7 @@ import (
 	"github.com/0gfoundation/0g-sandbox-billing/internal/proxy"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/settler"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/tee"
+	"github.com/0gfoundation/0g-sandbox-billing/web"
 )
 
 func main() {
@@ -126,6 +127,9 @@ func main() {
 	r.Use(gin.Recovery())
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+	r.GET("/dashboard", func(c *gin.Context) {
+		c.Data(http.StatusOK, "text/html; charset=utf-8", web.DashboardHTML)
 	})
 
 	api := r.Group("/api", auth.Middleware(rdb))
