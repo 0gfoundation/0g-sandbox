@@ -1,35 +1,318 @@
 services:
+
+  # ── Billing proxy (this repo) ─────────────────────────────────────────────
   billing:
-    build: .
+    image: billing:latest
     ports:
-      - "8080:8080"
+      - "${PORT:-8080}:8080"
     environment:
-      DAYTONA_API_URL:       ${DAYTONA_API_URL}
-      DAYTONA_ADMIN_KEY:     ${DAYTONA_ADMIN_KEY}
-      REDIS_ADDR:            redis:6379
-      TEE_SIGNING_KEY:       ${TEE_SIGNING_KEY}
-      PROVIDER_ADDRESS:      ${PROVIDER_ADDRESS}
-      SETTLEMENT_CONTRACT:   ${SETTLEMENT_CONTRACT}
-      CHAIN_ID:              ${CHAIN_ID}
-      RPC_URL:               ${RPC_URL}
-      COMPUTE_PRICE_PER_MIN: ${COMPUTE_PRICE_PER_MIN:-1000000}
-      CREATE_FEE:            ${CREATE_FEE:-5000000}
-      VOUCHER_INTERVAL_SEC:  ${VOUCHER_INTERVAL_SEC:-3600}
+      # Daytona API — internal only; must never be changed to a public URL.
+      DAYTONA_API_URL:         http://api:3000
+      DAYTONA_ADMIN_KEY:       ${DAYTONA_ADMIN_KEY}
+      # Redis (billing's own instance, separate from Daytona's)
+      REDIS_ADDR:              billing-redis:6379
+      REDIS_PASSWORD:          ${REDIS_PASSWORD:-}
+      # TEE / Chain
+      SETTLEMENT_CONTRACT:     ${SETTLEMENT_CONTRACT}
+      CHAIN_ID:                ${CHAIN_ID:-16602}
+      RPC_URL:                 ${RPC_URL:-https://evmrpc-testnet.0g.ai}
+      PROVIDER_ADDRESS:        ${PROVIDER_ADDRESS:-}
+      PROVIDER_PRIVATE_KEY:    ${PROVIDER_PRIVATE_KEY:-}
+      # Billing parameters (neuron; 1 0G = 10^18 neuron)
+      COMPUTE_PRICE_PER_SEC:   ${COMPUTE_PRICE_PER_SEC:-16667}
+      CREATE_FEE:              ${CREATE_FEE:-5000000}
+      VOUCHER_INTERVAL_SEC:    ${VOUCHER_INTERVAL_SEC:-3600}
+      PORT:                    8080
+      # TEE key — fetched from tapp-daemon via gRPC
+      BACKEND_TAPP_IP:         ${BACKEND_TAPP_IP:-127.0.0.1}
+      BACKEND_TAPP_PORT:       ${BACKEND_TAPP_PORT:-50051}
+      BACKEND_APP_NAME:        ${BACKEND_APP_NAME:-billing}
+      # Dev-only mock overrides (leave empty in production)
+      MOCK_TEE:                ${MOCK_TEE:-}
+      MOCK_APP_PRIVATE_KEY:    ${MOCK_APP_PRIVATE_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./.env:/app/.env:ro   # ensures tapp-cli uploads .env for compose variable substitution
     depends_on:
-      redis:
+      billing-redis:
         condition: service_healthy
+      api:
+        condition: service_started
+    networks:
+      - app-net
     restart: unless-stopped
 
-  redis:
-    image: redis:7-alpine
+  billing-redis:
+    image: redis@sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065
     volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
+      - billing_redis_data:/data
+    command: >
+      redis-server --appendonly yes --requirepass "${REDIS_PASSWORD:-}"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - app-net
+    restart: unless-stopped
+
+  # ── Daytona ───────────────────────────────────────────────────────────────
+  # Port 3000 is intentionally NOT published. All external API access must go
+  # through the billing proxy on port 8080.
+  api:
+    image: daytonaio/daytona-api@sha256:c1203729b066b7b4724a03973a1c167625b8bef89cc2172557e06871c1e3a082
+    environment:
+      - OTEL_ENABLED=false
+      - RESOURCE_LIMITS_DISABLED=true
+      - DEFAULT_SNAPSHOT=daytonaio/sandbox:0.5.0-slim
+      - ENCRYPTION_KEY=${DAYTONA_ENCRYPTION_KEY:-supersecretkey}
+      - ENCRYPTION_SALT=${DAYTONA_ENCRYPTION_SALT:-supersecretsalt}
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USERNAME=${DAYTONA_DB_USER:-user}
+      - DB_PASSWORD=${DAYTONA_DB_PASSWORD:-pass}
+      - DB_DATABASE=${DAYTONA_DB_NAME:-daytona}
+      - REDIS_HOST=daytona-redis
+      - REDIS_PORT=6379
+      - OIDC_CLIENT_ID=daytona
+      - OIDC_ISSUER_BASE_URL=http://dex:5556/dex
+      - PUBLIC_OIDC_DOMAIN=http://localhost:5556/dex
+      - OIDC_AUDIENCE=daytona
+      - OIDC_MANAGEMENT_API_ENABLED=
+      - OIDC_MANAGEMENT_API_CLIENT_ID=
+      - OIDC_MANAGEMENT_API_CLIENT_SECRET=
+      - OIDC_MANAGEMENT_API_AUDIENCE=
+      - DASHBOARD_URL=http://localhost:3000/dashboard
+      - DASHBOARD_BASE_API_URL=http://localhost:3000
+      - TRANSIENT_REGISTRY_URL=http://registry:6000
+      - TRANSIENT_REGISTRY_ADMIN=admin
+      - TRANSIENT_REGISTRY_PASSWORD=password
+      - TRANSIENT_REGISTRY_PROJECT_ID=daytona
+      - INTERNAL_REGISTRY_URL=http://registry:6000
+      - INTERNAL_REGISTRY_ADMIN=admin
+      - INTERNAL_REGISTRY_PASSWORD=password
+      - INTERNAL_REGISTRY_PROJECT_ID=daytona
+      - SMTP_HOST=localhost
+      - SMTP_PORT=1025
+      - SMTP_USER=
+      - SMTP_PASSWORD=
+      - SMTP_SECURE=
+      - SMTP_EMAIL_FROM=Daytona Team <no-reply@daytona.io>
+      - S3_ENDPOINT=http://minio:9000
+      - S3_STS_ENDPOINT=http://minio:9000/minio/v1/assume-role
+      - S3_REGION=us-east-1
+      - S3_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - S3_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - S3_DEFAULT_BUCKET=daytona
+      - S3_ACCOUNT_ID=/
+      - S3_ROLE_NAME=/
+      - ENVIRONMENT=docker-compose
+      - MAX_AUTO_ARCHIVE_INTERVAL=43200
+      - MAINTENANCE_MODE=false
+      - PROXY_DOMAIN=${PROXY_DOMAIN:-proxy.localhost:4000}
+      - PROXY_PROTOCOL=http
+      - PROXY_API_KEY=${DAYTONA_PROXY_API_KEY:-super_secret_key}
+      - PROXY_TEMPLATE_URL=http://{{PORT}}-{{sandboxId}}.${PROXY_DOMAIN:-proxy.localhost:4000}
+      - DEFAULT_RUNNER_DOMAIN=runner:3003
+      - DEFAULT_RUNNER_API_URL=http://runner:3003
+      - DEFAULT_RUNNER_PROXY_URL=http://runner:3003
+      - DEFAULT_RUNNER_API_KEY=${DAYTONA_RUNNER_API_KEY:-secret_api_token}
+      - DEFAULT_RUNNER_CPU=4
+      - DEFAULT_RUNNER_MEMORY=8
+      - DEFAULT_RUNNER_DISK=50
+      - DEFAULT_RUNNER_NAME=default
+      - DEFAULT_REGION_ID=us
+      - DEFAULT_REGION_NAME=us
+      - DEFAULT_REGION_ENFORCE_QUOTAS=false
+      - DEFAULT_ORG_QUOTA_TOTAL_CPU_QUOTA=10000
+      - DEFAULT_ORG_QUOTA_TOTAL_MEMORY_QUOTA=10000
+      - DEFAULT_ORG_QUOTA_TOTAL_DISK_QUOTA=100000
+      - DEFAULT_ORG_QUOTA_MAX_CPU_PER_SANDBOX=100
+      - DEFAULT_ORG_QUOTA_MAX_MEMORY_PER_SANDBOX=100
+      - DEFAULT_ORG_QUOTA_MAX_DISK_PER_SANDBOX=1000
+      - DEFAULT_ORG_QUOTA_SNAPSHOT_QUOTA=1000
+      - DEFAULT_ORG_QUOTA_MAX_SNAPSHOT_SIZE=1000
+      - ADMIN_MAX_CPU_PER_SANDBOX=100
+      - ADMIN_MAX_MEMORY_PER_SANDBOX=100
+      - ADMIN_MAX_DISK_PER_SANDBOX=1000
+      - ADMIN_TOTAL_CPU_QUOTA=10000
+      - ADMIN_TOTAL_MEMORY_QUOTA=10000
+      - ADMIN_TOTAL_DISK_QUOTA=100000
+      - ADMIN_SNAPSHOT_QUOTA=1000
+      - ADMIN_VOLUME_QUOTA=10000
+      - DEFAULT_ORG_QUOTA_VOLUME_QUOTA=10000
+      - SSH_GATEWAY_API_KEY=${DAYTONA_SSH_GATEWAY_API_KEY:-ssh_secret_api_token}
+      - SSH_GATEWAY_COMMAND=ssh -p 2222 {{TOKEN}}@localhost
+      - SSH_GATEWAY_URL=localhost:2222
+      - SSH_GATEWAY_PUBLIC_KEY=c3NoLWVkMjU1MTkgQUFBQUMzTnphQzFsWkRJMU5URTVBQUFBSU9HUDVKa3VYbVhieEhxYXVxNUxuQ2hoUkFXamIxWGdlQjloS0J6OUhPVE8gZGF5dG9uYS1nYXRld2F5Cg==
+      - SKIP_USER_EMAIL_VERIFICATION=true
+      - RUN_MIGRATIONS=true
+      - HEALTH_CHECK_API_KEY=${DAYTONA_HEALTH_CHECK_API_KEY:-supersecretkey}
+      - ADMIN_API_KEY=${DAYTONA_ADMIN_KEY}
+      - POSTHOG_API_KEY=
+      - POSTHOG_HOST=
+    depends_on:
+      db:
+        condition: service_healthy
+      runner:
+        condition: service_started
+      daytona-redis:
+        condition: service_started
+      dex:
+        condition: service_started
+      registry:
+        condition: service_started
+    networks:
+      - app-net
+    restart: always
+    privileged: true
+
+  runner:
+    image: daytonaio/daytona-runner@sha256:a1de89138d9f549f3313f6896748b36f30d0bead4a0a84ddf79f56a1fbe036b0
+    environment:
+      - ENVIRONMENT=production
+      - API_PORT=3003
+      - DAYTONA_RUNNER_TOKEN=${DAYTONA_RUNNER_API_KEY:-secret_api_token}
+      - LOG_FILE_PATH=/home/daytona/runner/runner.log
+      - RESOURCE_LIMITS_DISABLED=true
+      - AWS_ENDPOINT_URL=http://minio:9000
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - AWS_DEFAULT_BUCKET=daytona
+      - DAYTONA_API_URL=http://api:3000/api
+      - RUNNER_DOMAIN=${RUNNER_DOMAIN:-runner}
+      - SSH_GATEWAY_ENABLE=true
+      - SSH_PUBLIC_KEY=c3NoLWVkMjU1MTkgQUFBQUMzTnphQzFsWkRJMU5URTVBQUFBSU9HUDVKa3VYbVhieEhxYXVxNUxuQ2hoUkFXamIxWGdlQjloS0J6OUhPVE8gZGF5dG9uYS1nYXRld2F5Cg==
+    networks:
+      - app-net
+    depends_on:
+      - minio
+    privileged: true
+    restart: always
+
+  proxy:
+    image: daytonaio/daytona-proxy@sha256:2a4ce1cf1fb1d8f21ac6f49cea17e7ed5c7c591bb4af06b3ba001b7e5446d209
+    ports:
+      - "4000:4000"
+    environment:
+      - DAYTONA_API_URL=http://api:3000/api
+      - PROXY_PORT=4000
+      - PROXY_API_KEY=${DAYTONA_PROXY_API_KEY:-super_secret_key}
+      - PROXY_PROTOCOL=http
+      - OIDC_CLIENT_ID=daytona
+      - OIDC_CLIENT_SECRET=
+      - OIDC_DOMAIN=http://dex:5556/dex
+      - OIDC_PUBLIC_DOMAIN=http://localhost:5556/dex
+      - OIDC_AUDIENCE=daytona
+      - REDIS_HOST=daytona-redis
+      - REDIS_PORT=6379
+      - TOOLBOX_ONLY_MODE=false
+      - PREVIEW_WARNING_ENABLED=false
+    networks:
+      - app-net
+    restart: always
+
+  ssh-gateway:
+    image: daytonaio/daytona-ssh-gateway@sha256:870b20ea3fdcceb9bc52cf74269fea7f516af1af025034a84bc1a6bf298fd31d
+    ports:
+      - "2222:2222"
+    environment:
+      - API_URL=http://api:3000/api
+      - API_KEY=${DAYTONA_SSH_GATEWAY_API_KEY:-ssh_secret_api_token}
+      - SSH_GATEWAY_PORT=2222
+      - SSH_PRIVATE_KEY=LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KYjNCbGJuTnphQzFyWlhrdGRqRUFBQUFBQkc1dmJtVUFBQUFFYm05dVpRQUFBQUFBQUFBQkFBQUFNd0FBQUF0emMyZ3RaVwpReU5UVXhPUUFBQUNEaGorU1pMbDVsMjhSNm1ycXVTNXdvWVVRRm8yOVY0SGdmWVNnYy9Semt6Z0FBQUpqY01lRVUzREhoCkZBQUFBQXR6YzJndFpXUXlOVFV4T1FBQUFDRGhqK1NaTGw1bDI4UjZtcnF1UzV3b1lVUUZvMjlWNEhnZllTZ2MvUnpremcKQUFBRUNYbjJ0ZzJtOUdqc0U2Nm1FYUxsUEV1T0MzUktRc3U4OGcvQmRiRlZyOTZ1R1A1Smt1WG1YYnhIcWF1cTVMbkNoaApSQVdqYjFYZ2VCOWhLQno5SE9UT0FBQUFEMlJoZVhSdmJtRXRaMkYwWlhkaGVRRUNBd1FGQmc9PQotLS0tLUVORCBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0K
+      - SSH_HOST_KEY=LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KYjNCbGJuTnphQzFyWlhrdGRqRUFBQUFBQkc1dmJtVUFBQUFFYm05dVpRQUFBQUFBQUFBQkFBQUFNd0FBQUF0emMyZ3RaVwpReU5UVXhPUUFBQUNEbWt0d0hVVzMwd2VjQkZiSTRpS284SEkzejZqRnh1TDYwQmtTWnlaK2FJd0FBQUppU05HaWVralJvCm5nQUFBQXR6YzJndFpXUXlOVFV4T1FBQUFDRG1rdHdIVVczMHdlY0JGYkk0aUtvOEhJM3o2akZ4dUw2MEJrU1p5WithSXcKQUFBRUJhck95SFdxSHlpVzlvMGQ0VjJjYVhlL2RWM3FOZnFWV3k5bWkvQ3YveDNPYVMzQWRSYmZUQjV3RVZzamlJcWp3YwpqZlBxTVhHNHZyUUdSSm5KbjVvakFBQUFGR1JoZVhSdmJtRXRaMkYwWlhkaGVTMW9iM04wQVE9PQotLS0tLUVORCBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0K
+    networks:
+      - app-net
+    restart: always
+
+  dex:
+    image: dexidp/dex@sha256:1b4a6eee8550240b0faedad04d984ca939513650e1d9bd423502c67355e3822f
+    volumes:
+      - ./config/dex/config.yaml:/etc/dex/config.yaml
+      - dex_db:/var/dex
+    entrypoint: ['sh', '-c', 'touch /var/dex/dex.db && exec dex serve /etc/dex/config.yaml']
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://localhost:5556/dex/.well-known/openid-configuration"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks:
+      - app-net
+    restart: unless-stopped
+
+  db:
+    image: postgres@sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f
+    environment:
+      - POSTGRES_PASSWORD=${DAYTONA_DB_PASSWORD:-pass}
+      - POSTGRES_USER=${DAYTONA_DB_USER:-user}
+      - POSTGRES_DB=${DAYTONA_DB_NAME:-daytona}
+    volumes:
+      - db_data_v3:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DAYTONA_DB_USER:-user} -d ${DAYTONA_DB_NAME:-daytona}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    networks:
+      - app-net
+    restart: unless-stopped
+
+  daytona-redis:
+    image: redis@sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065
+    volumes:
+      - daytona_redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
+    networks:
+      - app-net
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    command: server /data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks:
+      - app-net
+    restart: unless-stopped
+
+  registry:
+    image: registry@sha256:bcece5dd3d4b6189e13e7ac71b2ccbc2aae649365f0c589852d687efeba6b290
+    environment:
+      REGISTRY_HTTP_ADDR: registry:6000
+      REGISTRY_STORAGE_DELETE_ENABLED: 'true'
+    volumes:
+      - registry_data:/var/lib/registry
+    networks:
+      - app-net
+    restart: unless-stopped
+
+networks:
+  app-net:
+    driver: bridge
 
 volumes:
-  redis_data:
+  billing_redis_data:
+  daytona_redis_data:
+  dex_db:
+  db_data_v3:
+  minio_data:
+  registry_data:

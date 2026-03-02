@@ -32,11 +32,12 @@ type BillingConfig struct {
 }
 
 type ChainConfig struct {
-	RPCURL          string `mapstructure:"rpc_url"`
-	ContractAddress string `mapstructure:"contract_address"`
-	TEEPrivateKey   string `mapstructure:"tee_private_key"`
-	ProviderAddress string `mapstructure:"provider_address"`
-	ChainID         int64  `mapstructure:"chain_id"`
+	RPCURL             string `mapstructure:"rpc_url"`
+	ContractAddress    string `mapstructure:"contract_address"`
+	TEEPrivateKey      string `mapstructure:"tee_private_key"`
+	ProviderPrivateKey string `mapstructure:"provider_private_key"`
+	ProviderAddress    string `mapstructure:"provider_address"`
+	ChainID            int64  `mapstructure:"chain_id"`
 }
 
 type ServerConfig struct {
@@ -75,6 +76,7 @@ func Load() (*Config, error) {
 		"chain.rpc_url":                "RPC_URL",
 		"chain.contract_address":       "SETTLEMENT_CONTRACT",
 		"chain.tee_private_key":        "TEE_SIGNING_KEY",
+		"chain.provider_private_key":   "PROVIDER_PRIVATE_KEY",
 		"chain.provider_address":       "PROVIDER_ADDRESS",
 		"chain.chain_id":               "CHAIN_ID",
 		"server.port":                  "PORT",

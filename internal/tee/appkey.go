@@ -28,11 +28,10 @@ type AppKey struct {
 	EthAddressHex string
 }
 
-// cached result — mirrors the TypeScript singleton promise pattern.
+// cached result — protected by mu.
 var (
-	once      sync.Once
+	mu        sync.Mutex
 	cachedKey *AppKey
-	cachedErr error
 )
 
 // Get returns the application signing key.
@@ -44,15 +43,17 @@ var (
 // Result is cached after the first successful call; errors are NOT cached
 // so the caller can retry after a transient failure.
 func Get(ctx context.Context) (*AppKey, error) {
-	// Try the fast cached path first (no lock needed for reads after Once).
-	once.Do(func() {
-		cachedKey, cachedErr = fetch(ctx)
-		if cachedErr != nil {
-			// Don't cache errors — allow retry on next call.
-			once = sync.Once{}
-		}
-	})
-	return cachedKey, cachedErr
+	mu.Lock()
+	defer mu.Unlock()
+	if cachedKey != nil {
+		return cachedKey, nil
+	}
+	key, err := fetch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cachedKey = key
+	return cachedKey, nil
 }
 
 func fetch(ctx context.Context) (*AppKey, error) {
@@ -85,7 +86,7 @@ func fetchMock() (*AppKey, error) {
 //	BACKEND_APP_NAME   application identifier
 func fetchGRPC(ctx context.Context) (*AppKey, error) {
 	host := envOrDefault("BACKEND_TAPP_IP", "127.0.0.1")
-	port := envOrDefault("BACKEND_TAPP_PORT", "8080")
+	port := envOrDefault("BACKEND_TAPP_PORT", "50051")
 	appID := os.Getenv("BACKEND_APP_NAME")
 	target := host + ":" + port
 
