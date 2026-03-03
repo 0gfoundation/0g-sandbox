@@ -42,6 +42,8 @@ func main() {
 	contractHex := flag.String("contract", "0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210", "Contract address")
 	depositEth := flag.Float64("deposit", 0.01, "0G amount to deposit into the contract")
 	serviceURL := flag.String("url", "https://0g-sandbox.io", "Provider service URL")
+	pricePerMin := flag.String("price-per-min", "0", "Compute price per minute in neuron")
+	createFee := flag.String("create-fee", "0", "Create fee in neuron")
 	flag.Parse()
 
 	keyHex := strings.TrimPrefix(os.Getenv("MOCK_APP_PRIVATE_KEY"), "0x")
@@ -83,8 +85,17 @@ func main() {
 
 	// ── 1. AddOrUpdateService ─────────────────────────────────────────────────
 	fmt.Println("\n[1/3] AddOrUpdateService...")
-	// TEE signer = same account; pricePerMin = 0; createFee = 0
-	tx, err := contract.AddOrUpdateService(auth, *serviceURL, addr, big.NewInt(0), big.NewInt(0))
+	pricePerMinBig, ok := new(big.Int).SetString(*pricePerMin, 10)
+	if !ok {
+		fatalf("invalid --price-per-min: %s", *pricePerMin)
+	}
+	createFeeBig, ok := new(big.Int).SetString(*createFee, 10)
+	if !ok {
+		fatalf("invalid --create-fee: %s", *createFee)
+	}
+	fmt.Printf("      price/min: %s neuron\n", pricePerMinBig.String())
+	fmt.Printf("      create fee: %s neuron\n", createFeeBig.String())
+	tx, err := contract.AddOrUpdateService(auth, *serviceURL, addr, pricePerMinBig, createFeeBig)
 	if err != nil {
 		fatalf("AddOrUpdateService: %v", err)
 	}

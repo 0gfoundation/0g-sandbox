@@ -5,7 +5,10 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"sync"
+	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -224,6 +227,98 @@ func (c *Client) PreviewSettlementResults(ctx context.Context, vouchers []vouche
 	return statuses, nil
 }
 
+// VoucherEvent is a decoded VoucherSettled log from the settlement contract.
+type VoucherEvent struct {
+	User      common.Address
+	Provider  common.Address
+	TotalFee  *big.Int
+	Nonce     *big.Int
+	Status    SettlementStatus
+	TxHash    string
+	Block     uint64
+	Timestamp uint64 // unix seconds (0 if unavailable)
+}
+
+// GetVoucherEvents queries VoucherSettled logs from the contract.
+// lookback is the number of blocks to look back from the current latest block.
+// lookback=0 means all history (from block 1).
+// Returns the events, the current (latest) block number, and any error.
+func (c *Client) GetVoucherEvents(ctx context.Context, lookback uint64) ([]VoucherEvent, uint64, error) {
+	latest, err := c.eth.BlockNumber(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("get block number: %w", err)
+	}
+	var fromBlock uint64 = 1
+	if lookback > 0 && latest > lookback {
+		fromBlock = latest - lookback
+	}
+
+	query := ethereum.FilterQuery{
+		FromBlock: new(big.Int).SetUint64(fromBlock),
+		Addresses: []common.Address{c.contractAddr},
+		Topics:    [][]common.Hash{{voucherSettledTopic}},
+	}
+	logs, err := c.eth.FilterLogs(ctx, query)
+	if err != nil {
+		return nil, latest, fmt.Errorf("FilterLogs: %w", err)
+	}
+
+	// Collect unique block numbers, then fetch their timestamps concurrently.
+	blockNums := make(map[uint64]uint64) // block → timestamp
+	for _, l := range logs {
+		blockNums[l.BlockNumber] = 0
+	}
+	type tsResult struct {
+		bn uint64
+		ts uint64
+	}
+	// Use a detached context with timeout so header fetches are not cancelled
+	// if the HTTP client disconnects mid-request.
+	fetchCtx, fetchCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer fetchCancel()
+	sem := make(chan struct{}, 20) // cap at 20 concurrent RPC calls
+	ch := make(chan tsResult, len(blockNums))
+	var wg sync.WaitGroup
+	for bn := range blockNums {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(bn uint64) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			hdr, err := c.eth.HeaderByNumber(fetchCtx, new(big.Int).SetUint64(bn))
+			if err == nil {
+				ch <- tsResult{bn, hdr.Time}
+			} else {
+				ch <- tsResult{bn, 0}
+			}
+		}(bn)
+	}
+	wg.Wait()
+	close(ch)
+	for r := range ch {
+		blockNums[r.bn] = r.ts
+	}
+
+	events := make([]VoucherEvent, 0, len(logs))
+	for _, l := range logs {
+		ev, err := c.contract.ParseVoucherSettled(l)
+		if err != nil {
+			continue
+		}
+		events = append(events, VoucherEvent{
+			User:      ev.User,
+			Provider:  ev.Provider,
+			TotalFee:  ev.TotalFee,
+			Nonce:     ev.Nonce,
+			Status:    SettlementStatus(ev.Status),
+			TxHash:    l.TxHash.Hex(),
+			Block:     l.BlockNumber,
+			Timestamp: blockNums[l.BlockNumber],
+		})
+	}
+	return events, latest, nil
+}
+
 // GetLastNonce returns the last settled nonce for a (user, provider) pair from the contract.
 func (c *Client) GetLastNonce(ctx context.Context, user, provider common.Address) (*big.Int, error) {
 	opts := &bind.CallOpts{Context: ctx}
@@ -234,10 +329,46 @@ func (c *Client) GetLastNonce(ctx context.Context, user, provider common.Address
 	return n, nil
 }
 
+// IsAcknowledged returns whether the user has acknowledged the TEE signer for
+// this provider. Used by the proxy to reject start requests from users who
+// have revoked acknowledgement.
+func (c *Client) IsAcknowledged(ctx context.Context, user common.Address) (bool, error) {
+	providerAddr := crypto.PubkeyToAddress(c.providerKey.PublicKey)
+	opts := &bind.CallOpts{Context: ctx}
+	ok, err := c.contract.IsTEEAcknowledged(opts, user, providerAddr)
+	if err != nil {
+		return false, fmt.Errorf("IsTEEAcknowledged: %w", err)
+	}
+	return ok, nil
+}
+
 // GetBalance returns only the on-chain balance for a user (satisfies proxy.BalanceChecker).
 func (c *Client) GetBalance(ctx context.Context, user common.Address) (*big.Int, error) {
 	balance, _, _, err := c.GetAccount(ctx, user)
 	return balance, err
+}
+
+// GetServicePricing reads the provider's on-chain service registration and
+// returns (computePricePerSec, createFee).  The contract stores price per
+// minute; this method converts it to per-second for the billing engine.
+// Returns (nil, nil, nil) when the service is not yet registered (exists=false).
+func (c *Client) GetServicePricing(ctx context.Context, provider common.Address) (pricePerSec, createFee *big.Int, err error) {
+	opts := &bind.CallOpts{Context: ctx}
+	exists, err := c.contract.ServiceExists(opts, provider)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ServiceExists: %w", err)
+	}
+	if !exists {
+		return nil, nil, nil
+	}
+	svc, err := c.contract.Services(opts, provider)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Services: %w", err)
+	}
+	// Convert per-minute → per-second (integer division; truncation is fine for
+	// internal accounting — the voucher amounts are summed over many seconds).
+	perSec := new(big.Int).Div(svc.ComputePricePerMin, big.NewInt(60))
+	return perSec, svc.CreateFee, nil
 }
 
 // GetAccount returns a user's balance, pendingRefund, and refundUnlockAt.

@@ -133,6 +133,22 @@ func (h *EventHandler) OnArchive(ctx context.Context, sandboxID string) {
 	h.OnDelete(ctx, sandboxID)
 }
 
+// EnsureSession is idempotent: if a billing session already exists for this
+// sandbox it does nothing. If not (e.g. the create request returned 502 before
+// the billing hook could fire), it calls OnCreate to emit the create-fee
+// voucher and open the session.
+func (h *EventHandler) EnsureSession(ctx context.Context, sandboxID, ownerAddr string) {
+	existing, err := GetSession(ctx, h.rdb, sandboxID)
+	if err != nil {
+		h.log.Error("EnsureSession: get session", zap.String("sandbox", sandboxID), zap.Error(err))
+		return
+	}
+	if existing != nil {
+		return // already billed
+	}
+	h.OnCreate(ctx, sandboxID, ownerAddr)
+}
+
 func (h *EventHandler) generateFinalVoucher(ctx context.Context, sandboxID string) {
 	sess, err := GetSession(ctx, h.rdb, sandboxID)
 	if err != nil {

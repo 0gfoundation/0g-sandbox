@@ -4,6 +4,7 @@ package admin
 import (
 	"math/big"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -12,19 +13,21 @@ import (
 
 	"github.com/0gfoundation/0g-sandbox-billing/internal/billing"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/config"
+	"github.com/0gfoundation/0g-sandbox-billing/internal/daytona"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/events"
 )
 
 // Handler serves /admin/* endpoints.
 type Handler struct {
-	rdb *redis.Client
-	cfg *config.Config
-	log *zap.Logger
+	rdb   *redis.Client
+	cfg   *config.Config
+	dtona *daytona.Client
+	log   *zap.Logger
 }
 
 // New creates an admin Handler.
-func New(rdb *redis.Client, cfg *config.Config, log *zap.Logger) *Handler {
-	return &Handler{rdb: rdb, cfg: cfg, log: log}
+func New(rdb *redis.Client, cfg *config.Config, dtona *daytona.Client, log *zap.Logger) *Handler {
+	return &Handler{rdb: rdb, cfg: cfg, dtona: dtona, log: log}
 }
 
 // AuthMiddleware rejects requests whose X-Admin-Key header doesn't match adminKey.
@@ -43,6 +46,7 @@ func (h *Handler) Register(r *gin.RouterGroup) {
 	r.GET("/status", h.status)
 	r.GET("/sandboxes", h.sandboxes)
 	r.GET("/events", h.eventList)
+	r.POST("/archive-all", h.archiveAll)
 }
 
 // ── /admin/status ──────────────────────────────────────────────────────────
@@ -149,4 +153,56 @@ func (h *Handler) eventList(c *gin.Context) {
 		list = []events.Event{}
 	}
 	c.JSON(http.StatusOK, list)
+}
+
+// ── /admin/archive-all ─────────────────────────────────────────────────────
+
+// archiveAll archives every started/starting sandbox. Call this before
+// redeploying so all running containers are backed up to object storage and
+// can be restarted after the stack comes back up.
+func (h *Handler) archiveAll(c *gin.Context) {
+	sandboxes, err := h.dtona.ListSandboxes(c.Request.Context())
+	if err != nil {
+		h.log.Error("admin/archive-all: list sandboxes", zap.Error(err))
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to list sandboxes"})
+		return
+	}
+
+	var archived, skipped, failed []string
+	for _, s := range sandboxes {
+		state := strings.ToLower(s.State)
+		if state != "started" && state != "starting" {
+			skipped = append(skipped, s.ID)
+			continue
+		}
+		// Step 1: stop (Daytona requires stopped state before archive)
+		if err := h.dtona.StopSandbox(c.Request.Context(), s.ID); err != nil {
+			h.log.Warn("admin/archive-all: stop failed",
+				zap.String("id", s.ID), zap.Error(err))
+			failed = append(failed, s.ID)
+			continue
+		}
+		// Step 2: wait for stopped state (stop is async in Daytona)
+		if err := h.dtona.WaitStopped(c.Request.Context(), s.ID); err != nil {
+			h.log.Warn("admin/archive-all: wait stopped failed",
+				zap.String("id", s.ID), zap.Error(err))
+			failed = append(failed, s.ID)
+			continue
+		}
+		// Step 3: archive (backup to object storage)
+		if err := h.dtona.ArchiveSandbox(c.Request.Context(), s.ID); err != nil {
+			h.log.Warn("admin/archive-all: archive failed",
+				zap.String("id", s.ID), zap.Error(err))
+			failed = append(failed, s.ID)
+		} else {
+			h.log.Info("admin/archive-all: archived", zap.String("id", s.ID))
+			archived = append(archived, s.ID)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"archived": archived,
+		"skipped":  skipped,
+		"failed":   failed,
+	})
 }

@@ -23,7 +23,8 @@ contract SandboxServing {
         uint256 pendingRefund;
         uint256 refundUnlockAt;
         mapping(address => uint256) lastNonce;       // provider → last settled nonce
-        mapping(address => bool)    teeAcknowledged; // provider → user ack'd TEE signer
+        mapping(address => bool)    teeAcknowledged; // provider → legacy bool ack (signerVersion==0)
+        mapping(address => uint256) teeAckVersion;   // provider → version user last acked
     }
 
     struct Service {
@@ -31,7 +32,7 @@ contract SandboxServing {
         address teeSignerAddress;
         uint256 computePricePerMin;
         uint256 createFee;
-        uint256 signerVersion; // incremented on every teeSignerAddress change
+        uint256 signerVersion; // incremented on every signer/price/fee change
     }
 
     struct SandboxVoucher {
@@ -192,7 +193,7 @@ contract SandboxServing {
 
         Account storage acct = _accounts[v.user];
 
-        if (!acct.teeAcknowledged[v.provider]) {
+        if (!_isAcknowledged(acct, v.provider)) {
             return SettlementStatus.NOT_ACKNOWLEDGED;
         }
 
@@ -246,7 +247,7 @@ contract SandboxServing {
             return SettlementStatus.PROVIDER_MISMATCH;
         }
         Account storage acct = _accounts[v.user];
-        if (!acct.teeAcknowledged[v.provider]) {
+        if (!_isAcknowledged(acct, v.provider)) {
             return SettlementStatus.NOT_ACKNOWLEDGED;
         }
         if (v.nonce <= acct.lastNonce[v.provider]) {
@@ -259,6 +260,17 @@ contract SandboxServing {
             return SettlementStatus.SUCCESS;
         }
         return SettlementStatus.INSUFFICIENT_BALANCE;
+    }
+
+    /// @dev Returns true if the user has acknowledged the current service version for provider.
+    ///      Backward-compatible: if signerVersion==0 (never changed), uses the legacy bool.
+    ///      Once signerVersion>0, only the versioned ack is accepted.
+    function _isAcknowledged(Account storage acct, address provider) internal view returns (bool) {
+        uint256 version = services[provider].signerVersion;
+        if (version == 0) {
+            return acct.teeAcknowledged[provider];
+        }
+        return acct.teeAckVersion[provider] == version;
     }
 
     function _verifySignature(SandboxVoucher calldata v) internal view returns (bool) {
@@ -305,7 +317,8 @@ contract SandboxServing {
 
     /// @notice Register or update provider service.
     /// @dev First registration requires staking providerStake ETH.
-    ///      Changing teeSignerAddress increments signerVersion, signalling users to re-acknowledge.
+    ///      Any change to teeSignerAddress, computePricePerMin, or createFee increments
+    ///      signerVersion, requiring all users to re-acknowledge before vouchers settle.
     function addOrUpdateService(
         string  calldata url,
         address teeSignerAddress,
@@ -320,23 +333,39 @@ contract SandboxServing {
         }
 
         Service storage svc = services[msg.sender];
-        bool signerChanged = !isNew && svc.teeSignerAddress != teeSignerAddress;
+        bool serviceChanged = !isNew && (
+            svc.teeSignerAddress   != teeSignerAddress   ||
+            svc.computePricePerMin != computePricePerMin ||
+            svc.createFee          != createFee
+        );
 
         svc.url                = url;
         svc.teeSignerAddress   = teeSignerAddress;
         svc.computePricePerMin = computePricePerMin;
         svc.createFee          = createFee;
-        if (signerChanged) {
+        if (serviceChanged) {
             svc.signerVersion += 1;
         }
 
         emit ServiceUpdated(msg.sender, url, teeSignerAddress, svc.signerVersion);
     }
 
-    /// @notice Acknowledge (or revoke) the current TEE signer for a provider.
+    /// @notice Acknowledge (or revoke) the current service version for a provider.
+    /// @dev When signerVersion==0 (legacy), writes the bool for backward compatibility.
+    ///      When signerVersion>0, writes the versioned ack so future price changes invalidate it.
     function acknowledgeTEESigner(address provider, bool acknowledged) external {
         require(serviceExists[provider], "provider not found");
-        _accounts[msg.sender].teeAcknowledged[provider] = acknowledged;
+        uint256 version = services[provider].signerVersion;
+        if (acknowledged) {
+            if (version == 0) {
+                _accounts[msg.sender].teeAcknowledged[provider] = true;
+            } else {
+                _accounts[msg.sender].teeAckVersion[provider] = version;
+            }
+        } else {
+            _accounts[msg.sender].teeAcknowledged[provider] = false;
+            _accounts[msg.sender].teeAckVersion[provider] = 0;
+        }
         emit TEESignerAcknowledged(msg.sender, provider, acknowledged);
     }
 
@@ -359,8 +388,11 @@ contract SandboxServing {
         return providerEarnings[provider];
     }
 
+    /// @notice Returns true if user has acknowledged the CURRENT service version for provider.
+    ///         Backward-compatible: uses legacy bool when signerVersion==0.
     function isTEEAcknowledged(address user, address provider) external view returns (bool) {
-        return _accounts[user].teeAcknowledged[provider];
+        if (!serviceExists[provider]) return false;
+        return _isAcknowledged(_accounts[user], provider);
     }
 
     function domainSeparator() external view returns (bytes32) {

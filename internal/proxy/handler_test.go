@@ -49,6 +49,7 @@ func (m *mockBilling) OnArchive(_ context.Context, sandboxID string) {
 	m.mu.Lock(); defer m.mu.Unlock()
 	m.archives = append(m.archives, sandboxID)
 }
+func (m *mockBilling) EnsureSession(_ context.Context, _, _ string) {}
 
 // ── Mock Daytona server helpers ───────────────────────────────────────────────
 
@@ -116,7 +117,7 @@ func newTestEngine(dtona *daytona.Client, bh BillingHooks, wallet string) *gin.E
 		c.Set("wallet_address", wallet)
 		c.Next()
 	})
-	NewHandler(dtona, bh, nil, nil, zap.NewNop()).Register(api)
+	NewHandler(dtona, bh, nil, nil, nil, nil, nil, "", nil, zap.NewNop()).Register(api)
 	return r
 }
 

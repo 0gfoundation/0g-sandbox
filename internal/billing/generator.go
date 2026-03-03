@@ -14,9 +14,8 @@ import (
 )
 
 // RunGenerator periodically scans all billing sessions and emits signed vouchers.
-func RunGenerator(ctx context.Context, cfg *config.Config, rdb *redis.Client, signer VoucherSigner, log *zap.Logger) {
+func RunGenerator(ctx context.Context, cfg *config.Config, rdb *redis.Client, signer VoucherSigner, computePricePerSec *big.Int, log *zap.Logger) {
 	interval := time.Duration(cfg.Billing.VoucherIntervalSec) * time.Second
-	computePricePerSec, _ := new(big.Int).SetString(cfg.Billing.ComputePricePerSec, 10)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

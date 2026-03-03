@@ -91,6 +91,63 @@ func (c *Client) StopSandbox(ctx context.Context, id string) error {
 	return nil
 }
 
+// ArchiveSandbox archives a sandbox (backs up container to object storage).
+// Archived sandboxes can be restarted later via Daytona's start endpoint,
+// unlike stopped sandboxes where the container is removed without a backup.
+func (c *Client) ArchiveSandbox(ctx context.Context, id string) error {
+	resp, err := c.do(ctx, http.MethodPost, "/api/sandbox/"+id+"/archive", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("daytona ArchiveSandbox %s: status %d", id, resp.StatusCode)
+	}
+	return nil
+}
+
+// SSHAccess holds the result of creating SSH access for a sandbox.
+type SSHAccess struct {
+	Token      string `json:"token"`
+	ExpiresAt  string `json:"expiresAt"`
+	SSHCommand string `json:"sshCommand"`
+}
+
+// CreateSSHAccess creates a temporary SSH access token for a sandbox.
+func (c *Client) CreateSSHAccess(ctx context.Context, id string) (*SSHAccess, error) {
+	resp, err := c.do(ctx, http.MethodPost, "/api/sandbox/"+id+"/ssh-access", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("daytona CreateSSHAccess %s: status %d", id, resp.StatusCode)
+	}
+	var a SSHAccess
+	return &a, json.NewDecoder(resp.Body).Decode(&a)
+}
+
+// WaitStopped polls GetSandbox until the sandbox state is "stopped" (or any
+// non-running terminal state) or the context deadline is exceeded.
+// Call this after StopSandbox before calling ArchiveSandbox.
+func (c *Client) WaitStopped(ctx context.Context, id string) error {
+	for {
+		s, err := c.GetSandbox(ctx, id)
+		if err != nil {
+			return err
+		}
+		switch s.State {
+		case "stopped", "archived", "error":
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
 // BaseURL returns the configured base URL (used by reverse proxy).
 func (c *Client) BaseURL() string { return c.baseURL }
 

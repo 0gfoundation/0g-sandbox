@@ -361,7 +361,7 @@ func buildServer(t *testing.T, dtona *daytona.Client, bh proxy.BillingHooks, rdb
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	api := r.Group("/api", auth.Middleware(rdb))
-	proxy.NewHandler(dtona, bh, nil, nil, zap.NewNop()).Register(api)
+	proxy.NewHandler(dtona, bh, nil, nil, nil, big.NewInt(0), big.NewInt(0), "", rdb, zap.NewNop()).Register(api)
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
 	return srv
@@ -581,11 +581,12 @@ func TestComponent_InsufficientBalance(t *testing.T) {
 // Used by tests that only care about proxy/ownership behavior, not billing.
 type noopBillingHooks struct{}
 
-func (n *noopBillingHooks) OnCreate(_ context.Context, _, _ string) {}
-func (n *noopBillingHooks) OnStart(_ context.Context, _, _ string)  {}
-func (n *noopBillingHooks) OnStop(_ context.Context, _ string)      {}
-func (n *noopBillingHooks) OnDelete(_ context.Context, _ string)    {}
-func (n *noopBillingHooks) OnArchive(_ context.Context, _ string)   {}
+func (n *noopBillingHooks) OnCreate(_ context.Context, _, _ string)       {}
+func (n *noopBillingHooks) OnStart(_ context.Context, _, _ string)        {}
+func (n *noopBillingHooks) OnStop(_ context.Context, _ string)            {}
+func (n *noopBillingHooks) OnDelete(_ context.Context, _ string)          {}
+func (n *noopBillingHooks) OnArchive(_ context.Context, _ string)         {}
+func (n *noopBillingHooks) EnsureSession(_ context.Context, _, _ string)  {}
 
 // ── ownerMockDaytona ─────────────────────────────────────────────────────────
 

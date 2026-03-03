@@ -7,8 +7,8 @@ import (
 	"math/big"
 	"net/http"
 	"os"
-	"strings"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -79,14 +79,34 @@ func main() {
 		log.Fatal("chain client init failed", zap.Error(err))
 	}
 
-	// ── VoucherSigner (TEE key → sign → Redis queue) ──────────────────────────
-	computePricePerSec, ok := new(big.Int).SetString(cfg.Billing.ComputePricePerSec, 10)
-	if !ok {
-		log.Fatal("invalid COMPUTE_PRICE_PER_SEC")
+	// ── Pricing: on-chain service registration is the source of truth ────────
+	// Read computePricePerSec and createFee from the on-chain service record so
+	// that users can verify the actual billing rate on the contract explorer.
+	// Fall back to env vars only when the service is not yet registered (dev /
+	// first-time setup).
+	computePricePerSec, createFee, err := onchain.GetServicePricing(ctx, common.HexToAddress(cfg.Chain.ProviderAddress))
+	if err != nil {
+		log.Warn("could not read on-chain service pricing; falling back to env vars", zap.Error(err))
 	}
-	createFee, ok := new(big.Int).SetString(cfg.Billing.CreateFee, 10)
-	if !ok {
-		log.Fatal("invalid CREATE_FEE")
+	if computePricePerSec == nil || computePricePerSec.Sign() == 0 {
+		var ok bool
+		computePricePerSec, ok = new(big.Int).SetString(cfg.Billing.ComputePricePerSec, 10)
+		if !ok {
+			log.Fatal("invalid COMPUTE_PRICE_PER_SEC")
+		}
+		log.Info("using env COMPUTE_PRICE_PER_SEC (service not on-chain)", zap.String("value", computePricePerSec.String()))
+	} else {
+		log.Info("using on-chain compute price", zap.String("per_sec", computePricePerSec.String()))
+	}
+	if createFee == nil || createFee.Sign() == 0 {
+		var ok bool
+		createFee, ok = new(big.Int).SetString(cfg.Billing.CreateFee, 10)
+		if !ok {
+			log.Fatal("invalid CREATE_FEE")
+		}
+		log.Info("using env CREATE_FEE (service not on-chain)", zap.String("value", createFee.String()))
+	} else {
+		log.Info("using on-chain create fee", zap.String("value", createFee.String()))
 	}
 
 	signer := billing.NewSigner(
@@ -123,7 +143,7 @@ func main() {
 	go recoverPendingStops(ctx, rdb, stopCh, log)
 	go settler.Run(ctx, cfg, rdb, onchain, stopCh, log)
 	go runStopHandler(ctx, stopCh, dtona, rdb, log)
-	go billing.RunGenerator(ctx, cfg, rdb, signer, log)
+	go billing.RunGenerator(ctx, cfg, rdb, signer, computePricePerSec, log)
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	r := gin.New()
@@ -132,15 +152,55 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 	r.GET("/dashboard", func(c *gin.Context) {
-		html := strings.ReplaceAll(string(web.DashboardHTML), "{{ADMIN_KEY}}", cfg.Daytona.AdminKey)
-		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
+		c.Header("Cache-Control", "no-store")
+		c.Data(http.StatusOK, "text/html; charset=utf-8", web.DashboardHTML)
+	})
+	r.GET("/static/ethers.js", func(c *gin.Context) {
+		c.Data(http.StatusOK, "application/javascript; charset=utf-8", web.EthersJS)
+	})
+	r.GET("/info", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"contract_address":    cfg.Chain.ContractAddress,
+			"provider_address":    cfg.Chain.ProviderAddress,
+			"chain_id":            cfg.Chain.ChainID,
+			"rpc_url":             cfg.Chain.RPCURL,
+			"compute_price_per_sec": computePricePerSec.String(),
+			"create_fee":          createFee.String(),
+			"voucher_interval_sec": cfg.Billing.VoucherIntervalSec,
+			"min_balance":         minBalance.String(),
+		})
+	})
+
+	// Public sandbox list — no signing required, filters by ?wallet= query param.
+	// Sandbox ownership is public (on-chain labels), so this exposes no sensitive data.
+	r.GET("/api/sandbox_list", func(c *gin.Context) {
+		wallet := c.Query("wallet")
+		if wallet == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "wallet required"})
+			return
+		}
+		sandboxes, err := dtona.ListSandboxes(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "upstream error"})
+			return
+		}
+		var filtered []daytona.Sandbox
+		for _, s := range sandboxes {
+			if strings.EqualFold(s.Labels["daytona-owner"], wallet) {
+				filtered = append(filtered, s)
+			}
+		}
+		if filtered == nil {
+			filtered = []daytona.Sandbox{}
+		}
+		c.JSON(http.StatusOK, filtered)
 	})
 
 	adminGroup := r.Group("/admin", admin.AuthMiddleware(cfg.Daytona.AdminKey))
-	admin.New(rdb, cfg, log).Register(adminGroup)
+	admin.New(rdb, cfg, dtona, log).Register(adminGroup)
 
 	api := r.Group("/api", auth.Middleware(rdb))
-	proxy.NewHandler(dtona, billingHandler, onchain, minBalance, log).Register(api)
+	proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, minBalance, computePricePerSec, cfg.Chain.ProviderAddress, rdb, log).Register(api)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
@@ -162,12 +222,52 @@ func main() {
 	log.Info("shutting down...")
 	cancel()
 
+	// Archive all running sandboxes before exiting so they can be restarted
+	// after the stack comes back up (state is backed up to object storage).
+	archiveCtx, archiveCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer archiveCancel()
+	archiveRunningOnShutdown(archiveCtx, dtona, log)
+
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error("HTTP server shutdown error", zap.Error(err))
 	}
 	log.Info("shutdown complete")
+}
+
+// archiveRunningOnShutdown archives all started/starting/stopped sandboxes so
+// their container state is preserved in object storage across a redeploy.
+func archiveRunningOnShutdown(ctx context.Context, dtona *daytona.Client, log *zap.Logger) {
+	sandboxes, err := dtona.ListSandboxes(ctx)
+	if err != nil {
+		log.Error("shutdown: list sandboxes", zap.Error(err))
+		return
+	}
+	for _, s := range sandboxes {
+		state := strings.ToLower(s.State)
+		switch state {
+		case "started", "starting":
+			// Stop first (Daytona requires stopped state before archive).
+			if err := dtona.StopSandbox(ctx, s.ID); err != nil {
+				log.Warn("shutdown: stop sandbox failed",
+					zap.String("id", s.ID), zap.Error(err))
+			}
+			if err := dtona.WaitStopped(ctx, s.ID); err != nil {
+				log.Warn("shutdown: wait stopped failed",
+					zap.String("id", s.ID), zap.Error(err))
+				continue
+			}
+			fallthrough // now stopped — archive below
+		case "stopped":
+			if err := dtona.ArchiveSandbox(ctx, s.ID); err != nil {
+				log.Warn("shutdown: archive sandbox failed",
+					zap.String("id", s.ID), zap.Error(err))
+			} else {
+				log.Info("shutdown: archived sandbox", zap.String("id", s.ID))
+			}
+		}
+	}
 }
 
 // recoverPendingStops scans stop:sandbox:* on startup and re-queues any
@@ -197,27 +297,43 @@ func recoverPendingStops(ctx context.Context, rdb *redis.Client, stopCh chan<- s
 	}
 }
 
-// runStopHandler consumes StopSignals, calls Daytona STOP, and cleans up Redis.
+// runStopHandler consumes StopSignals, archives the sandbox (preserving state in
+// object storage so it can be restarted later), and cleans up Redis.
 func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona *daytona.Client, rdb *redis.Client, log *zap.Logger) {
 	for {
 		select {
 		case sig := <-stopCh:
+			// Daytona requires stopped state before archive.
+			// Step 1: stop (removes container from runner).
 			if err := dtona.StopSandbox(ctx, sig.SandboxID); err != nil {
-				// Daytona STOP is idempotent; "already stopped" is not an error.
-				log.Warn("stop sandbox failed (may already be stopped)",
+				log.Warn("stop sandbox failed (may already be stopped/archived)",
+					zap.String("sandbox", sig.SandboxID),
+					zap.Error(err),
+				)
+			}
+			// Step 2: wait for stopped state (stop is async in Daytona).
+			if err := dtona.WaitStopped(ctx, sig.SandboxID); err != nil {
+				log.Warn("wait stopped failed",
+					zap.String("sandbox", sig.SandboxID),
+					zap.Error(err),
+				)
+			}
+			// Step 3: archive (backup filesystem to MinIO for later restore).
+			if err := dtona.ArchiveSandbox(ctx, sig.SandboxID); err != nil {
+				log.Warn("archive sandbox failed (may already be archived)",
 					zap.String("sandbox", sig.SandboxID),
 					zap.Error(err),
 				)
 			}
 			rdb.Del(ctx, "billing:compute:"+sig.SandboxID) //nolint:errcheck
 			rdb.Del(ctx, "stop:sandbox:"+sig.SandboxID)    //nolint:errcheck
-			log.Info("sandbox stopped",
+			log.Info("sandbox archived",
 				zap.String("sandbox", sig.SandboxID),
 				zap.String("reason", sig.Reason),
 			)
 			_ = events.Push(ctx, rdb, events.Event{
 				Type:      events.TypeAutoStopped,
-				Message:   fmt.Sprintf("Sandbox %s auto-stopped: %s", sig.SandboxID, sig.Reason),
+				Message:   fmt.Sprintf("Sandbox %s archived: %s", sig.SandboxID, sig.Reason),
 				SandboxID: sig.SandboxID,
 			})
 		case <-ctx.Done():
