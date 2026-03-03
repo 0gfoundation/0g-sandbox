@@ -4,32 +4,30 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>0G Sandbox Billing</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --primary:   #1e3de4;
-  --primary-h: #0f23bd;
-  --primary-bg:#edf3ff;
-  --blue2:     #4665f0;
-  --text:      #333;
-  --text-2:    rgba(0,0,0,.65);
-  --muted:     #74798c;
-  --border:    #d9d9d9;
-  --bg:        #f5f5f5;
-  --surface:   #fff;
-  --green:     #52c41a;
-  --green-bg:  #f6ffed;
-  --green-bd:  #b7eb8f;
-  --red:       #e15c56;
-  --red-bg:    #fff2f0;
-  --red-bd:    #fab8af;
-  --orange:    #fa8c16;
-  --orange-bg: #fff7e6;
-  --yellow:    #faad14;
-  --mono:      'Roboto Mono', monospace;
+  --primary:    #9200E1;
+  --primary-d:  #7200b0;
+  --primary-bg: #f5eeff;
+  --primary-bd: #d9b3f7;
+  --text:       #1a1a2e;
+  --text-2:     rgba(26,26,46,.65);
+  --muted:      #74798c;
+  --border:     #e0e0e0;
+  --bg:         #f7f7fa;
+  --surface:    #fff;
+  --green:      #52c41a;
+  --green-bg:   #f6ffed;
+  --green-bd:   #b7eb8f;
+  --red:        #e15c56;
+  --red-bg:     #fff2f0;
+  --red-bd:     #fab8af;
+  --orange:     #fa8c16;
+  --orange-bg:  #fff7e6;
+  --mono:       'Roboto Mono', monospace;
 }
 
 body {
@@ -48,7 +46,6 @@ body {
   display: flex;
   align-items: center;
   padding: 0 24px;
-  gap: 0;
   position: sticky;
   top: 0;
   z-index: 100;
@@ -60,10 +57,7 @@ body {
   gap: 10px;
   font-weight: 600;
   font-size: 15px;
-  color: var(--text);
-  text-decoration: none;
   margin-right: 32px;
-  white-space: nowrap;
 }
 .logo-mark {
   width: 28px; height: 28px;
@@ -73,7 +67,6 @@ body {
   color: #fff;
   font-weight: 700;
   font-size: 13px;
-  letter-spacing: -0.5px;
 }
 .nav-links { display: flex; align-items: center; gap: 2px; }
 .nav-link {
@@ -81,476 +74,511 @@ body {
   border-radius: 6px;
   font-size: 13.5px;
   color: var(--text-2);
-  text-decoration: none;
   font-weight: 500;
+  cursor: pointer;
   transition: all .15s;
 }
 .nav-link:hover { color: var(--primary); background: var(--primary-bg); }
 .nav-link.active { color: var(--primary); background: var(--primary-bg); }
-.topbar-right {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 .chain-tag {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  display: flex; align-items: center; gap: 6px;
   background: var(--primary-bg);
   color: var(--primary);
-  border: 1px solid rgba(30,61,228,.2);
+  border: 1px solid var(--primary-bd);
   border-radius: 4px;
   padding: 3px 10px;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 12px; font-weight: 600;
 }
 .dot-live {
-  width: 6px; height: 6px;
-  border-radius: 50%;
+  width: 6px; height: 6px; border-radius: 50%;
   background: var(--green);
   box-shadow: 0 0 0 2px var(--green-bg);
 }
 
 /* ── Layout ── */
 .page { max-width: 1200px; margin: 0 auto; padding: 24px 24px 48px; }
-.page-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin-bottom: 20px;
-  color: var(--text);
+
+/* ── Auth overlay ── */
+.auth-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 200;
 }
+.auth-box {
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 32px;
+  width: 360px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.15);
+}
+.auth-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+.auth-sub { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+.auth-input {
+  width: 100%; padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px; font-family: var(--mono);
+  outline: none; margin-bottom: 12px;
+}
+.auth-input:focus { border-color: var(--primary); }
+.btn-primary {
+  width: 100%; padding: 9px;
+  background: var(--primary);
+  color: #fff; border: none; border-radius: 6px;
+  font-size: 13.5px; font-weight: 600;
+  cursor: pointer; font-family: inherit;
+}
+.btn-primary:hover { background: var(--primary-d); }
+.auth-err { font-size: 12px; color: var(--red); margin-top: 8px; display: none; }
 
 /* ── Stat cards ── */
 .stats-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin-bottom: 20px;
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 16px; margin-bottom: 20px;
 }
 .stat {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 20px 20px 16px;
+  position: relative; overflow: hidden;
+}
+.stat::before {
+  content: ''; position: absolute;
+  top: 0; left: 0; right: 0; height: 3px;
+  background: var(--primary);
+  opacity: .25;
 }
 .stat-label {
-  font-size: 12px;
-  color: var(--muted);
-  font-weight: 500;
-  margin-bottom: 8px;
-  text-transform: uppercase;
-  letter-spacing: .04em;
+  font-size: 11.5px; color: var(--muted); font-weight: 500;
+  text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px;
 }
 .stat-value {
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--text);
-  line-height: 1.2;
-  font-family: var(--mono);
+  font-size: 24px; font-weight: 600;
+  font-family: var(--mono); line-height: 1.2;
 }
 .stat-unit { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: 4px; }
-.stat-footer {
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--muted);
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.stat-footer { margin-top: 8px; font-size: 12px; color: var(--muted); }
+.badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 11.5px; font-weight: 600;
+  padding: 1px 7px; border-radius: 3px;
 }
-.change {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  font-size: 11.5px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 3px;
-}
-.change.up   { color: var(--green);  background: var(--green-bg); }
-.change.down { color: var(--red);    background: var(--red-bg); }
-.change.warn { color: var(--orange); background: var(--orange-bg); }
+.badge.purple { background: var(--primary-bg); color: var(--primary); border: 1px solid var(--primary-bd); }
+.badge.green  { background: var(--green-bg);   color: #389e0d; border: 1px solid var(--green-bd); }
+.badge.red    { background: var(--red-bg);      color: var(--red); border: 1px solid var(--red-bd); }
+.badge.orange { background: var(--orange-bg);   color: var(--orange); border: 1px solid #ffd591; }
 
-/* ── Two-column ── */
+/* ── Two-col ── */
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
 
 /* ── Card ── */
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-}
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .card-head {
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  padding: 14px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
   background: #fafafa;
 }
-.card-title { font-size: 13.5px; font-weight: 600; color: var(--text); }
-.card-action {
-  font-size: 12px;
-  color: var(--primary);
-  text-decoration: none;
-  font-weight: 500;
-}
-.card-action:hover { color: var(--primary-h); }
-
-/* ── Bar chart ── */
-.chart-wrap { padding: 20px 20px 0; display: flex; align-items: flex-end; gap: 5px; height: 140px; }
-.bar {
-  flex: 1;
-  border-radius: 3px 3px 0 0;
-  background: var(--primary-bg);
-  border: 1px solid rgba(30,61,228,.15);
-  border-bottom: none;
-  min-height: 4px;
-  transition: background .15s;
-}
-.bar:hover { background: var(--blue2); }
-.bar.active { background: var(--primary); border-color: var(--primary); }
-.chart-labels { display: flex; gap: 5px; padding: 6px 20px 14px; }
-.chart-lbl { flex: 1; text-align: center; font-size: 10.5px; color: var(--muted); }
+.card-title { font-size: 13.5px; font-weight: 600; }
+.card-meta { font-size: 11.5px; color: var(--muted); }
+.card-action { font-size: 12px; color: var(--primary); font-weight: 500; cursor: pointer; }
 
 /* ── Table ── */
 table { width: 100%; border-collapse: collapse; }
 thead th {
-  padding: 10px 16px;
-  text-align: left;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: .04em;
-  background: #fafafa;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
+  padding: 10px 16px; text-align: left;
+  font-size: 11.5px; font-weight: 600;
+  color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
+  background: #fafafa; border-bottom: 1px solid var(--border);
 }
-tbody td {
-  padding: 11px 16px;
-  border-bottom: 1px solid #f0f0f0;
-  font-size: 13px;
-  vertical-align: middle;
-}
+tbody td { padding: 11px 16px; border-bottom: 1px solid #f0f0f0; font-size: 13px; vertical-align: middle; }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover td { background: #fafafa; }
 .mono { font-family: var(--mono); font-size: 12px; color: var(--text-2); }
-.link { color: var(--primary); text-decoration: none; font-family: var(--mono); font-size: 12px; }
-.link:hover { color: var(--primary-h); text-decoration: underline; }
+.link { color: var(--primary); font-family: var(--mono); font-size: 12px; text-decoration: none; }
+.link:hover { color: var(--primary-d); text-decoration: underline; }
 
 /* ── Status tags ── */
 .tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 11.5px;
-  font-weight: 500;
-  border: 1px solid transparent;
-  white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: 4px;
+  font-size: 11.5px; font-weight: 500; border: 1px solid transparent;
 }
 .tag.running { background: var(--green-bg); color: #389e0d; border-color: var(--green-bd); }
 .tag.stopped { background: #fafafa; color: var(--muted); border-color: var(--border); }
-.tag.settling { background: var(--primary-bg); color: var(--primary); border-color: rgba(30,61,228,.25); }
-.tag .dot-tag { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.tag-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 
 /* ── Activity feed ── */
 .feed-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 16px;
-  border-bottom: 1px solid #f0f0f0;
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 11px 16px; border-bottom: 1px solid #f0f0f0;
 }
 .feed-item:last-child { border-bottom: none; }
 .feed-icon {
-  width: 28px; height: 28px;
-  border-radius: 50%;
+  width: 26px; height: 26px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  font-size: 13px;
-  flex-shrink: 0;
-  margin-top: 1px;
+  font-size: 12px; flex-shrink: 0; margin-top: 1px;
 }
-.feed-icon.settled  { background: var(--green-bg); }
-.feed-icon.created  { background: var(--primary-bg); }
-.feed-icon.signed   { background: #f0f0ff; }
-.feed-icon.stopped  { background: var(--red-bg); }
-.feed-icon.deposit  { background: var(--orange-bg); }
-.feed-text { font-size: 13px; line-height: 1.5; color: var(--text); }
-.feed-text .hl { color: var(--primary); font-family: var(--mono); font-size: 12px; }
-.feed-time { margin-top: 2px; font-size: 11.5px; color: var(--muted); }
+.fi-settled   { background: var(--green-bg);   color: #389e0d; }
+.fi-created   { background: var(--primary-bg); color: var(--primary); }
+.fi-stopped   { background: var(--red-bg);     color: var(--red); }
+.fi-auto      { background: var(--orange-bg);  color: var(--orange); }
+.feed-text { font-size: 12.5px; line-height: 1.5; }
+.feed-hl { color: var(--primary); font-family: var(--mono); font-size: 11.5px; }
+.feed-time { font-size: 11px; color: var(--muted); margin-top: 1px; }
 
 /* ── Info list ── */
-.info-list { padding: 4px 0; }
 .info-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  border-bottom: 1px solid #f0f0f0;
-  gap: 12px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; border-bottom: 1px solid #f0f0f0; gap: 12px;
 }
 .info-row:last-child { border-bottom: none; }
-.info-key {
-  font-size: 12.5px;
-  color: var(--muted);
-  font-weight: 500;
-  white-space: nowrap;
-  flex-shrink: 0;
+.info-key { font-size: 12px; color: var(--muted); font-weight: 500; white-space: nowrap; flex-shrink: 0; }
+.info-val { font-family: var(--mono); font-size: 11.5px; text-align: right; word-break: break-all; }
+.info-val.purple { color: var(--primary); }
+.info-val.green  { color: var(--green); }
+.info-sep { height: 1px; background: #f0f0f0; }
+
+/* ── Loading / error ── */
+.skeleton { background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%); background-size: 200%; animation: shimmer 1.4s infinite; border-radius: 4px; height: 22px; }
+@keyframes shimmer { to { background-position: -200% 0; } }
+.error-msg { color: var(--red); font-size: 12px; padding: 12px 16px; }
+.empty-msg { color: var(--muted); font-size: 13px; padding: 20px 16px; text-align: center; }
+
+/* ── Refresh indicator ── */
+.refresh-btn {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 12px; color: var(--muted);
+  background: none; border: none; cursor: pointer; padding: 4px 8px;
+  border-radius: 4px; font-family: inherit;
 }
-.info-val {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--text);
-  text-align: right;
-  word-break: break-all;
-}
-.info-val.blue { color: var(--primary); }
-.info-val.green { color: var(--green); }
-.info-sep {
-  height: 1px;
-  background: #f0f0f0;
-  margin: 0 16px;
-}
-.copy-btn {
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 13px;
-  flex-shrink: 0;
-  background: none;
-  border: none;
-  padding: 2px;
-  line-height: 1;
-}
-.copy-btn:hover { color: var(--primary); }
+.refresh-btn:hover { background: var(--primary-bg); color: var(--primary); }
+.spin { animation: spin .8s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
 
+<!-- Auth overlay -->
+<div class="auth-overlay" id="authOverlay">
+  <div class="auth-box">
+    <div class="auth-title">0G Sandbox Billing</div>
+    <div class="auth-sub">Enter the admin key to access the dashboard</div>
+    <input class="auth-input" type="password" id="keyInput" placeholder="DAYTONA_ADMIN_KEY" autocomplete="off">
+    <button class="btn-primary" onclick="login()">Continue</button>
+    <div class="auth-err" id="authErr">Invalid admin key</div>
+  </div>
+</div>
+
 <!-- Topbar -->
 <header class="topbar">
-  <a class="logo" href="#">
+  <div class="logo">
     <div class="logo-mark">0G</div>
     Sandbox Billing
-  </a>
+  </div>
   <nav class="nav-links">
-    <a class="nav-link active" href="#">Overview</a>
-    <a class="nav-link" href="#">Sandboxes</a>
-    <a class="nav-link" href="#">Vouchers</a>
-    <a class="nav-link" href="#">Settlement</a>
+    <span class="nav-link active">Overview</span>
+    <span class="nav-link">Sandboxes</span>
+    <span class="nav-link">Vouchers</span>
+    <span class="nav-link">Settlement</span>
   </nav>
   <div class="topbar-right">
-    <div class="chain-tag">
+    <div class="chain-tag" id="chainTag">
       <div class="dot-live"></div>
-      0G Galileo · 16602
+      Loading…
     </div>
+    <button class="refresh-btn" id="refreshBtn" onclick="refresh()">⟳ Refresh</button>
   </div>
 </header>
 
 <!-- Page -->
-<main class="page">
-  <div class="page-title">Overview</div>
+<main class="page" id="mainPage" style="display:none">
 
   <!-- Stats -->
   <div class="stats-grid">
     <div class="stat">
-      <div class="stat-label">Total Balance</div>
-      <div class="stat-value">0.02350 <span class="stat-unit">0G</span></div>
-      <div class="stat-footer">23,500,000,000,000,000 neuron</div>
-    </div>
-    <div class="stat">
       <div class="stat-label">Active Sandboxes</div>
-      <div class="stat-value">3</div>
-      <div class="stat-footer">
-        <span class="change up">+1</span> since yesterday
-      </div>
+      <div class="stat-value" id="statSandboxes">—</div>
+      <div class="stat-footer" id="statSandboxesSub"></div>
     </div>
     <div class="stat">
-      <div class="stat-label">Settled This Epoch</div>
-      <div class="stat-value">0.00024 <span class="stat-unit">0G</span></div>
-      <div class="stat-footer">
-        Next flush in <span class="change warn">42 min</span>
-      </div>
+      <div class="stat-label">Next Voucher Flush</div>
+      <div class="stat-value" id="statFlush">—</div>
+      <div class="stat-footer" id="statFlushSub"></div>
     </div>
     <div class="stat">
-      <div class="stat-label">Compute / hr</div>
-      <div class="stat-value">0.00018 <span class="stat-unit">0G</span></div>
-      <div class="stat-footer">
-        <span class="change down">↑12%</span> vs last hour
-      </div>
+      <div class="stat-label">Compute Price / sec</div>
+      <div class="stat-value" id="statPrice">—</div>
+      <div class="stat-footer">neuron per sandbox</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Create Fee</div>
+      <div class="stat-value" id="statFee">—</div>
+      <div class="stat-footer">neuron flat fee</div>
     </div>
   </div>
 
-  <!-- Chart + Sandbox table -->
+  <!-- Sandboxes + Events -->
   <div class="two-col">
 
     <div class="card">
       <div class="card-head">
-        <span class="card-title">Settlement History (7d)</span>
-        <a class="card-action" href="#">View all</a>
+        <span class="card-title">Active Sandboxes</span>
+        <span class="card-meta" id="sandboxMeta"></span>
       </div>
-      <div class="chart-wrap">
-        <div class="bar" style="height:33%"></div>
-        <div class="bar" style="height:50%"></div>
-        <div class="bar" style="height:40%"></div>
-        <div class="bar" style="height:66%"></div>
-        <div class="bar" style="height:54%"></div>
-        <div class="bar" style="height:71%"></div>
-        <div class="bar active" style="height:87%"></div>
-      </div>
-      <div class="chart-labels">
-        <div class="chart-lbl">Mon</div>
-        <div class="chart-lbl">Tue</div>
-        <div class="chart-lbl">Wed</div>
-        <div class="chart-lbl">Thu</div>
-        <div class="chart-lbl">Fri</div>
-        <div class="chart-lbl">Sat</div>
-        <div class="chart-lbl">Sun</div>
-      </div>
+      <div id="sandboxTable"><div class="empty-msg">Loading…</div></div>
     </div>
-
-    <div class="card">
-      <div class="card-head">
-        <span class="card-title">Sandboxes</span>
-        <a class="card-action" href="#">Manage</a>
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Sandbox ID</th>
-            <th>Owner</th>
-            <th>Status</th>
-            <th>Accrued</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><a class="link" href="#">9c1d0f45</a></td>
-            <td><span class="mono">0xdAc1…1023</span></td>
-            <td><span class="tag running"><span class="dot-tag"></span>Running</span></td>
-            <td><span class="mono">0.00008 0G</span></td>
-          </tr>
-          <tr>
-            <td><a class="link" href="#">3a72be91</a></td>
-            <td><span class="mono">0x128D…58f2</span></td>
-            <td><span class="tag settling">Settling</span></td>
-            <td><span class="mono">0.00012 0G</span></td>
-          </tr>
-          <tr>
-            <td><a class="link" href="#">f0c4d218</a></td>
-            <td><span class="mono">0xdAc1…1023</span></td>
-            <td><span class="tag running"><span class="dot-tag"></span>Running</span></td>
-            <td><span class="mono">0.00004 0G</span></td>
-          </tr>
-          <tr>
-            <td><a class="link" href="#">7e9a1b44</a></td>
-            <td><span class="mono">0xfA92…9c3e</span></td>
-            <td><span class="tag stopped">Stopped</span></td>
-            <td><span class="mono" style="color:var(--muted)">—</span></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-  </div>
-
-  <!-- Activity + Contract info -->
-  <div class="two-col">
 
     <div class="card">
       <div class="card-head">
         <span class="card-title">Recent Activity</span>
-        <a class="card-action" href="#">View logs</a>
+        <span class="card-meta" id="eventsMeta"></span>
       </div>
-      <div class="feed-item">
-        <div class="feed-icon settled">✓</div>
-        <div>
-          <div class="feed-text">Voucher settled — nonce <strong>#7</strong> for <span class="hl">0xdAc1…1023</span></div>
-          <div class="feed-time">2 min ago · tx <span class="hl">0x4a3f…e192</span></div>
-        </div>
-      </div>
-      <div class="feed-item">
-        <div class="feed-icon created">+</div>
-        <div>
-          <div class="feed-text">Sandbox <span class="hl">3a72be91</span> created by <span class="hl">0x128D…58f2</span></div>
-          <div class="feed-time">18 min ago</div>
-        </div>
-      </div>
-      <div class="feed-item">
-        <div class="feed-icon signed">✎</div>
-        <div>
-          <div class="feed-text">EIP-712 voucher signed — 60,001,200 neuron</div>
-          <div class="feed-time">1 hr ago · TEE <span class="hl">0x61BE…6E3</span></div>
-        </div>
-      </div>
-      <div class="feed-item">
-        <div class="feed-icon stopped">✕</div>
-        <div>
-          <div class="feed-text">Sandbox <span class="hl">7e9a1b44</span> auto-stopped — <span style="color:var(--red)">insufficient balance</span></div>
-          <div class="feed-time">2 hr ago</div>
-        </div>
-      </div>
-      <div class="feed-item">
-        <div class="feed-icon deposit">↓</div>
-        <div>
-          <div class="feed-text">Deposit 0.01 0G from <span class="hl">0xfA92…9c3e</span></div>
-          <div class="feed-time">3 hr ago</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <span class="card-title">Contract &amp; Provider</span>
-        <a class="card-action" href="https://chainscan-galileo.0g.ai/" target="_blank">Explorer ↗</a>
-      </div>
-      <div class="info-list">
-        <div class="info-row">
-          <span class="info-key">Settlement Contract</span>
-          <div style="display:flex;align-items:center;gap:6px">
-            <span class="info-val blue">0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210</span>
-            <button class="copy-btn" title="Copy">⎘</button>
-          </div>
-        </div>
-        <div class="info-sep"></div>
-        <div class="info-row">
-          <span class="info-key">Beacon</span>
-          <span class="info-val">0x8f3A…d701</span>
-        </div>
-        <div class="info-row">
-          <span class="info-key">Implementation</span>
-          <span class="info-val">0xe12B…5c34</span>
-        </div>
-        <div class="info-sep"></div>
-        <div class="info-row">
-          <span class="info-key">Provider</span>
-          <span class="info-val blue">0xB831371eb2703305f1d9F8542163633D0675CEd7</span>
-        </div>
-        <div class="info-row">
-          <span class="info-key">TEE Signer</span>
-          <span class="info-val">0x61BEb835D1935Eec8cC04efa2f4e2B3cC8B8B6E3</span>
-        </div>
-        <div class="info-sep"></div>
-        <div class="info-row">
-          <span class="info-key">Price / sec</span>
-          <span class="info-val green">16,667 neuron</span>
-        </div>
-        <div class="info-row">
-          <span class="info-key">Create Fee</span>
-          <span class="info-val green">5,000,000 neuron</span>
-        </div>
-        <div class="info-row">
-          <span class="info-key">Voucher Interval</span>
-          <span class="info-val">3,600 s (1 hr)</span>
-        </div>
-      </div>
+      <div id="eventsFeed"><div class="empty-msg">Loading…</div></div>
     </div>
 
   </div>
+
+  <!-- Contract info -->
+  <div class="card">
+    <div class="card-head">
+      <span class="card-title">Contract &amp; Provider</span>
+      <a class="card-action" id="explorerLink" href="https://chainscan-galileo.0g.ai/" target="_blank">Explorer ↗</a>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr">
+      <div>
+        <div class="info-row">
+          <span class="info-key">Settlement Contract</span>
+          <span class="info-val purple" id="infoContract">—</span>
+        </div>
+        <div class="info-sep"></div>
+        <div class="info-row">
+          <span class="info-key">Provider Address</span>
+          <span class="info-val purple" id="infoProvider">—</span>
+        </div>
+        <div class="info-row">
+          <span class="info-key">Chain ID</span>
+          <span class="info-val" id="infoChain">—</span>
+        </div>
+      </div>
+      <div>
+        <div class="info-row">
+          <span class="info-key">Voucher Interval</span>
+          <span class="info-val" id="infoInterval">—</span>
+        </div>
+        <div class="info-sep"></div>
+        <div class="info-row">
+          <span class="info-key">Compute Price / sec</span>
+          <span class="info-val green" id="infoPrice">—</span>
+        </div>
+        <div class="info-row">
+          <span class="info-key">Create Fee</span>
+          <span class="info-val green" id="infoFee">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </main>
+
+<script>
+// ── Auth ──────────────────────────────────────────────────────────────────
+let adminKey = localStorage.getItem('adminKey') || '';
+
+async function login() {
+  const key = document.getElementById('keyInput').value.trim();
+  if (!key) return;
+  // Probe /admin/status with this key
+  const r = await fetch('/admin/status', { headers: { 'X-Admin-Key': key } });
+  if (r.ok) {
+    adminKey = key;
+    localStorage.setItem('adminKey', key);
+    document.getElementById('authOverlay').style.display = 'none';
+    document.getElementById('mainPage').style.display = '';
+    loadAll();
+    startAutoRefresh();
+  } else {
+    document.getElementById('authErr').style.display = 'block';
+  }
+}
+
+document.getElementById('keyInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') login();
+});
+
+// Auto-login if key is stored
+if (adminKey) {
+  fetch('/admin/status', { headers: { 'X-Admin-Key': adminKey } }).then(r => {
+    if (r.ok) {
+      document.getElementById('authOverlay').style.display = 'none';
+      document.getElementById('mainPage').style.display = '';
+      loadAll();
+      startAutoRefresh();
+    }
+  });
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+const api = path => fetch(path, { headers: { 'X-Admin-Key': adminKey } }).then(r => r.json());
+
+function fmtNeuron(s) {
+  if (!s || s === '0') return '0';
+  const n = BigInt(s);
+  const one0g = BigInt('1000000000000000000');
+  if (n >= one0g / 10000n) {
+    const val = Number(n * 10000n / one0g) / 10000;
+    return val.toFixed(6) + ' 0G';
+  }
+  return Number(s).toLocaleString() + ' neuron';
+}
+
+function shortAddr(a) {
+  if (!a || a.length < 12) return a;
+  return a.slice(0, 8) + '…' + a.slice(-6);
+}
+
+function timeAgo(iso) {
+  const d = new Date(iso);
+  const sec = Math.floor((Date.now() - d) / 1000);
+  if (sec < 60) return sec + 's ago';
+  if (sec < 3600) return Math.floor(sec/60) + 'min ago';
+  if (sec < 86400) return Math.floor(sec/3600) + 'hr ago';
+  return Math.floor(sec/86400) + 'd ago';
+}
+
+function fmtDuration(sec) {
+  if (sec <= 0) return 'due now';
+  const m = Math.floor(sec / 60), s = sec % 60;
+  if (m >= 60) return Math.floor(m/60) + 'h ' + (m%60) + 'min';
+  return m + 'min ' + s + 's';
+}
+
+// ── Load ──────────────────────────────────────────────────────────────────
+async function loadAll() {
+  const [status, sandboxes, evts] = await Promise.all([
+    api('/admin/status'),
+    api('/admin/sandboxes'),
+    api('/admin/events'),
+  ]);
+  renderStatus(status);
+  renderSandboxes(sandboxes);
+  renderEvents(evts);
+}
+
+function renderStatus(s) {
+  document.getElementById('chainTag').innerHTML =
+    `<div class="dot-live"></div> 0G Galileo · ${s.chain_id}`;
+
+  document.getElementById('statSandboxes').textContent = s.active_sandboxes;
+  document.getElementById('statSandboxesSub').innerHTML =
+    s.active_sandboxes > 0
+      ? `<span class="badge green">● running</span>`
+      : '<span style="color:var(--muted)">none running</span>';
+
+  document.getElementById('statFlush').textContent = fmtDuration(s.next_flush_in_sec);
+  document.getElementById('statFlushSub').innerHTML =
+    `interval: ${s.voucher_interval_sec}s`;
+
+  document.getElementById('statPrice').textContent =
+    Number(s.compute_price_per_sec).toLocaleString();
+  document.getElementById('statFee').textContent =
+    Number(s.create_fee).toLocaleString();
+
+  // Contract info panel
+  document.getElementById('infoContract').textContent = shortAddr(s.contract_address);
+  document.getElementById('infoContract').title = s.contract_address;
+  document.getElementById('infoProvider').textContent = shortAddr(s.provider_address);
+  document.getElementById('infoProvider').title = s.provider_address;
+  document.getElementById('infoChain').textContent = s.chain_id;
+  document.getElementById('infoInterval').textContent = s.voucher_interval_sec + 's';
+  document.getElementById('infoPrice').textContent =
+    Number(s.compute_price_per_sec).toLocaleString() + ' neuron';
+  document.getElementById('infoFee').textContent =
+    Number(s.create_fee).toLocaleString() + ' neuron';
+
+  // Explorer link
+  document.getElementById('explorerLink').href =
+    `https://chainscan-galileo.0g.ai/address/${s.contract_address}`;
+}
+
+function renderSandboxes(list) {
+  const el = document.getElementById('sandboxTable');
+  document.getElementById('sandboxMeta').textContent = list.length ? `${list.length} active` : '';
+  if (!list.length) {
+    el.innerHTML = '<div class="empty-msg">No active sandboxes</div>';
+    return;
+  }
+  el.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Sandbox ID</th><th>Owner</th><th>Uptime</th><th>Accrued</th>
+      </tr></thead>
+      <tbody>
+        ${list.map(s => {
+          const uptimeSec = Math.floor(Date.now()/1000) - s.start_time;
+          const uptime = fmtDuration(uptimeSec < 0 ? 0 : -(-uptimeSec)); // reuse fmtDuration inversely
+          const uptimeStr = uptimeSec < 0 ? '—'
+            : uptimeSec < 60 ? uptimeSec + 's'
+            : uptimeSec < 3600 ? Math.floor(uptimeSec/60) + 'min'
+            : Math.floor(uptimeSec/3600) + 'h';
+          return `<tr>
+            <td><span class="link">${s.sandbox_id.slice(0,8)}</span></td>
+            <td><span class="mono" title="${s.owner}">${shortAddr(s.owner)}</span></td>
+            <td><span class="tag running"><span class="tag-dot"></span>${uptimeStr}</span></td>
+            <td><span class="mono">${fmtNeuron(s.accrued_neuron)}</span></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
+const FEED_ICONS = {
+  created:      { cls: 'fi-created',  icon: '+' },
+  stopped:      { cls: 'fi-stopped',  icon: '✎' },
+  auto_stopped: { cls: 'fi-auto',     icon: '✕' },
+  settled:      { cls: 'fi-settled',  icon: '✓' },
+};
+
+function renderEvents(list) {
+  const el = document.getElementById('eventsFeed');
+  document.getElementById('eventsMeta').textContent = list.length ? `last ${list.length}` : '';
+  if (!list.length) {
+    el.innerHTML = '<div class="empty-msg">No events yet</div>';
+    return;
+  }
+  el.innerHTML = list.map(e => {
+    const fi = FEED_ICONS[e.type] || { cls: 'fi-created', icon: '·' };
+    const userHtml = e.user ? `<span class="feed-hl">${shortAddr(e.user)}</span>` : '';
+    const amtHtml  = e.amount && e.amount !== '0'
+      ? ` — <span class="feed-hl">${fmtNeuron(e.amount)}</span>` : '';
+    return `
+      <div class="feed-item">
+        <div class="feed-icon ${fi.cls}">${fi.icon}</div>
+        <div>
+          <div class="feed-text">${e.message}${userHtml ? ' · ' + userHtml : ''}${amtHtml}</div>
+          <div class="feed-time">${timeAgo(e.time)}
+            ${e.sandbox_id ? '· <span class="feed-hl">' + e.sandbox_id.slice(0,8) + '</span>' : ''}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ── Refresh ───────────────────────────────────────────────────────────────
+async function refresh() {
+  const btn = document.getElementById('refreshBtn');
+  btn.innerHTML = '<span class="spin">⟳</span> Refreshing…';
+  await loadAll();
+  btn.innerHTML = '⟳ Refresh';
+}
+
+let autoRefreshTimer;
+function startAutoRefresh() {
+  autoRefreshTimer = setInterval(refresh, 30000);
+}
+</script>
 
 </body>
 </html>

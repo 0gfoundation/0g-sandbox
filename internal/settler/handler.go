@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/0gfoundation/0g-sandbox-billing/internal/chain"
+	"github.com/0gfoundation/0g-sandbox-billing/internal/events"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/voucher"
 )
 
@@ -40,6 +41,13 @@ func HandleStatuses(
 				zap.String("user", v.User.Hex()),
 				zap.String("nonce", v.Nonce.String()),
 			)
+			_ = events.Push(ctx, rdb, events.Event{
+				Type:      events.TypeSettled,
+				Message:   fmt.Sprintf("Voucher settled nonce #%s for %s", v.Nonce.String(), v.User.Hex()),
+				SandboxID: sandboxID,
+				User:      v.User.Hex(),
+				Amount:    v.TotalFee.String(),
+			})
 
 		case chain.StatusInsufficientBalance:
 			persistStop(ctx, rdb, stopCh, sandboxID, "insufficient_balance", log)

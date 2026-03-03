@@ -18,11 +18,13 @@ import (
 
 	"github.com/ethereum/go-ethereum/crypto"
 
+	"github.com/0gfoundation/0g-sandbox-billing/internal/admin"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/auth"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/billing"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/chain"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/config"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/daytona"
+	"github.com/0gfoundation/0g-sandbox-billing/internal/events"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/proxy"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/settler"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/tee"
@@ -132,6 +134,9 @@ func main() {
 		c.Data(http.StatusOK, "text/html; charset=utf-8", web.DashboardHTML)
 	})
 
+	adminGroup := r.Group("/admin", admin.AuthMiddleware(cfg.Daytona.AdminKey))
+	admin.New(rdb, cfg, log).Register(adminGroup)
+
 	api := r.Group("/api", auth.Middleware(rdb))
 	proxy.NewHandler(dtona, billingHandler, onchain, minBalance, log).Register(api)
 
@@ -208,6 +213,11 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 				zap.String("sandbox", sig.SandboxID),
 				zap.String("reason", sig.Reason),
 			)
+			_ = events.Push(ctx, rdb, events.Event{
+				Type:      events.TypeAutoStopped,
+				Message:   fmt.Sprintf("Sandbox %s auto-stopped: %s", sig.SandboxID, sig.Reason),
+				SandboxID: sig.SandboxID,
+			})
 		case <-ctx.Done():
 			return
 		}

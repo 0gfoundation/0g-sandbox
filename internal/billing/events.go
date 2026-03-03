@@ -2,6 +2,7 @@ package billing
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
+	"github.com/0gfoundation/0g-sandbox-billing/internal/events"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/voucher"
 )
 
@@ -77,6 +79,13 @@ func (h *EventHandler) OnCreate(ctx context.Context, sandboxID, ownerAddr string
 	if err := CreateSession(ctx, h.rdb, s); err != nil {
 		h.log.Error("OnCreate: create session", zap.String("sandbox", sandboxID), zap.Error(err))
 	}
+	_ = events.Push(ctx, h.rdb, events.Event{
+		Type:      events.TypeCreated,
+		Message:   fmt.Sprintf("Sandbox %s created, create-fee %s neuron", sandboxID, h.createFee.String()),
+		SandboxID: sandboxID,
+		User:      ownerAddr,
+		Amount:    h.createFee.String(),
+	})
 }
 
 // OnStart handles POST /sandbox/:id/start success: create billing session if
@@ -159,6 +168,14 @@ func (h *EventHandler) generateFinalVoucher(ctx context.Context, sandboxID strin
 	}
 	if err := h.signer.SignAndEnqueue(ctx, v); err != nil {
 		h.log.Error("generateFinalVoucher: sign/enqueue", zap.String("sandbox", sandboxID), zap.Error(err))
+		return
 	}
+	_ = events.Push(ctx, h.rdb, events.Event{
+		Type:      events.TypeStopped,
+		Message:   fmt.Sprintf("Final voucher signed for sandbox %s, %s neuron", sandboxID, totalFee.String()),
+		SandboxID: sandboxID,
+		User:      sess.Owner,
+		Amount:    totalFee.String(),
+	})
 }
 
