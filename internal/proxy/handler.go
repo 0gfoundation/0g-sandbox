@@ -111,6 +111,9 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	// ── GET /sandbox/:id (no wildcard suffix) ─────────────────────────────
 	rg.GET("/sandbox/:id", h.withOwner(h.forward))
 
+	// ── Toolbox API (/api/toolbox/:id/*) — owner check + transparent forward
+	rg.Any("/toolbox/:id/*action", h.withOwner(h.forward))
+
 	// ── Provider-only: archive all running sandboxes (pre-deploy) ──────────
 	rg.POST("/archive-all", h.handleArchiveAll)
 

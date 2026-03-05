@@ -4,6 +4,7 @@
 /upgrade
 /verify
 /setup
+/user
 
 # Contract build artifacts (reproducible via make build-contracts)
 contracts/out/

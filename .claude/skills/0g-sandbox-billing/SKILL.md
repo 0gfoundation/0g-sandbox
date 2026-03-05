@@ -141,6 +141,28 @@ USER_KEY=0x<key> go run ./cmd/user/ acknowledge \
 USER_KEY=0x<key> go run ./cmd/user/ create --api http://47.236.111.154:8080
 USER_KEY=0x<key> go run ./cmd/user/ list   --api http://47.236.111.154:8080
 USER_KEY=0x<key> go run ./cmd/user/ stop   --api http://47.236.111.154:8080 --id <id>
+
+# Remote execution inside a sandbox
+USER_KEY=0x<key> go run ./cmd/user/ exec \
+  --api http://47.236.111.154:8080 \
+  --id <sandbox-id> \
+  --cmd "python3 -c \"print('hello')\""
+
+# Arbitrary toolbox API call
+USER_KEY=0x<key> go run ./cmd/user/ toolbox \
+  --api http://47.236.111.154:8080 \
+  --id <sandbox-id> \
+  --action files                          # GET /toolbox/files
+USER_KEY=0x<key> go run ./cmd/user/ toolbox \
+  --api http://47.236.111.154:8080 \
+  --id <sandbox-id> \
+  --action git/status                     # GET /toolbox/git/status
+USER_KEY=0x<key> go run ./cmd/user/ toolbox \
+  --api http://47.236.111.154:8080 \
+  --id <sandbox-id> \
+  --method POST \
+  --action process/execute \
+  --body '{"command":"echo hi","timeout":10}'
 ```
 
 ---
@@ -168,12 +190,29 @@ USER_KEY=0x<key> go run ./cmd/user/ stop   --api http://47.236.111.154:8080 --id
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/healthz` | none | Liveness probe |
-| GET | `/dashboard` | none | Operator dashboard (static, issue [#14](https://github.com/0gfoundation/0g-sandbox-billing/issues/14) for live data) |
+| GET | `/dashboard` | none | Operator dashboard |
+| GET | `/api/providers` | none | On-chain service info for known providers |
 | POST | `/api/sandbox` | EIP-191 | Create sandbox |
 | GET | `/api/sandbox` | EIP-191 | List own sandboxes |
 | GET | `/api/sandbox/:id` | EIP-191 | Get sandbox (403 if not owner) |
 | POST | `/api/sandbox/:id/stop` | EIP-191 | Stop sandbox |
 | DELETE | `/api/sandbox/:id` | EIP-191 | Delete sandbox |
+| ANY | `/api/toolbox/:id/toolbox/*` | EIP-191 | Daytona toolbox — owner-checked transparent forward |
+
+### Toolbox API (remote execution)
+Path format: `/api/toolbox/{sandboxId}/toolbox/{action}` (double `/toolbox/`).
+
+Available actions (from Daytona): `files`, `files/download`, `files/upload`, `files/find`, `git/status`, `git/clone`, `git/commit`, `git/push`, `git/pull`, `process/execute`, `process/pty`, `lsp/start`, `lsp/completions`, `project-dir`, `user-home-dir`, `computeruse/*`
+
+Use the CLI for easy access (handles EIP-191 signing automatically):
+```bash
+# Run a command
+USER_KEY=0x<key> go run ./cmd/user/ exec --api http://47.236.111.154:8080 --id <id> --cmd "echo hi"
+
+# Arbitrary toolbox call
+USER_KEY=0x<key> go run ./cmd/user/ toolbox --api http://47.236.111.154:8080 --id <id> --action files
+USER_KEY=0x<key> go run ./cmd/user/ toolbox --api http://47.236.111.154:8080 --id <id> --action git/status
+```
 
 ---
 

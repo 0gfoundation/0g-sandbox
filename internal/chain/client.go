@@ -371,6 +371,39 @@ func (c *Client) GetServicePricing(ctx context.Context, provider common.Address)
 	return perSec, svc.CreateFee, nil
 }
 
+// ServiceInfo holds the full on-chain service registration for a provider.
+type ServiceInfo struct {
+	URL                string
+	TEESignerAddress   common.Address
+	ComputePricePerMin *big.Int
+	CreateFee          *big.Int
+	SignerVersion      *big.Int
+}
+
+// GetServiceInfo returns the full on-chain service data for a provider.
+// Returns (nil, nil) when the service is not registered.
+func (c *Client) GetServiceInfo(ctx context.Context, provider common.Address) (*ServiceInfo, error) {
+	opts := &bind.CallOpts{Context: ctx}
+	exists, err := c.contract.ServiceExists(opts, provider)
+	if err != nil {
+		return nil, fmt.Errorf("ServiceExists: %w", err)
+	}
+	if !exists {
+		return nil, nil
+	}
+	svc, err := c.contract.Services(opts, provider)
+	if err != nil {
+		return nil, fmt.Errorf("Services: %w", err)
+	}
+	return &ServiceInfo{
+		URL:                svc.Url,
+		TEESignerAddress:   svc.TeeSignerAddress,
+		ComputePricePerMin: svc.ComputePricePerMin,
+		CreateFee:          svc.CreateFee,
+		SignerVersion:      svc.SignerVersion,
+	}, nil
+}
+
 // GetAccount returns a user's balance, pendingRefund, and refundUnlockAt.
 func (c *Client) GetAccount(ctx context.Context, user common.Address) (balance, pendingRefund, refundUnlockAt *big.Int, err error) {
 	opts := &bind.CallOpts{Context: ctx}

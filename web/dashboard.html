@@ -29,36 +29,34 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-siz
 .btn-connect{background:var(--p);color:#fff;border:none;border-radius:6px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:background .15s}
 .btn-connect:hover{background:var(--pd)}
 .addr-chip{background:var(--pbg);color:var(--p);border:1px solid var(--pbd);border-radius:6px;padding:5px 12px;font-size:12px;font-family:var(--mono)}
-.logout-btn{background:none;border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;color:var(--muted);cursor:pointer}
+.logout-btn{background:none;border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;color:var(--muted);cursor:pointer;transition:all .15s}
 .logout-btn:hover{border-color:var(--red);color:var(--red)}
 
 /* ─ Tabs ─ */
 .tabs{background:var(--surf);border-bottom:1px solid var(--border);padding:0 24px;display:flex;gap:4px}
 .tab{padding:12px 18px;font-size:13.5px;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .15s}
-.tab:hover{color:var(--p)}
-.tab.active{color:var(--p);border-bottom-color:var(--p)}
+.tab:hover{color:var(--p)}.tab.active{color:var(--p);border-bottom-color:var(--p)}
 
 /* ─ Page ─ */
 .page{max-width:1100px;margin:0 auto;padding:24px 24px 60px}
-.two-col{display:grid;grid-template-columns:340px 1fr;gap:16px}
-.full-col{margin-top:16px}
+.two-col{display:grid;grid-template-columns:300px 1fr;gap:16px;align-items:start}
 @media(max-width:800px){.two-col{grid-template-columns:1fr}}
 
 /* ─ Card ─ */
-.card{background:var(--surf);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:16px}
-.card-head{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:#fafafa}
-.card-title{font-size:13.5px;font-weight:600}
+.card{background:var(--surf);border:1px solid rgba(0,0,0,.07);border-radius:8px;overflow:hidden;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.card-head{padding:13px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:#fafafa}
+.card-title{font-size:13px;font-weight:600}
 .card-meta{font-size:12px;color:var(--muted)}
-.card-body{padding:20px}
+.card-body{padding:18px}
 
 /* ─ Info rows ─ */
-.info-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #f0f0f0;gap:12px}
+.info-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f0f0f0;gap:12px}
 .info-row:last-child{border-bottom:none}
 .ik{font-size:12px;color:var(--muted);font-weight:500;flex-shrink:0}
 .iv{font-family:var(--mono);font-size:12px;text-align:right;word-break:break-all}
 .iv.purple{color:var(--p);font-weight:500}
 .iv.green{color:var(--green);font-weight:500}
-.iv.big{font-size:18px;font-weight:600;font-family:var(--mono);color:var(--text)}
+.iv.big{font-size:17px;font-weight:600;font-family:var(--mono);color:var(--text)}
 
 /* ─ Badges ─ */
 .badge{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:3px;border:1px solid transparent}
@@ -71,13 +69,43 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-siz
 
 /* ─ Buttons ─ */
 .btn{display:inline-flex;align-items:center;gap:5px;border:none;border-radius:6px;padding:7px 14px;font-size:13px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .15s}
-.btn-prim{background:var(--p);color:#fff}.btn-prim:hover{background:var(--pd)}
-.btn-ghost{background:var(--pbg);color:var(--p);border:1px solid var(--pbd)}.btn-ghost:hover{background:var(--pbd)}
-.btn-warn{background:#b45309;color:#fff}.btn-warn:hover{background:#92400e}
-.btn-sm{padding:5px 10px;font-size:12px}
-.btn-danger{background:var(--rbg);color:var(--red);border:1px solid var(--rbd)}.btn-danger:hover{background:var(--rbd)}
-.btn-row{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+.btn-prim{background:var(--p);color:#fff}
+.btn-prim:not(:disabled):hover{background:var(--pd);transform:translateY(-1px)}
+.btn-prim:active{transform:translateY(0)}
+.btn-ghost{background:var(--pbg);color:var(--p);border:1px solid var(--pbd)}
+.btn-ghost:not(:disabled):hover{background:var(--pbd);transform:translateY(-1px)}
+.btn-ghost:active{transform:translateY(0)}
+.btn-warn{background:#b45309;color:#fff;border:none}.btn-warn:hover{background:#92400e}
+.btn-sm{padding:4px 10px;font-size:12px}
+.btn-danger{background:var(--rbg);color:var(--red);border:1px solid var(--rbd)}
+.btn-danger:not(:disabled):hover{background:var(--rbd)}
 .btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* ─ Inline action rows ─ */
+.ia-row{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+.ia-row:last-child{margin-bottom:0}
+.ia-label{font-size:11.5px;color:var(--muted);font-weight:500}
+.ia-input-row{display:flex;gap:6px;align-items:center}
+.ia-input{flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;outline:none;transition:border-color .15s;min-width:0}
+.ia-input:focus{border-color:var(--p)}
+.ia-unit{font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0}
+.ia-hint{font-size:11px;color:var(--muted)}
+
+/* ─ Provider cards (with embedded sandboxes) ─ */
+.pv-subscribed{border-color:var(--gbd)!important;box-shadow:0 1px 4px rgba(56,158,13,.12)!important}
+.pv-pricing-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px}
+.pv-price-box{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:9px 10px}
+.pv-price-val{font-size:14px;font-weight:700;font-family:var(--mono);color:var(--p);line-height:1.2}
+.pv-price-label{font-size:10.5px;color:var(--muted);margin-top:3px}
+.pv-sandbox-section{border-top:1px solid var(--border);padding-top:14px;margin-top:4px}
+.pv-sandbox-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.pv-sandbox-list{display:flex;flex-direction:column}
+.pv-sandbox-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0}
+.pv-sandbox-row:last-child{border-bottom:none}
+.pv-sandbox-id{font-family:var(--mono);font-size:12px;flex:1;color:var(--text2)}
+.pv-sandbox-actions{display:flex;gap:5px}
+.pv-sandbox-empty{color:var(--muted);font-size:12.5px;padding:16px 0;text-align:center}
+.pv-sandbox-other{color:var(--muted);font-size:12px;padding:12px 0;font-style:italic}
 
 /* ─ Table ─ */
 table{width:100%;border-collapse:collapse}
@@ -92,24 +120,27 @@ tbody tr:hover td{background:#fafafa}
 .tag.running{background:var(--gbg);color:var(--green);border-color:var(--gbd)}
 .tag.stopped{background:#fafafa;color:var(--muted);border-color:var(--border)}
 .tag.starting{background:var(--obg);color:var(--orange);border-color:#ffd591}
+.tag.archived{background:#e6f4ff;color:#1677ff;border-color:#91caff}
 .tag.error{background:#fff1f0;color:#cf1322;border-color:#ffa39e}
 .tag-dot{width:5px;height:5px;border-radius:50%;background:currentColor}
 
 /* ─ Modal ─ */
-.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:center;justify-content:center;z-index:300}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);backdrop-filter:blur(2px);display:none;align-items:center;justify-content:center;z-index:300}
 .modal-bg.open{display:flex}
-.modal{background:var(--surf);border-radius:12px;padding:28px;width:400px;max-width:95vw;box-shadow:0 8px 32px rgba(0,0,0,.15)}
+.modal{background:var(--surf);border-radius:12px;padding:28px;width:400px;max-width:95vw;box-shadow:0 8px 32px rgba(0,0,0,.15);animation:modalin .2s ease}
+@keyframes modalin{from{transform:translateY(-8px);opacity:0}to{transform:translateY(0);opacity:1}}
 .modal-title{font-size:16px;font-weight:600;margin-bottom:16px}
 .field{margin-bottom:14px}
 .field label{display:block;font-size:12.5px;font-weight:500;color:var(--muted);margin-bottom:5px}
-.field input,.field select{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;outline:none}
+.field input,.field select{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;outline:none;transition:border-color .15s}
 .field input:focus,.field select:focus{border-color:var(--p)}
 .field .hint{font-size:11.5px;color:var(--muted);margin-top:4px}
 .modal-btns{display:flex;gap:8px;margin-top:18px;justify-content:flex-end}
 
 /* ─ Misc ─ */
-.empty{color:var(--muted);font-size:13px;padding:24px;text-align:center}
-.err{color:var(--red);font-size:12px;margin-top:6px}
+.empty{color:var(--muted);font-size:13px;padding:28px 20px;text-align:center}
+.empty-icon{font-size:26px;margin-bottom:8px}
+.err{color:var(--red);font-size:12px;margin-top:4px}
 .loading{color:var(--muted);font-size:12px;margin-top:6px}
 .code-block{background:#f6f6f6;border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-family:var(--mono);font-size:12px;word-break:break-all;user-select:all;cursor:text}
 .tab-content{display:none}.tab-content.active{display:block}
@@ -119,10 +150,12 @@ tbody tr:hover td{background:#fafafa}
 
 /* ─ Toast ─ */
 #toast{position:fixed;bottom:24px;right:24px;z-index:999;display:flex;flex-direction:column;gap:8px;pointer-events:none}
-.toast{background:var(--text);color:#fff;border-radius:8px;padding:10px 16px;font-size:13px;min-width:200px;box-shadow:0 4px 12px rgba(0,0,0,.2);animation:slidein .2s ease}
-.toast.success{background:#237804}
-.toast.error{background:var(--red)}
+.toast{background:var(--text);color:#fff;border-radius:8px;padding:10px 16px;font-size:13px;min-width:220px;max-width:360px;box-shadow:0 4px 12px rgba(0,0,0,.2);animation:slidein .2s ease;pointer-events:auto}
+.toast.success{background:#237804}.toast.error{background:var(--red)}.toast.pending{background:var(--orange)}
+.toast a{color:rgba(255,255,255,.9);text-decoration:underline;margin-left:6px}
 @keyframes slidein{from{transform:translateY(10px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes skel-pulse{0%,100%{opacity:.35}50%{opacity:.7}}
+.skel{background:var(--border);border-radius:4px;display:inline-block;min-width:60px;min-height:14px;animation:skel-pulse 1.4s ease infinite;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -158,45 +191,75 @@ tbody tr:hover td{background:#fafafa}
   <div id="userContent" style="display:none">
     <div class="two-col">
 
-      <!-- Account card -->
+      <!-- ─ Left column ─ -->
       <div>
+
+        <!-- Account -->
         <div class="card">
-          <div class="card-head"><span class="card-title">Account</span><div style="display:flex;align-items:center;gap:8px"><span class="card-meta" id="userAddr"></span><button class="btn btn-sm btn-ghost" onclick="loadUserData()">↻</button></div></div>
-          <div class="card-body">
-            <div class="info-row"><span class="ik">Balance</span><span class="iv big" id="userBalance">—</span></div>
-            <div class="info-row"><span class="ik">Pending Refund</span><span class="iv" id="userRefund">—</span></div>
-            <div class="info-row"><span class="ik">TEE Acknowledged</span><span id="userAck">—</span></div>
+          <div class="card-head">
+            <span class="card-title">Account</span>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="card-meta" id="userAddr"></span>
+              <button class="btn btn-sm btn-ghost" onclick="loadUserData()">↻</button>
+            </div>
           </div>
-        </div>
-        <div class="card">
-          <div class="card-head"><span class="card-title">Actions</span></div>
           <div class="card-body">
-            <div style="display:flex;flex-direction:column;gap:10px">
-              <button class="btn btn-prim" onclick="openModal('depositModal')">⬆ Deposit Funds</button>
-              <button class="btn btn-ghost" id="ackBtn" onclick="toggleAck()">✓ Acknowledge TEE Signer</button>
-              <button class="btn btn-ghost" onclick="openModal('refundModal')">↩ Request Refund</button>
+            <div class="info-row">
+              <span class="ik">Balance</span>
+              <span class="iv big" id="userBalance"><span class="skel" style="width:70px"></span></span>
+            </div>
+            <div class="info-row">
+              <span class="ik">Min Required</span>
+              <span class="iv green" id="infoMinBal">—</span>
+            </div>
+            <div class="info-row">
+              <span class="ik">Pending Refund</span>
+              <span class="iv" id="userRefund"><span class="skel" style="width:50px"></span></span>
+            </div>
+            <div id="balanceWarnBanner" style="display:none;background:var(--obg);border:1px solid #ffd591;border-radius:6px;padding:8px 12px;margin-top:10px;font-size:12px;color:var(--orange)">
+              ⚠ Balance below minimum — sandboxes may be stopped soon.
             </div>
           </div>
         </div>
+
+        <!-- Deposit -->
         <div class="card">
-          <div class="card-head"><span class="card-title">Billing Info</span></div>
+          <div class="card-head"><span class="card-title">Deposit</span></div>
           <div class="card-body">
-            <div class="info-row"><span class="ik">Min Balance</span><span class="iv green" id="infoMinBal">—</span></div>
-            <div class="info-row"><span class="ik">Compute Price</span><span class="iv" id="infoPricePerSec">—</span></div>
-            <div class="info-row"><span class="ik">Create Fee</span><span class="iv" id="infoCreateFee">—</span></div>
-            <div class="info-row"><span class="ik">Contract</span><span class="iv purple" id="infoContract">—</span></div>
+            <div class="ia-row">
+              <div class="ia-input-row">
+                <input id="depositAmt" class="ia-input" type="number" step="0.001" min="0.001" value="0.01">
+                <span class="ia-unit">0G</span>
+                <button class="btn btn-prim btn-sm" id="depositBtn" onclick="doDeposit()">⬆ Deposit</button>
+              </div>
+              <div class="ia-hint" id="depositHint"></div>
+              <div class="err" id="depositErr"></div>
+            </div>
           </div>
         </div>
+
+        <!-- Refund -->
+        <div class="card">
+          <div class="card-head"><span class="card-title">Refund</span></div>
+          <div class="card-body">
+            <div class="ia-row">
+              <div class="ia-input-row">
+                <input id="refundAmt" class="ia-input" type="number" step="0.001" min="0.001" placeholder="0.01">
+                <span class="ia-unit">0G</span>
+                <button class="btn btn-ghost btn-sm" onclick="doRefund()">↩ Request</button>
+              </div>
+              <div class="ia-hint">2-hour lock period before withdrawal</div>
+              <div class="err" id="refundErr"></div>
+            </div>
+          </div>
+        </div>
+
       </div>
 
-      <!-- Sandboxes card -->
-      <div>
-        <div class="card">
-          <div class="card-head">
-            <span class="card-title">My Sandboxes</span>
-            <button class="btn btn-sm btn-prim" onclick="openModal('createModal')">+ Create</button>
-          </div>
-          <div id="sandboxTable"><div class="empty">Loading sandboxes…</div></div>
+      <!-- ─ Right column: Providers + Sandboxes ─ -->
+      <div id="providerSection">
+        <div class="empty" style="padding:40px 0">
+          <span class="skel" style="width:100%;height:120px;display:block;border-radius:10px"></span>
         </div>
       </div>
 
@@ -219,10 +282,9 @@ tbody tr:hover td{background:#fafafa}
   <div id="providerContent" style="display:none">
     <div class="two-col">
 
-      <!-- Service card -->
       <div>
         <div class="card">
-          <div class="card-head"><span class="card-title">Service Status</span><span id="providerStatus"></span></div>
+          <div class="card-head"><span class="card-title">Service Status</span></div>
           <div class="card-body">
             <div class="info-row"><span class="ik">Registered</span><span id="svcRegistered">—</span></div>
             <div class="info-row"><span class="ik">Service URL</span><span class="iv" id="svcUrl">—</span></div>
@@ -236,15 +298,14 @@ tbody tr:hover td{background:#fafafa}
           <div class="card-head"><span class="card-title">Actions</span></div>
           <div class="card-body">
             <div style="display:flex;flex-direction:column;gap:10px">
-              <button class="btn btn-prim" id="registerBtn" onclick="openModal('serviceModal')">Register / Update Service</button>
-              <button class="btn btn-warn" id="archiveAllBtn" onclick="doArchiveAll()" title="Archive all running sandboxes before redeploying. This stops all active sessions.">Archive All (Pre-deploy)</button>
-              <div class="err" id="archiveAllErr" style="margin-top:4px"></div>
+              <button class="btn btn-prim" onclick="openModal('serviceModal')">Register / Update Service</button>
+              <button class="btn btn-warn" id="archiveAllBtn" onclick="doArchiveAll()">Archive All (Pre-deploy)</button>
+              <div class="err" id="archiveAllErr"></div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Earnings card -->
       <div>
         <div class="card">
           <div class="card-head"><span class="card-title">Earnings</span><button class="btn btn-sm btn-ghost" onclick="loadProviderData()">↻</button></div>
@@ -263,8 +324,7 @@ tbody tr:hover td{background:#fafafa}
 
     </div>
 
-    <!-- All Sandboxes -->
-    <div class="card" style="margin-top:20px">
+    <div class="card" style="margin-top:4px">
       <div class="card-head">
         <span class="card-title">All Sandboxes</span>
         <button class="btn btn-sm btn-ghost" onclick="loadAllSandboxes()">Refresh</button>
@@ -274,7 +334,6 @@ tbody tr:hover td{background:#fafafa}
       </div>
     </div>
 
-    <!-- On-chain Voucher Events -->
     <div class="card" style="margin-top:16px">
       <div class="card-head">
         <span class="card-title">Voucher Settlement History</span>
@@ -300,41 +359,6 @@ tbody tr:hover td{background:#fafafa}
 
 <!-- ═══ Modals ═══ -->
 
-<!-- Deposit -->
-<div class="modal-bg" id="depositModal">
-  <div class="modal">
-    <div class="modal-title">Deposit Funds</div>
-    <div class="field">
-      <label>Amount (A0GI)</label>
-      <input id="depositAmt" type="number" step="0.001" min="0.001" value="0.01" placeholder="0.01">
-      <div class="hint" id="depositHint"></div>
-    </div>
-    <div class="err" id="depositErr"></div>
-    <div class="modal-btns">
-      <button class="btn btn-ghost" onclick="closeModal('depositModal')">Cancel</button>
-      <button class="btn btn-prim" id="depositBtn" onclick="doDeposit()">Deposit</button>
-    </div>
-  </div>
-</div>
-
-<!-- Request Refund -->
-<div class="modal-bg" id="refundModal">
-  <div class="modal">
-    <div class="modal-title">Request Refund</div>
-    <div class="field">
-      <label>Amount (A0GI)</label>
-      <input id="refundAmt" type="number" step="0.001" min="0.001" placeholder="0.01">
-      <div class="hint">Refund has a 2-hour lock period before withdrawal.</div>
-    </div>
-    <div class="err" id="refundErr"></div>
-    <div class="modal-btns">
-      <button class="btn btn-ghost" onclick="closeModal('refundModal')">Cancel</button>
-      <button class="btn btn-prim" onclick="doRefund()">Request Refund</button>
-    </div>
-  </div>
-</div>
-
-<!-- Create Sandbox -->
 <div class="modal-bg" id="createModal">
   <div class="modal">
     <div class="modal-title">Create Sandbox</div>
@@ -351,7 +375,6 @@ tbody tr:hover td{background:#fafafa}
   </div>
 </div>
 
-<!-- SSH Access -->
 <div class="modal-bg" id="sshModal">
   <div class="modal" style="width:480px">
     <div class="modal-title">SSH Access</div>
@@ -359,7 +382,7 @@ tbody tr:hover td{background:#fafafa}
       <label>Connect command (valid 60 min)</label>
       <div class="code-block" id="sshCommand">Loading…</div>
     </div>
-    <div style="font-size:12px;color:var(--muted)">Click the command to select, then copy. The token is your SSH password — no key needed.</div>
+    <div style="font-size:12px;color:var(--muted)">The token is your SSH password — no key needed.</div>
     <div class="modal-btns">
       <button class="btn btn-ghost" onclick="closeModal('sshModal')">Close</button>
       <button class="btn btn-prim" onclick="copySSH()">Copy</button>
@@ -367,30 +390,16 @@ tbody tr:hover td{background:#fafafa}
   </div>
 </div>
 
-<!-- Register/Update Service -->
 <div class="modal-bg" id="serviceModal">
   <div class="modal">
     <div class="modal-title">Register / Update Service</div>
+    <div class="field"><label>Service URL</label><input id="svcUrlInput" type="text" placeholder="https://your-daytona-url"></div>
+    <div class="field"><label>TEE Signer Address</label><input id="svcTEEInput" type="text" placeholder="0x..."></div>
+    <div class="field"><label>Compute Price / min (neuron)</label><input id="svcPriceInput" type="number" value="1000020" min="0"></div>
+    <div class="field"><label>Create Fee (neuron)</label><input id="svcFeeInput" type="number" value="5000000" min="0"></div>
     <div class="field">
-      <label>Service URL</label>
-      <input id="svcUrlInput" type="text" placeholder="https://your-daytona-url">
-    </div>
-    <div class="field">
-      <label>TEE Signer Address</label>
-      <input id="svcTEEInput" type="text" placeholder="0x...">
-    </div>
-    <div class="field">
-      <label>Compute Price / min (neuron)</label>
-      <input id="svcPriceInput" type="number" value="1000020" min="0">
-    </div>
-    <div class="field">
-      <label>Create Fee (neuron)</label>
-      <input id="svcFeeInput" type="number" value="5000000" min="0">
-    </div>
-    <div class="field">
-      <label>Stake (A0GI) — required for first registration</label>
+      <label>Stake (0G) — required for first registration</label>
       <input id="svcStakeInput" type="number" step="0.001" value="0" min="0">
-      <div class="hint" id="svcStakeHint"></div>
     </div>
     <div class="err" id="serviceErr"></div>
     <div class="modal-btns">
@@ -400,7 +409,6 @@ tbody tr:hover td{background:#fafafa}
   </div>
 </div>
 
-<!-- Wallet selector -->
 <div class="modal-bg" id="walletModal">
   <div class="modal">
     <div class="modal-title">Select Wallet</div>
@@ -409,19 +417,16 @@ tbody tr:hover td{background:#fafafa}
   </div>
 </div>
 
-<!-- Toast container -->
 <div id="toast"></div>
 
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
 let walletAddr = null, signer = null, contract = null, info = null;
-let userAcked = false;
-const eip6963Providers = new Map(); // uuid → { info, provider }
-let _refreshTimer = null;   // single auto-refresh interval handle
-let _activeProvider = null; // current wallet provider (to manage accountsChanged listener)
-function _onAccountsChanged(accounts) {
-  if (!accounts || accounts.length === 0) { location.reload(); return; }
-  initWallet(accounts[0], _activeProvider);
+const eip6963Providers = new Map();
+let _refreshTimer = null, _activeProvider = null;
+function _onAccountsChanged(a) {
+  if (!a || !a.length) { location.reload(); return; }
+  initWallet(a[0], _activeProvider);
 }
 
 const ABI = [
@@ -440,89 +445,55 @@ const ABI = [
   "function withdrawRefund()",
 ];
 
-// ── EIP-6963 wallet discovery ─────────────────────────────────────────────────
-window.addEventListener('eip6963:announceProvider', e => {
-  eip6963Providers.set(e.detail.info.uuid, e.detail);
-});
+window.addEventListener('eip6963:announceProvider', e => eip6963Providers.set(e.detail.info.uuid, e.detail));
 window.dispatchEvent(new Event('eip6963:requestProvider'));
 
-// ── Init ──────────────────────────────────────────────────────────────────────
 window.onload = async () => {
   info = await fetch('/info').then(r => r.json()).catch(() => null);
   if (info) {
-    document.getElementById('chainTag').innerHTML =
-      `<div class="dot"></div>Chain ${info.chain_id}`;
-    document.getElementById('infoMinBal').textContent       = fmtNeuron(info.min_balance);
-    document.getElementById('infoPricePerSec').textContent  = fmtNeuron(info.compute_price_per_sec) + '/sec';
-    document.getElementById('infoCreateFee').textContent    = fmtNeuron(info.create_fee);
-    document.getElementById('infoContract').textContent     = shortAddr(info.contract_address);
-    document.getElementById('infoContract').title           = info.contract_address;
-    document.getElementById('depositHint').textContent      =
-      `Min balance required: ${fmtNeuron(info.min_balance)}`;
-    if (info.provider_address) {
-      document.getElementById('svcTEEInput').value = info.provider_address;
-    }
+    document.getElementById('chainTag').innerHTML = `<div class="dot"></div>Chain ${info.chain_id}`;
+    document.getElementById('infoMinBal').textContent = fmtNeuron(info.min_balance);
+    document.getElementById('depositHint').textContent = `Min balance required: ${fmtNeuron(info.min_balance)}`;
+    if (info.provider_address) document.getElementById('svcTEEInput').value = info.provider_address;
   }
-
-  // Auto-reconnect: try EIP-6963 providers first, then window.ethereum
   const lastUUID = localStorage.getItem('walletUUID');
   if (lastUUID && eip6963Providers.has(lastUUID)) {
     const p = eip6963Providers.get(lastUUID).provider;
-    const accounts = await p.request({ method: 'eth_accounts' }).catch(() => []);
-    if (accounts.length > 0) { await initWallet(accounts[0], p); return; }
+    const a = await p.request({ method:'eth_accounts' }).catch(()=>[]);
+    if (a.length) { await initWallet(a[0], p); return; }
   }
   if (window.ethereum) {
-    const accounts = await window.ethereum.request({ method: 'eth_accounts' }).catch(() => []);
-    if (accounts.length > 0) { await initWallet(accounts[0], window.ethereum); return; }
+    const a = await window.ethereum.request({ method:'eth_accounts' }).catch(()=>[]);
+    if (a.length) { await initWallet(a[0], window.ethereum); return; }
   }
 };
 
 // ── Wallet ────────────────────────────────────────────────────────────────────
 function connectWallet() {
-  // Collect all available wallets
-  const list = document.getElementById('walletList');
-  list.innerHTML = '';
-
+  const list = document.getElementById('walletList'); list.innerHTML = '';
   const wallets = [...eip6963Providers.values()];
-
-  // Also add window.ethereum if not already represented by EIP-6963
-  const legacyRdns = new Set(wallets.map(w => w.info.rdns));
-  if (window.ethereum && !legacyRdns.size) {
-    wallets.push({ info: { uuid: '__legacy__', name: 'Browser Wallet', icon: '' }, provider: window.ethereum });
-  }
-
-  if (wallets.length === 0) {
-    list.innerHTML = '<p style="color:var(--muted);font-size:13px">No wallets detected. Install MetaMask or another EIP-1193 wallet.</p>';
-    openModal('walletModal');
-    return;
-  }
-
-  wallets.forEach(({ info: wi, provider: prov }) => {
+  if (window.ethereum && !wallets.length) wallets.push({ info:{ uuid:'__legacy__', name:'Browser Wallet', icon:'' }, provider:window.ethereum });
+  if (!wallets.length) { list.innerHTML='<p style="color:var(--muted);font-size:13px">No wallets detected.</p>'; openModal('walletModal'); return; }
+  wallets.forEach(({ info:wi, provider:prov }) => {
     const btn = document.createElement('button');
     btn.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surf);cursor:pointer;font-family:inherit;font-size:13.5px;font-weight:500;width:100%;transition:background .15s';
-    btn.onmouseover = () => btn.style.background = 'var(--pbg)';
-    btn.onmouseout  = () => btn.style.background = 'var(--surf)';
-    if (wi.icon) {
-      const img = document.createElement('img');
-      img.src = wi.icon; img.width = 28; img.height = 28;
-      img.style.borderRadius = '6px';
-      btn.appendChild(img);
-    }
+    btn.onmouseover = () => btn.style.background='var(--pbg)';
+    btn.onmouseout  = () => btn.style.background='var(--surf)';
+    if (wi.icon) { const img=document.createElement('img'); img.src=wi.icon; img.width=img.height=28; img.style.borderRadius='6px'; btn.appendChild(img); }
     btn.appendChild(document.createTextNode(wi.name));
     btn.onclick = () => { closeModal('walletModal'); selectWallet(wi.uuid, prov); };
     list.appendChild(btn);
   });
-
   openModal('walletModal');
 }
 
 async function selectWallet(uuid, prov) {
   try {
     await ensureChain(prov);
-    const accounts = await prov.request({ method: 'eth_requestAccounts' });
+    const accounts = await prov.request({ method:'eth_requestAccounts' });
     if (uuid !== '__legacy__') localStorage.setItem('walletUUID', uuid);
     await initWallet(accounts[0], prov);
-  } catch (e) { toast(e.message, 'error'); }
+  } catch(e) { toast(e.message,'error'); }
 }
 
 async function initWallet(addr, prov) {
@@ -531,94 +502,45 @@ async function initWallet(addr, prov) {
   signer = await provider.getSigner();
   contract = new ethers.Contract(info.contract_address, ABI, signer);
 
-  // Remove any existing addr chip before adding a new one
-  document.querySelectorAll('.addr-chip').forEach(el => el.remove());
+  document.querySelectorAll('.addr-chip').forEach(el=>el.remove());
   document.getElementById('connectBtn').style.display = 'none';
-  const chip = document.createElement('div');
-  chip.className = 'addr-chip';
-  chip.textContent = shortAddr(addr);
-  chip.title = addr;
+  const chip = document.createElement('div'); chip.className='addr-chip'; chip.textContent=shortAddr(addr); chip.title=addr;
   document.querySelector('.topbar-right').prepend(chip);
-  // Logout button
-  const logoutBtn = document.createElement('button');
-  logoutBtn.className = 'btn btn-sm btn-ghost logout-btn';
-  logoutBtn.textContent = 'Logout';
-  logoutBtn.onclick = logout;
-  document.querySelector('.topbar-right').prepend(logoutBtn);
+  const lb = document.createElement('button'); lb.className='btn btn-sm btn-ghost logout-btn'; lb.textContent='Logout'; lb.onclick=logout;
+  document.querySelector('.topbar-right').prepend(lb);
   document.getElementById('userAddr').textContent = shortAddr(addr);
 
-  showUserContent();
-  showProviderContent();
-  await loadUserData();
-  await loadProviderData();
+  document.getElementById('userNoWallet').style.display='none'; document.getElementById('userContent').style.display='';
+  document.getElementById('providerNoWallet').style.display='none'; document.getElementById('providerContent').style.display='';
 
-  // Swap accountsChanged listener: remove from old provider, add to new one (once).
-  if (_activeProvider && _activeProvider !== prov) {
-    try { _activeProvider.removeListener('accountsChanged', _onAccountsChanged); } catch (_) {}
-  }
-  if (_activeProvider !== prov) {
-    prov.on('accountsChanged', _onAccountsChanged);
-    _activeProvider = prov;
-  }
+  await Promise.all([loadUserData(), loadProviderData()]);
 
-  // Single auto-refresh timer — clear previous before creating new.
+  if (_activeProvider && _activeProvider !== prov) try { _activeProvider.removeListener('accountsChanged',_onAccountsChanged); } catch(_){}
+  if (_activeProvider !== prov) { prov.on('accountsChanged',_onAccountsChanged); _activeProvider=prov; }
   if (_refreshTimer) clearInterval(_refreshTimer);
-  _refreshTimer = setInterval(() => {
-    if (walletAddr) { loadUserData(); loadProviderData(); }
-  }, 30000);
+  _refreshTimer = setInterval(()=>{ if(walletAddr){ loadUserData(); loadProviderData(); } }, 30000);
 }
 
 async function ensureChain(prov) {
   if (!info) return;
-  const chainHex = '0x' + info.chain_id.toString(16);
-  try {
-    await prov.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainHex }] });
-  } catch (e) {
-    if (e.code === 4902) {
-      await prov.request({
-        method: 'wallet_addEthereumChain',
-        params: [{
-          chainId: chainHex,
-          chainName: '0G Galileo Testnet',
-          nativeCurrency: { name: '0G', symbol: 'A0GI', decimals: 18 },
-          rpcUrls: [info.rpc_url],
-          blockExplorerUrls: ['https://chainscan-galileo.0g.ai']
-        }]
-      });
-    }
-  }
+  const hex = '0x'+info.chain_id.toString(16);
+  try { await prov.request({ method:'wallet_switchEthereumChain', params:[{chainId:hex}] }); }
+  catch(e) { if(e.code===4902) await prov.request({ method:'wallet_addEthereumChain', params:[{chainId:hex,chainName:'0G Galileo Testnet',nativeCurrency:{name:'0G',symbol:'0G',decimals:18},rpcUrls:[info.rpc_url],blockExplorerUrls:['https://chainscan-galileo.0g.ai']}] }); }
 }
 
-function showUserContent() {
-  document.getElementById('userNoWallet').style.display = 'none';
-  document.getElementById('userContent').style.display = '';
-}
-function showProviderContent() {
-  document.getElementById('providerNoWallet').style.display = 'none';
-  document.getElementById('providerContent').style.display = '';
-}
 async function logout() {
-  // Revoke MetaMask permissions so the next connect shows the account picker.
   if (_activeProvider) {
-    try {
-      await _activeProvider.request({
-        method: 'wallet_revokePermissions',
-        params: [{ eth_accounts: {} }],
-      });
-    } catch (_) {}
-    try { _activeProvider.removeListener('accountsChanged', _onAccountsChanged); } catch (_) {}
+    try { await _activeProvider.request({ method:'wallet_revokePermissions', params:[{eth_accounts:{}}] }); } catch(_){}
+    try { _activeProvider.removeListener('accountsChanged',_onAccountsChanged); } catch(_){}
     _activeProvider = null;
   }
-  walletAddr = null; signer = null; contract = null;
-  if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null; }
+  walletAddr=null; signer=null; contract=null;
+  if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer=null; }
   localStorage.removeItem('walletUUID');
-  document.querySelectorAll('.addr-chip').forEach(el => el.remove());
-  document.querySelectorAll('.logout-btn').forEach(el => el.remove());
-  document.getElementById('connectBtn').style.display = '';
-  document.getElementById('userNoWallet').style.display = '';
-  document.getElementById('userContent').style.display = 'none';
-  document.getElementById('providerNoWallet').style.display = '';
-  document.getElementById('providerContent').style.display = 'none';
+  document.querySelectorAll('.addr-chip,.logout-btn').forEach(el=>el.remove());
+  document.getElementById('connectBtn').style.display='';
+  ['userNoWallet','providerNoWallet'].forEach(id=>document.getElementById(id).style.display='');
+  ['userContent','providerContent'].forEach(id=>document.getElementById(id).style.display='none');
 }
 
 // ── User Data ─────────────────────────────────────────────────────────────────
@@ -628,525 +550,392 @@ async function loadUserData() {
     const [balance, pendingRefund] = await contract.getAccount(walletAddr);
     document.getElementById('userBalance').textContent = fmtNeuron(balance.toString());
     document.getElementById('userRefund').textContent  = fmtNeuron(pendingRefund.toString());
-
-    userAcked = await contract.isTEEAcknowledged(walletAddr, info.provider_address);
-    const ackEl = document.getElementById('userAck');
-    const ackBtn = document.getElementById('ackBtn');
-    if (userAcked) {
-      ackEl.innerHTML = '<span class="badge green">✓ Acknowledged</span>';
-      ackBtn.textContent = '✕ Revoke Acknowledgment';
-      ackBtn.className = 'btn btn-danger';
-    } else {
-      ackEl.innerHTML = '<span class="badge red">✗ Not Acknowledged</span>';
-      ackBtn.textContent = '✓ Acknowledge TEE Signer';
-      ackBtn.className = 'btn btn-ghost';
+    if (info?.min_balance) {
+      const bal=BigInt(balance.toString()), min=BigInt(info.min_balance);
+      document.getElementById('balanceWarnBanner').style.display = (bal>0n && bal<min) ? '' : 'none';
     }
-  } catch (e) { console.error(e); }
-
-  await loadSandboxes();
+  } catch(e) { console.error(e); }
+  await loadProviders();
 }
 
+// ── Providers + Sandboxes ─────────────────────────────────────────────────────
 let _pollTimer = null;
 
-async function loadSandboxes() {
-  const el = document.getElementById('sandboxTable');
-  el.innerHTML = '<div class="empty">Loading…</div>';
+async function loadProviders() {
+  if (!contract || !walletAddr) return;
+  const section = document.getElementById('providerSection');
   try {
-    const resp = await fetch(`/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`);
-    if (!resp.ok) { el.innerHTML = '<div class="empty">Failed to load sandboxes</div>'; return; }
-    const list = await resp.json();
-    if (!list || list.length === 0) {
-      el.innerHTML = '<div class="empty">No sandboxes yet. Create one to get started.</div>';
-      _stopPoll();
+    const [providers, sbxList] = await Promise.all([
+      fetch('/api/providers').then(r=>r.json()).catch(()=>[]),
+      fetch(`/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`).then(r=>r.ok?r.json():[]).catch(()=>[]),
+    ]);
+    if (!providers?.length) {
+      section.innerHTML = '<div class="empty" style="padding:40px 0">No providers registered yet.</div>';
       return;
     }
-    el.innerHTML = `<table>
-      <thead><tr><th>ID</th><th>State</th><th>Actions</th></tr></thead>
-      <tbody>${list.map(s => `
-        <tr>
-          <td><span class="mono">${s.id}</span></td>
-          <td>${stateTag(s.state)}</td>
-          <td>
-            ${(s.state||'').toLowerCase() === 'started' ? `<button class="btn btn-sm btn-ghost" onclick="doSSH('${s.id}')">SSH</button>` : ''}
-            ${['started','starting'].includes((s.state||'').toLowerCase()) ? `<button class="btn btn-sm btn-danger" onclick="doStop('${s.id}')">Stop</button>` : ''}
-            ${['archived','stopped'].includes((s.state||'').toLowerCase()) ? `<button class="btn btn-sm btn-prim" onclick="doStart('${s.id}')">Start</button>` : ''}
-            ${(s.state||'').toLowerCase() === 'error' ? `<button class="btn btn-sm btn-ghost" title="Container lost — delete and recreate" onclick="doDelete('${s.id}')">Delete</button>` : ''}
-          </td>
-        </tr>`).join('')}
-      </tbody></table>`;
-    // Auto-poll while any sandbox is in a transient state.
-    const transient = list.some(s => ['starting','archiving','stopping'].includes((s.state||'').toLowerCase()));
-    if (transient) { _startPoll(); } else { _stopPoll(); }
-  } catch (e) { el.innerHTML = `<div class="empty">Error: ${e.message}</div>`; }
+    const sandboxes = sbxList || [];
+    const ackedArr = await Promise.all(
+      providers.map(p => contract.isTEEAcknowledged(walletAddr, p.address).catch(()=>false))
+    );
+
+    section.innerHTML = '';
+    providers.forEach((p, i) => {
+      const isAcked = ackedArr[i];
+      const isThis  = info && p.address.toLowerCase() === info.provider_address.toLowerCase();
+      const mySbx   = isThis ? sandboxes : [];
+
+      const card = document.createElement('div');
+      card.className = 'card' + (isAcked ? ' pv-subscribed' : '');
+      card.id = 'pv-' + p.address.toLowerCase();
+      card.innerHTML = `
+        <div class="card-head">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span class="card-title" title="${p.address}">${shortAddr(p.address)}</span>
+            <span class="badge purple">v${p.signer_version}</span>
+            ${isThis ? '<span class="badge green">This server</span>' : ''}
+            ${isAcked ? '<span class="badge green">✓ Subscribed</span>' : ''}
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+            <button class="btn btn-sm btn-ghost" onclick="loadProviders()">↻</button>
+            ${isAcked
+              ? `<button class="btn btn-sm btn-danger" onclick="doUnsubscribe('${p.address}',this)">Unsubscribe</button>`
+              : `<button class="btn btn-sm btn-prim" onclick="doSubscribe('${p.address}',this)">Subscribe</button>`
+            }
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="pv-pricing-row">
+            <div class="pv-price-box">
+              <div class="pv-price-val">${fmtNeuron(p.compute_price_per_min)}</div>
+              <div class="pv-price-label">per minute</div>
+            </div>
+            <div class="pv-price-box">
+              <div class="pv-price-val">${fmtNeuron(p.create_fee)}</div>
+              <div class="pv-price-label">per sandbox</div>
+            </div>
+            <div class="pv-price-box">
+              <div style="font-size:11px;color:var(--muted);margin-bottom:4px">TEE signer</div>
+              <div style="font-family:var(--mono);font-size:12px" title="${p.tee_signer}">${shortAddr(p.tee_signer)}</div>
+            </div>
+          </div>
+          <div class="pv-sandbox-section">
+            <div class="pv-sandbox-header">
+              <span style="font-size:12.5px;font-weight:600">Sandboxes</span>
+              ${isAcked && isThis ? `<button class="btn btn-sm btn-prim" onclick="openModal('createModal')">+ Create</button>` : ''}
+            </div>
+            <div class="pv-sandbox-list">
+              ${isThis ? renderSandboxRows(mySbx) : '<div class="pv-sandbox-other">Sandboxes on this provider are managed by its own server.</div>'}
+            </div>
+          </div>
+        </div>`;
+      section.appendChild(card);
+    });
+
+    const transient = sandboxes.some(s=>['starting','archiving','stopping'].includes((s.state||'').toLowerCase()));
+    transient ? _startPoll() : _stopPoll();
+  } catch(e) {
+    section.innerHTML = `<div class="empty">Failed to load: ${e.message}</div>`;
+  }
+}
+
+function renderSandboxRows(sandboxes) {
+  if (!sandboxes?.length) return '<div class="pv-sandbox-empty"><div style="font-size:22px;margin-bottom:6px">📭</div>No sandboxes yet. Create one to get started.</div>';
+  return sandboxes.map(s => `
+    <div class="pv-sandbox-row">
+      <span class="pv-sandbox-id">${s.id?.slice(0,14)||'—'}…</span>
+      ${stateTag(s.state)}
+      <div class="pv-sandbox-actions">
+        ${(s.state||'').toLowerCase()==='started' ? `<button class="btn btn-sm btn-ghost" onclick="doSSH('${s.id}')">SSH</button>` : ''}
+        ${['started','starting'].includes((s.state||'').toLowerCase()) ? `<button class="btn btn-sm btn-danger" onclick="doStop('${s.id}')">Stop</button>` : ''}
+        ${['archived','stopped'].includes((s.state||'').toLowerCase()) ? `<button class="btn btn-sm btn-prim" onclick="doStart('${s.id}')">Start</button>` : ''}
+        ${(s.state||'').toLowerCase()==='error' ? `<button class="btn btn-sm btn-ghost" onclick="doDelete('${s.id}')">Delete</button>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+async function doSubscribe(addr, btn) {
+  btn.disabled = true;
+  await sendTx('Subscribe', () => contract.acknowledgeTEESigner(addr, true), {
+    onSuccess: () => loadProviders(),
+    onError:   () => { btn.disabled=false; },
+  });
+}
+
+async function doUnsubscribe(addr, btn) {
+  btn.disabled = true;
+  await sendTx('Unsubscribe', () => contract.acknowledgeTEESigner(addr, false), {
+    onSuccess: () => loadProviders(),
+    onError:   () => { btn.disabled=false; },
+  });
 }
 
 function _startPoll() {
   if (_pollTimer) return;
   _pollTimer = setInterval(async () => {
-    const resp = await fetch(`/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`).catch(() => null);
-    if (!resp || !resp.ok) return;
-    const list = await resp.json().catch(() => []);
-    const stillTransient = list.some(s => ['starting','archiving','stopping'].includes((s.state||'').toLowerCase()));
-    if (!stillTransient) {
-      _stopPoll();
-      await loadSandboxes();
+    const r = await fetch(`/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`).catch(()=>null);
+    if (!r?.ok) return;
+    const list = await r.json().catch(()=>[]);
+    if (!list.some(s=>['starting','archiving','stopping'].includes((s.state||'').toLowerCase()))) {
+      _stopPoll(); await loadProviders();
     }
   }, 5000);
 }
-
-function _stopPoll() {
-  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
-}
+function _stopPoll() { if (_pollTimer) { clearInterval(_pollTimer); _pollTimer=null; } }
 
 // ── User Actions ──────────────────────────────────────────────────────────────
 async function doDeposit() {
   const amt = document.getElementById('depositAmt').value;
-  if (!amt || parseFloat(amt) <= 0) { setErr('depositErr', 'Enter a valid amount'); return; }
-  setErr('depositErr', '');
-  setBusy('depositBtn', true);
-  try {
-    const tx = await contract.deposit(walletAddr, { value: ethers.parseEther(amt) });
-    await tx.wait();
-    toast(`Deposited ${amt} A0GI`, 'success');
-    closeModal('depositModal');
-    await loadUserData();
-  } catch (e) { setErr('depositErr', e.reason || e.message); }
-  setBusy('depositBtn', false);
-}
-
-async function toggleAck() {
-  try {
-    const tx = await contract.acknowledgeTEESigner(info.provider_address, !userAcked);
-    await tx.wait();
-    toast(userAcked ? 'Acknowledgment revoked' : 'TEE Signer acknowledged', 'success');
-    await loadUserData();
-  } catch (e) { toast(e.reason || e.message, 'error'); }
+  if (!amt || parseFloat(amt)<=0) { setErr('depositErr','Enter a valid amount'); return; }
+  setErr('depositErr',''); setBusy('depositBtn',true);
+  await sendTx(`Deposit ${amt} 0G`, ()=>contract.deposit(walletAddr,{value:ethers.parseEther(amt)}), {
+    onSuccess: ()=>loadUserData(), errEl:'depositErr',
+  });
+  setBusy('depositBtn',false);
 }
 
 async function doRefund() {
   const amt = document.getElementById('refundAmt').value;
-  if (!amt || parseFloat(amt) <= 0) { setErr('refundErr', 'Enter a valid amount'); return; }
-  setErr('refundErr', '');
-  try {
-    const neuron = ethers.parseEther(amt);
-    const tx = await contract.requestRefund(neuron);
-    await tx.wait();
-    toast('Refund requested (2hr lock)', 'success');
-    closeModal('refundModal');
-    await loadUserData();
-  } catch (e) { setErr('refundErr', e.reason || e.message); }
+  if (!amt || parseFloat(amt)<=0) { setErr('refundErr','Enter a valid amount'); return; }
+  setErr('refundErr','');
+  await sendTx('Refund request', ()=>contract.requestRefund(ethers.parseEther(amt)), {
+    onSuccess: ()=>loadUserData(), errEl:'refundErr',
+  });
 }
 
 async function fetchSandboxIds() {
-  try {
-    const r = await fetch(`/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`);
-    if (!r.ok) return new Set();
-    const list = await r.json();
-    return new Set((list || []).map(s => s.id));
-  } catch (_) { return new Set(); }
+  try { const r=await fetch(`/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`); if(!r.ok) return new Set(); return new Set((await r.json()||[]).map(s=>s.id)); }
+  catch(_) { return new Set(); }
 }
 
 async function doCreate() {
-  const name = document.getElementById('sandboxName').value.trim();
-  setErr('createErr', ''); setLoading('createErr', '');
-  const btn = document.getElementById('createBtn');
-  btn.disabled = true;
-  btn.textContent = 'Creating… (may take ~60s)';
-  // Snapshot existing IDs so we can detect a newly created sandbox even if
-  // the server returns an error after successfully writing to Daytona's DB.
-  const prevIds = await fetchSandboxIds();
+  const name=document.getElementById('sandboxName').value.trim();
+  setErr('createErr',''); setLoading('createErr','');
+  const btn=document.getElementById('createBtn'); btn.disabled=true; btn.textContent='Creating… (may take ~60s)';
+  const prevIds=await fetchSandboxIds();
   try {
-    const body = name ? { name } : {};
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 180000);
-    const resp = await signedFetch('POST', '/api/sandbox', body, ctrl.signal);
-    clearTimeout(timer);
-    let data = {};
-    try { data = await resp.json(); } catch (_) {}
+    const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),180000);
+    const resp=await signedFetch('POST','/api/sandbox',name?{name}:{},ctrl.signal); clearTimeout(timer);
+    let data={}; try{ data=await resp.json(); }catch(_){}
     if (!resp.ok) {
-      if (resp.status === 402) {
-        setErr('createErr', `Insufficient balance (have ${fmtNeuron(data.balance)}, need ${fmtNeuron(data.required)}). Deposit first.`);
-        return;
-      }
-      // Non-402 error: Daytona may have created the sandbox before the
-      // connection dropped. Check after 3s — if a new sandbox appears, treat
-      // it as success; otherwise show the error.
-      setLoading('createErr', 'Checking if sandbox was created…');
-      await new Promise(r => setTimeout(r, 3000));
-      const newIds = await fetchSandboxIds();
-      const created = [...newIds].find(id => !prevIds.has(id));
-      if (created) {
-        // Sandbox was created but billing hook didn't fire — ensure session.
-        try { await signedFetch('POST', `/api/sandbox/${created}/ensure-billing`); } catch (_) {}
-        toast('Sandbox created!', 'success');
-        closeModal('createModal');
-        document.getElementById('sandboxName').value = '';
-        await loadSandboxes();
-        return;
-      }
-      setErr('createErr', data.error || `HTTP ${resp.status} — please try again.`);
-      return;
+      if (resp.status===402) { setErr('createErr',`Insufficient balance (have ${fmtNeuron(data.balance)}, need ${fmtNeuron(data.required)}). Deposit first.`); return; }
+      setLoading('createErr','Checking if sandbox was created…');
+      await new Promise(r=>setTimeout(r,3000));
+      const created=[...(await fetchSandboxIds())].find(id=>!prevIds.has(id));
+      if (created) { try{await signedFetch('POST',`/api/sandbox/${created}/ensure-billing`);}catch(_){} toast('Sandbox created!','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await loadProviders(); return; }
+      setErr('createErr',data.error||`HTTP ${resp.status} — please try again.`); return;
     }
-    toast('Sandbox created!', 'success');
-    closeModal('createModal');
-    document.getElementById('sandboxName').value = '';
-    await loadSandboxes();
-  } catch (e) {
-    if (e.name === 'AbortError') {
-      // Timeout — still check in case it was created.
-      setLoading('createErr', 'Checking if sandbox was created…');
-      await new Promise(r => setTimeout(r, 3000));
-      const newIds = await fetchSandboxIds();
-      const created = [...newIds].find(id => !prevIds.has(id));
-      if (created) {
-        // Sandbox was created but billing hook didn't fire — ensure session.
-        try { await signedFetch('POST', `/api/sandbox/${created}/ensure-billing`); } catch (_) {}
-        toast('Sandbox created!', 'success');
-        closeModal('createModal');
-        document.getElementById('sandboxName').value = '';
-        await loadSandboxes();
-        return;
-      }
-      setErr('createErr', 'Request timed out and no sandbox found — please try again.');
-    } else {
-      setErr('createErr', e.message);
-    }
+    toast('Sandbox created!','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await loadProviders();
+  } catch(e) {
+    if (e.name==='AbortError') {
+      setLoading('createErr','Checking if sandbox was created…'); await new Promise(r=>setTimeout(r,3000));
+      const created=[...(await fetchSandboxIds())].find(id=>!prevIds.has(id));
+      if (created) { try{await signedFetch('POST',`/api/sandbox/${created}/ensure-billing`);}catch(_){} toast('Sandbox created!','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await loadProviders(); return; }
+      setErr('createErr','Request timed out — please try again.');
+    } else { setErr('createErr',e.message); }
   }
-  btn.disabled = false;
-  btn.textContent = 'Create & Start';
+  btn.disabled=false; btn.textContent='Create & Start';
 }
 
 async function doStop(id) {
   if (!confirm(`Stop sandbox ${id}?`)) return;
-  try {
-    const resp = await signedFetch('POST', `/api/sandbox/${id}/stop`);
-    if (!resp.ok) { const d = await resp.json(); toast(d.error || 'Failed', 'error'); return; }
-    toast('Sandbox stopped', 'success');
-    await loadSandboxes();
-  } catch (e) { toast(e.message, 'error'); }
+  const r=await signedFetch('POST',`/api/sandbox/${id}/stop`).catch(e=>{toast(e.message,'error');return null});
+  if (!r) return;
+  if (!r.ok) { const d=await r.json().catch(()=>{}); toast(d?.error||'Failed','error'); return; }
+  toast('Sandbox stopped','success'); await loadProviders();
 }
 
 async function doStart(id) {
-  try {
-    const resp = await signedFetch('POST', `/api/sandbox/${id}/start`);
-    if (!resp.ok) { let d = {}; try { d = await resp.json(); } catch(_) {} toast(d.error || 'Failed to start', 'error'); return; }
-    toast('Sandbox starting…', 'success');
-    await loadSandboxes();
-  } catch (e) { toast(e.message, 'error'); }
+  const r=await signedFetch('POST',`/api/sandbox/${id}/start`).catch(e=>{toast(e.message,'error');return null});
+  if (!r) return;
+  if (!r.ok) { let d={}; try{d=await r.json();}catch(_){} toast(d.error||'Failed to start','error'); return; }
+  toast('Sandbox starting…','success'); await loadProviders();
 }
 
 async function doDelete(id) {
   if (!confirm(`Delete sandbox ${id}? This cannot be undone.`)) return;
-  try {
-    const resp = await signedFetch('DELETE', `/api/sandbox/${id}`);
-    if (!resp.ok) { let d = {}; try { d = await resp.json(); } catch(_) {} toast(d.error || 'Failed to delete', 'error'); return; }
-    toast('Sandbox deleted', 'success');
-    await loadSandboxes();
-  } catch (e) { toast(e.message, 'error'); }
+  const r=await signedFetch('DELETE',`/api/sandbox/${id}`).catch(e=>{toast(e.message,'error');return null});
+  if (!r) return;
+  if (!r.ok) { let d={}; try{d=await r.json();}catch(_){} toast(d.error||'Failed to delete','error'); return; }
+  toast('Sandbox deleted','success'); await loadProviders();
 }
 
 async function doSSH(id) {
-  document.getElementById('sshCommand').textContent = 'Loading…';
-  openModal('sshModal');
+  document.getElementById('sshCommand').textContent='Loading…'; openModal('sshModal');
   try {
-    const resp = await signedFetch('POST', `/api/sandbox/${id}/ssh-access`);
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) { document.getElementById('sshCommand').textContent = data.error || 'Failed'; return; }
-    // Replace localhost with the actual gateway host
-    const cmd = (data.sshCommand || '').replace('@localhost', '@' + window.location.hostname);
-    document.getElementById('sshCommand').textContent = cmd;
-  } catch (e) { document.getElementById('sshCommand').textContent = e.message; }
+    const resp=await signedFetch('POST',`/api/sandbox/${id}/ssh-access`);
+    const data=await resp.json().catch(()=>({}));
+    if (!resp.ok) { document.getElementById('sshCommand').textContent=data.error||'Failed'; return; }
+    document.getElementById('sshCommand').textContent=(data.sshCommand||'').replace('@localhost','@'+window.location.hostname);
+  } catch(e) { document.getElementById('sshCommand').textContent=e.message; }
 }
 
 function copySSH() {
-  const cmd = document.getElementById('sshCommand').textContent;
-  navigator.clipboard.writeText(cmd).then(() => toast('Copied!', 'success')).catch(() => toast('Copy failed', 'error'));
+  navigator.clipboard.writeText(document.getElementById('sshCommand').textContent)
+    .then(()=>toast('Copied!','success')).catch(()=>toast('Copy failed','error'));
 }
 
 async function loadAllSandboxes() {
-  const el = document.getElementById('allSandboxTable');
-  if (!walletAddr) { el.innerHTML = '<div class="empty">Connect wallet first.</div>'; return; }
-  el.innerHTML = '<div class="empty">Loading…</div>';
+  const el=document.getElementById('allSandboxTable');
+  if (!walletAddr) { el.innerHTML='<div class="empty">Connect wallet first.</div>'; return; }
+  el.innerHTML='<div class="empty">Loading…</div>';
   try {
-    const resp = await signedFetch('GET', '/api/sessions');
-    const data = await resp.json().catch(() => []);
-    if (!resp.ok) { el.innerHTML = `<div class="empty">${data.error || 'Failed to load'}</div>`; return; }
-    if (!data || data.length === 0) { el.innerHTML = '<div class="empty">No sandboxes found.</div>'; return; }
-    el.innerHTML = `<table>
-      <thead><tr><th>Sandbox ID</th><th>Owner</th><th>State</th><th>Accrued</th><th></th></tr></thead>
-      <tbody>${data.map(s => `
-        <tr>
-          <td><span class="mono">${s.sandbox_id}</span></td>
-          <td><span class="mono" title="${s.owner||''}">${s.owner ? s.owner.slice(0,10)+'…' : '—'}</span></td>
-          <td><span class="badge ${stateBadge(s.state)}">${s.state||'—'}</span></td>
-          <td>${s.accrued_neuron ? fmtNeuron(s.accrued_neuron) : '—'}</td>
-          <td><button class="btn btn-sm btn-ghost" style="color:var(--red)" onclick="doForceDelete('${s.sandbox_id}')">Delete</button></td>
-        </tr>`).join('')}
-      </tbody></table>`;
-  } catch (e) { el.innerHTML = `<div class="empty">Error: ${e.message}</div>`; }
+    const resp=await signedFetch('GET','/api/sessions'); const data=await resp.json().catch(()=>[]);
+    if (!resp.ok) { el.innerHTML=`<div class="empty">${data.error||'Failed to load'}</div>`; return; }
+    if (!data?.length) { el.innerHTML='<div class="empty"><div class="empty-icon">📭</div>No sandboxes found.</div>'; return; }
+    el.innerHTML=`<table><thead><tr><th>Sandbox ID</th><th>Owner</th><th>State</th><th>Accrued</th><th></th></tr></thead><tbody>${
+      data.map(s=>`<tr><td><span class="mono">${s.sandbox_id}</span></td><td><span class="mono" title="${s.owner||''}">${s.owner?s.owner.slice(0,10)+'…':'—'}</span></td><td><span class="badge ${stateBadge(s.state)}">${s.state||'—'}</span></td><td>${s.accrued_neuron?fmtNeuron(s.accrued_neuron):'—'}</td><td><button class="btn btn-sm btn-ghost" style="color:var(--red)" onclick="doForceDelete('${s.sandbox_id}')">Delete</button></td></tr>`).join('')
+    }</tbody></table>`;
+  } catch(e) { el.innerHTML=`<div class="empty">Error: ${e.message}</div>`; }
 }
 
 async function doForceDelete(id) {
   if (!confirm(`Delete sandbox ${id}?\nThis cannot be undone.`)) return;
-  try {
-    const resp = await signedFetch('DELETE', `/api/sandbox/${id}/force`);
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) { toast(data.error || 'Delete failed', 'error'); return; }
-    toast(`Sandbox ${id.slice(0,8)}… deleted`, 'success');
-    loadAllSandboxes();
-  } catch (e) { toast(e.message, 'error'); }
+  const resp=await signedFetch('DELETE',`/api/sandbox/${id}/force`); const data=await resp.json().catch(()=>({}));
+  if (!resp.ok) { toast(data.error||'Delete failed','error'); return; }
+  toast(`Sandbox ${id.slice(0,8)}… deleted`,'success'); loadAllSandboxes();
 }
 
 async function loadEvents() {
-  const el = document.getElementById('eventsTable');
-  const meta = document.getElementById('evtMeta');
-  if (!walletAddr) { el.innerHTML = '<div class="empty">Connect wallet first.</div>'; return; }
-  el.innerHTML = '<div class="empty">Loading…</div>';
-  meta.textContent = '';
-  // blockLookback: 0G Galileo ~2s/block
-  const blockLookback = parseInt(document.getElementById('evtRange').value);
-  const qs = `?lookback=${blockLookback}`;
+  const el=document.getElementById('eventsTable'),meta=document.getElementById('evtMeta');
+  if (!walletAddr) { el.innerHTML='<div class="empty">Connect wallet first.</div>'; return; }
+  el.innerHTML='<div class="empty">Loading…</div>'; meta.textContent='';
   try {
-    const resp = await signedFetch('GET', '/api/events' + qs);
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) { el.innerHTML = `<div class="empty">${data.error || 'Failed'}</div>`; return; }
-    const evts = data.events || [];
-    meta.textContent = `block ${data.from_block} → ${data.current_block}`;
-    if (evts.length === 0) { el.innerHTML = '<div class="empty">No events found in range.</div>'; return; }
-    const explorer = 'https://chainscan-galileo.0g.ai/tx/';
-    // Group by user, newest-first within each group
-    const byUser = {};
-    [...evts].reverse().forEach(e => { (byUser[e.user] = byUser[e.user] || []).push(e); });
-    const sections = Object.entries(byUser).map(([user, ues]) => `
-      <tr style="background:var(--pbg)">
-        <td colspan="6" style="padding:6px 12px;font-size:12px;font-weight:600;color:var(--p)">
-          User: <span class="mono" title="${user}">${user}</span>
-          <span style="font-weight:400;color:var(--muted);margin-left:8px">${ues.length} voucher(s)</span>
-        </td>
-      </tr>
-      ${ues.map(e => `
-        <tr>
-          <td style="font-size:12px;white-space:nowrap">${fmtTime(e.timestamp)}</td>
-          <td>${fmtNeuron(e.total_fee)}</td>
-          <td>nonce ${e.nonce}</td>
-          <td><span class="badge ${e.status==='SUCCESS'?'green':e.status==='INSUFFICIENT_BALANCE'?'orange':'red'}">${e.status}</span></td>
-          <td><a href="${explorer}${e.tx_hash}" target="_blank" style="font-size:11px;color:var(--p)">↗ tx</a></td>
-        </tr>`).join('')}`).join('');
-    el.innerHTML = `<table>
-      <thead><tr><th>Time</th><th>Fee</th><th>Nonce</th><th>Status</th><th>Tx</th></tr></thead>
-      <tbody>${sections}</tbody></table>`;
-  } catch (e) { el.innerHTML = `<div class="empty">Error: ${e.message}</div>`; }
+    const resp=await signedFetch('GET','/api/events?lookback='+parseInt(document.getElementById('evtRange').value));
+    const data=await resp.json().catch(()=>({}));
+    if (!resp.ok) { el.innerHTML=`<div class="empty">${data.error||'Failed'}</div>`; return; }
+    const evts=data.events||[]; meta.textContent=`block ${data.from_block} → ${data.current_block}`;
+    if (!evts.length) { el.innerHTML='<div class="empty"><div class="empty-icon">📋</div>No events in this range.</div>'; return; }
+    const exp='https://chainscan-galileo.0g.ai/tx/', byUser={};
+    [...evts].reverse().forEach(e=>{ (byUser[e.user]=byUser[e.user]||[]).push(e); });
+    el.innerHTML=`<table><thead><tr><th>Time</th><th>Fee</th><th>Nonce</th><th>Status</th><th>Tx</th></tr></thead><tbody>${
+      Object.entries(byUser).map(([user,ues])=>`
+        <tr style="background:var(--pbg)"><td colspan="5" style="padding:6px 12px;font-size:12px;font-weight:600;color:var(--p)">User: <span class="mono" title="${user}">${user}</span> <span style="font-weight:400;color:var(--muted)">${ues.length} voucher(s)</span></td></tr>
+        ${ues.map(e=>`<tr><td style="font-size:12px;white-space:nowrap">${fmtTime(e.timestamp)}</td><td>${fmtNeuron(e.total_fee)}</td><td>nonce ${e.nonce}</td><td><span class="badge ${e.status==='SUCCESS'?'green':e.status==='INSUFFICIENT_BALANCE'?'orange':'red'}">${e.status}</span></td><td><a href="${exp}${e.tx_hash}" target="_blank" style="font-size:11px;color:var(--p)">↗ tx</a></td></tr>`).join('')}`).join('')
+    }</tbody></table>`;
+  } catch(e) { el.innerHTML=`<div class="empty">Error: ${e.message}</div>`; }
 }
 
-// ── Provider Data ─────────────────────────────────────────────────────────────
+// ── Provider Data (Provider tab) ──────────────────────────────────────────────
 async function loadProviderData() {
   if (!contract || !walletAddr) return;
   try {
-    const exists = await contract.serviceExists(walletAddr);
-    document.getElementById('svcRegistered').innerHTML =
-      exists ? '<span class="badge green">✓ Registered</span>'
-             : '<span class="badge red">✗ Not Registered</span>';
-
+    const exists=await contract.serviceExists(walletAddr);
+    document.getElementById('svcRegistered').innerHTML=exists?'<span class="badge green">✓ Registered</span>':'<span class="badge red">✗ Not Registered</span>';
     if (exists) {
-      const svc = await contract.services(walletAddr);
-      document.getElementById('svcUrl').textContent   = svc.url || '—';
-      document.getElementById('svcTEE').textContent   = shortAddr(svc.teeSignerAddress);
-      document.getElementById('svcTEE').title         = svc.teeSignerAddress;
-      document.getElementById('svcPrice').textContent = fmtNeuron(svc.computePricePerMin.toString()) + '/min';
-      document.getElementById('svcFee').textContent   = fmtNeuron(svc.createFee.toString());
+      const svc=await contract.services(walletAddr);
+      document.getElementById('svcUrl').textContent=svc.url||'—';
+      document.getElementById('svcTEE').textContent=shortAddr(svc.teeSignerAddress); document.getElementById('svcTEE').title=svc.teeSignerAddress;
+      document.getElementById('svcPrice').textContent=fmtNeuron(svc.computePricePerMin.toString())+'/min';
+      document.getElementById('svcFee').textContent=fmtNeuron(svc.createFee.toString());
     }
-
-    const stake = await contract.providerStake();
-    document.getElementById('svcStake').textContent   = fmtNeuron(stake.toString());
-
-    const earnings = await contract.providerEarnings(walletAddr);
-    document.getElementById('providerEarnings').textContent = fmtNeuron(earnings.toString());
-
-    const staked = await contract.providerStakes(walletAddr);
-    document.getElementById('providerStaked').textContent   = fmtNeuron(staked.toString());
-  } catch (e) { console.error(e); }
+    const stake=await contract.providerStake(); document.getElementById('svcStake').textContent=fmtNeuron(stake.toString());
+    const earn=await contract.providerEarnings(walletAddr); document.getElementById('providerEarnings').textContent=fmtNeuron(earn.toString());
+    const staked=await contract.providerStakes(walletAddr); document.getElementById('providerStaked').textContent=fmtNeuron(staked.toString());
+  } catch(e) { console.error(e); }
 }
 
-// ── Provider Actions ──────────────────────────────────────────────────────────
 async function doRegisterService() {
-  const url   = document.getElementById('svcUrlInput').value.trim();
-  const tee   = document.getElementById('svcTEEInput').value.trim();
-  const price = document.getElementById('svcPriceInput').value;
-  const fee   = document.getElementById('svcFeeInput').value;
-  const stake = document.getElementById('svcStakeInput').value;
-  if (!url || !tee) { setErr('serviceErr', 'URL and TEE address are required'); return; }
-  setErr('serviceErr', '');
-  try {
-    const value = stake && parseFloat(stake) > 0 ? ethers.parseEther(stake) : 0n;
-    const tx = await contract.addOrUpdateService(url, tee, BigInt(price), BigInt(fee), { value });
-    await tx.wait();
-    toast('Service registered!', 'success');
-    closeModal('serviceModal');
-    await loadProviderData();
-  } catch (e) { setErr('serviceErr', e.reason || e.message); }
+  const url=document.getElementById('svcUrlInput').value.trim(), tee=document.getElementById('svcTEEInput').value.trim(),
+        price=document.getElementById('svcPriceInput').value, fee=document.getElementById('svcFeeInput').value,
+        stake=document.getElementById('svcStakeInput').value;
+  if (!url||!tee) { setErr('serviceErr','URL and TEE address are required'); return; }
+  setErr('serviceErr','');
+  const value=stake&&parseFloat(stake)>0?ethers.parseEther(stake):0n;
+  await sendTx('Service update',()=>contract.addOrUpdateService(url,tee,BigInt(price),BigInt(fee),{value}),{
+    onSuccess:async()=>{ closeModal('serviceModal'); await loadProviderData(); }, errEl:'serviceErr',
+  });
 }
 
 async function withdrawEarnings() {
-  try {
-    const tx = await contract.withdrawEarnings();
-    await tx.wait();
-    toast('Earnings withdrawn!', 'success');
-    await loadProviderData();
-  } catch (e) { toast(e.reason || e.message, 'error'); }
+  await sendTx('Withdraw earnings',()=>contract.withdrawEarnings(),{ onSuccess:()=>loadProviderData() });
 }
 
 async function doArchiveAll() {
-  setErr('archiveAllErr', '');
-  if (!confirm('Archive all running sandboxes?\n\nThis will stop all active sessions. Users will need to click Start to resume their sandboxes.\n\nOnly do this before a server redeploy.')) return;
-  const btn = document.getElementById('archiveAllBtn');
-  btn.disabled = true;
-  btn.textContent = 'Archiving…';
+  setErr('archiveAllErr','');
+  if (!confirm('Archive all running sandboxes?\n\nThis stops all active sessions. Only do this before a server redeploy.')) return;
+  const btn=document.getElementById('archiveAllBtn'); btn.disabled=true; btn.textContent='Archiving…';
   try {
-    const resp = await signedFetch('POST', '/api/archive-all');
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      setErr('archiveAllErr', data.error || `HTTP ${resp.status}`);
-      return;
-    }
-    const n = (data.archived || []).length;
-    const f = (data.failed || []).length;
-    if (f > 0) {
-      toast(`Archived ${n}, failed ${f} — check logs`, 'error');
-    } else {
-      toast(`Archived ${n} sandbox(es). Safe to redeploy.`, 'success');
-    }
-  } catch (e) {
-    setErr('archiveAllErr', e.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Archive All (Pre-deploy)';
-  }
+    const resp=await signedFetch('POST','/api/archive-all'); const data=await resp.json().catch(()=>({}));
+    if (!resp.ok) { setErr('archiveAllErr',data.error||`HTTP ${resp.status}`); return; }
+    const n=(data.archived||[]).length,f=(data.failed||[]).length;
+    toast(f>0?`Archived ${n}, failed ${f} — check logs`:`Archived ${n} sandbox(es). Safe to redeploy.`,f>0?'error':'success');
+  } catch(e) { setErr('archiveAllErr',e.message); }
+  finally { btn.disabled=false; btn.textContent='Archive All (Pre-deploy)'; }
 }
 
 // ── Auth-signed fetch ─────────────────────────────────────────────────────────
 function genUUID() {
-  // crypto.randomUUID() requires HTTPS; fall back to getRandomValues (works on HTTP too)
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-    const r = crypto.getRandomValues(new Uint8Array(1))[0] & 15;
-    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-  });
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{ const r=crypto.getRandomValues(new Uint8Array(1))[0]&15; return(c==='x'?r:(r&0x3|0x8)).toString(16); });
+}
+async function signedFetch(method,path,body=null,signal=null) {
+  const msg={action:method+':'+path,expires_at:Math.floor(Date.now()/1000)+300,nonce:genUUID(),payload:body||{},resource_id:''};
+  const msgStr=JSON.stringify(msg), sig=await signer.signMessage(msgStr);
+  return fetch(path,{method,headers:{'Content-Type':'application/json','X-Wallet-Address':walletAddr,'X-Signed-Message':btoa(msgStr),'X-Wallet-Signature':sig},body:body?JSON.stringify(body):undefined,signal});
 }
 
-async function signedFetch(method, path, body = null, signal = null) {
-  const msg = {
-    action:      method + ':' + path,
-    expires_at:  Math.floor(Date.now() / 1000) + 300,
-    nonce:       genUUID(),
-    payload:     body || {},
-    resource_id: '',
-  };
-  const msgStr = JSON.stringify(msg);
-  const sig = await signer.signMessage(msgStr);
-  return fetch(path, {
-    method,
-    headers: {
-      'Content-Type':     'application/json',
-      'X-Wallet-Address': walletAddr,
-      'X-Signed-Message': btoa(msgStr),
-      'X-Wallet-Signature': sig,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-    signal,
-  });
-}
-
-// ── Tabs ──────────────────────────────────────────────────────────────────────
+// ── Tabs / Modals ─────────────────────────────────────────────────────────────
 function switchTab(name) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  document.getElementById('tab' + name.charAt(0).toUpperCase() + name.slice(1)).classList.add('active');
-  document.getElementById('content' + name.charAt(0).toUpperCase() + name.slice(1)).classList.add('active');
-  if (name === 'user' && walletAddr) loadSandboxes();
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab'+name[0].toUpperCase()+name.slice(1)).classList.add('active');
+  document.getElementById('content'+name[0].toUpperCase()+name.slice(1)).classList.add('active');
+  if (name==='user'&&walletAddr) loadProviders();
 }
-
-// ── Modals ────────────────────────────────────────────────────────────────────
 function openModal(id)  { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
-document.querySelectorAll('.modal-bg').forEach(m => {
-  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('open'); });
-});
+document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) m.classList.remove('open'); }));
+
+// ── Tx helpers ────────────────────────────────────────────────────────────────
+function cleanErr(e) {
+  if (e.reason) return e.reason;
+  if (e.message) { const m=e.message,cut=m.indexOf('(action='); if(cut>0) return m.slice(0,cut).trim(); return m.length>140?m.slice(0,140)+'…':m; }
+  return String(e);
+}
+function pushToast(msg,type) {
+  const el=document.createElement('div'); el.className='toast'+(type&&type!=='info'?' '+type:''); el.textContent=msg;
+  document.getElementById('toast').appendChild(el); return el;
+}
+function updateToast(el,msg,type,hash,autoRemove) {
+  el.className='toast'+(type&&type!=='info'?' '+type:'');
+  if (hash) { el.innerHTML=''; const s=document.createElement('span'); s.textContent=msg; el.appendChild(s); const a=document.createElement('a'); a.href='https://chainscan-galileo.0g.ai/tx/'+hash; a.target='_blank'; a.rel='noopener'; a.textContent='↗ View tx'; el.appendChild(a); }
+  else { el.textContent=msg; }
+  if (autoRemove) setTimeout(()=>el.remove(),type==='error'?8000:6000);
+}
+async function sendTx(label,txFn,{onSuccess,onError,errEl}={}) {
+  const t=pushToast(label+'…','pending');
+  try {
+    const tx=await txFn(); updateToast(t,label+' submitted','pending',tx.hash);
+    const receipt=await tx.wait(); updateToast(t,label+' confirmed','success',tx.hash,true);
+    if(onSuccess) await onSuccess(receipt);
+  } catch(e) {
+    const msg=cleanErr(e); updateToast(t,label+' failed: '+msg,'error',null,true);
+    if(errEl){ const node=typeof errEl==='string'?document.getElementById(errEl):errEl; if(node) node.textContent=msg; }
+    if(onError) onError(e);
+  }
+}
+function toast(msg,type='info') { const el=pushToast(msg,type); setTimeout(()=>el.remove(),4000); }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function stateBadge(state) {
-  switch ((state||'').toLowerCase()) {
-    case 'started':   return 'green';
-    case 'starting':  return 'blue';
-    case 'stopped':   return '';
-    case 'stopping':  return '';
-    case 'archived':  return 'gray';
-    case 'archiving': return 'gray';
-    case 'error':     return 'red';
-    default:          return '';
-  }
+function stateBadge(s) {
+  switch((s||'').toLowerCase()){case'started':return'green';case'starting':return'blue';case'archived':case'archiving':return'gray';case'error':return'red';default:return'';}
 }
-// fmtNeuron: display neuron amounts in 0G (1 0G = 10^18 neuron).
-// ≥ 1e12 neuron (0.000001 0G): show as "x.xxxxxx 0G" (up to 6 sig decimals)
-// < 1e12 neuron: show as scientific notation "x.xxe-n 0G"
-// = 0: show "0 0G"
 function fmtNeuron(s) {
-  if (!s || s === '0') return '0 0G';
-  const n = BigInt(s);
-  if (n === 0n) return '0 0G';
-  const ONE = 1000000000000000000n; // 10^18
-  const val = Number(n) / 1e18;
-  if (val >= 0.000001) {
-    // strip trailing zeros, keep up to 6 decimal places
-    return val.toFixed(6).replace(/\.?0+$/, '') + ' 0G';
-  }
-  // very small: scientific notation
-  return val.toExponential(2) + ' 0G';
+  if(!s||s==='0') return '0 0G';
+  const n=BigInt(s); if(n===0n) return '0 0G';
+  const val=Number(n)/1e18;
+  return val>=0.000001 ? val.toFixed(6).replace(/\.?0+$/,'')+' 0G' : val.toExponential(2)+' 0G';
 }
-function fmtTime(ts) {
-  if (!ts) return '—';
-  return new Date(ts * 1000).toLocaleString();
-}
-
-function shortAddr(a) {
-  if (!a || a.length < 12) return a || '—';
-  return a.slice(0, 8) + '…' + a.slice(-6);
-}
-
+function fmtTime(ts) { return ts?new Date(ts*1000).toLocaleString():'—'; }
+function shortAddr(a) { if(!a||a.length<12) return a||'—'; return a.slice(0,8)+'…'+a.slice(-6); }
 function stateTag(state) {
-  const s = (state || '').toLowerCase();
-  const cls = s === 'started' ? 'running'
-    : s === 'stopped' || s === 'archived' ? 'stopped'
-    : s === 'error' ? 'error'
-    : 'starting';
-  return `<span class="tag ${cls}"><span class="tag-dot"></span>${state || '—'}</span>`;
+  const s=(state||'').toLowerCase();
+  const cls=s==='started'?'running':s==='archived'?'archived':s==='stopped'?'stopped':s==='error'?'error':'starting';
+  return `<span class="tag ${cls}"><span class="tag-dot"></span>${state||'—'}</span>`;
 }
-
-function setErr(id, msg) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.textContent = msg;
-  el.className = msg ? 'err' : '';
-}
-function setLoading(id, msg) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.textContent = msg;
-  el.className = msg ? 'loading' : '';
-}
-
-function setBusy(id, busy) {
-  const el = document.getElementById(id);
-  if (el) { el.disabled = busy; el.textContent = busy ? '…' : el.dataset.label || el.textContent; }
-}
-
-function toast(msg, type = 'info') {
-  const el = document.createElement('div');
-  el.className = 'toast' + (type !== 'info' ? ' ' + type : '');
-  el.textContent = msg;
-  document.getElementById('toast').appendChild(el);
-  setTimeout(() => el.remove(), 4000);
-}
+function setErr(id,msg){ const el=document.getElementById(id); if(!el) return; el.textContent=msg; el.className=msg?'err':''; }
+function setLoading(id,msg){ const el=document.getElementById(id); if(!el) return; el.textContent=msg; el.className=msg?'loading':''; }
+function setBusy(id,busy){ const el=document.getElementById(id); if(el){ el.disabled=busy; el.textContent=busy?'…':(el.dataset.label||el.textContent); } }
 </script>
-
 </body>
 </html>

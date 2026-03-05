@@ -82,6 +82,10 @@ func main() {
 		runStop(os.Args[2:])
 	case "delete":
 		runDelete(os.Args[2:])
+	case "exec":
+		runExec(os.Args[2:])
+	case "toolbox":
+		runToolbox(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
 		printUsage()
@@ -92,7 +96,7 @@ func main() {
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "usage: user <subcommand> [flags]")
 	fmt.Fprintln(os.Stderr, "  chain:  balance | deposit | acknowledge")
-	fmt.Fprintln(os.Stderr, "  api:    create | list | stop | delete")
+	fmt.Fprintln(os.Stderr, "  api:    create | list | stop | delete | exec | toolbox")
 }
 
 // ── Shared chain flags ───────────────────────────────────────────────────────
@@ -417,6 +421,112 @@ func runDelete(args []string) {
 		fatalf("delete sandbox: HTTP %d: %s", resp.StatusCode, respBody)
 	}
 	fmt.Printf("Deleted sandbox %s\n", *id)
+}
+
+// ── exec ─────────────────────────────────────────────────────────────────────
+
+// runExec runs a shell command inside a sandbox via the toolbox API and prints stdout/stderr.
+func runExec(args []string) {
+	fs := flag.NewFlagSet("exec", flag.ExitOnError)
+	apiURL  := fs.String("api",     "http://localhost:8080", "Billing proxy URL")
+	keyHex  := fs.String("key",     "",                     "User private key (hex); or set USER_KEY env")
+	id      := fs.String("id",      "",                     "Sandbox ID (required)")
+	command := fs.String("cmd",     "",                     "Shell command to run (required)")
+	timeout := fs.Int("timeout",    30,                     "Timeout in seconds")
+	_ = fs.Parse(args)
+
+	if *id == "" {
+		fatalf("--id is required")
+	}
+	if *command == "" {
+		fatalf("--cmd is required")
+	}
+
+	privKey := mustLoadKey(*keyHex)
+	msg, sig, walletAddr := signRequest(privKey, "toolbox", *id, json.RawMessage(`{}`))
+
+	body, _ := json.Marshal(map[string]any{"command": *command, "timeout": *timeout})
+	url := *apiURL + "/api/toolbox/" + *id + "/toolbox/process/execute"
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		fatalf("build request: %v", err)
+	}
+	req.Header.Set("X-Wallet-Address", walletAddr)
+	req.Header.Set("X-Signed-Message", msg)
+	req.Header.Set("X-Wallet-Signature", sig)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fatalf("exec: %v", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		fatalf("exec: HTTP %d: %s", resp.StatusCode, respBody)
+	}
+
+	var result struct {
+		ExitCode int    `json:"exitCode"`
+		Result   string `json:"result"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		fmt.Print(string(respBody))
+		return
+	}
+	fmt.Print(result.Result)
+	if result.ExitCode != 0 {
+		os.Exit(result.ExitCode)
+	}
+}
+
+// ── toolbox ──────────────────────────────────────────────────────────────────
+
+// runToolbox makes an arbitrary toolbox API call and prints the response.
+func runToolbox(args []string) {
+	fs := flag.NewFlagSet("toolbox", flag.ExitOnError)
+	apiURL  := fs.String("api",    "http://localhost:8080", "Billing proxy URL")
+	keyHex  := fs.String("key",    "",                     "User private key (hex); or set USER_KEY env")
+	id      := fs.String("id",     "",                     "Sandbox ID (required)")
+	action  := fs.String("action", "",                     "Toolbox action path, e.g. files, git/status (required)")
+	method  := fs.String("method", "GET",                  "HTTP method")
+	body    := fs.String("body",   "",                     "Request body (JSON)")
+	_ = fs.Parse(args)
+
+	if *id == "" {
+		fatalf("--id is required")
+	}
+	if *action == "" {
+		fatalf("--action is required")
+	}
+
+	privKey := mustLoadKey(*keyHex)
+	msg, sig, walletAddr := signRequest(privKey, "toolbox", *id, json.RawMessage(`{}`))
+
+	url := *apiURL + "/api/toolbox/" + *id + "/toolbox/" + strings.TrimPrefix(*action, "/")
+	req, err := http.NewRequest(strings.ToUpper(*method), url, strings.NewReader(*body))
+	if err != nil {
+		fatalf("build request: %v", err)
+	}
+	req.Header.Set("X-Wallet-Address", walletAddr)
+	req.Header.Set("X-Signed-Message", msg)
+	req.Header.Set("X-Wallet-Signature", sig)
+	if *body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fatalf("toolbox: %v", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		fatalf("toolbox: HTTP %d: %s", resp.StatusCode, respBody)
+	}
+	fmt.Println(prettyJSON(json.RawMessage(respBody)))
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

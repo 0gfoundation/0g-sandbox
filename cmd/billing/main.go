@@ -158,6 +158,45 @@ func main() {
 	r.GET("/static/ethers.js", func(c *gin.Context) {
 		c.Data(http.StatusOK, "application/javascript; charset=utf-8", web.EthersJS)
 	})
+	// Public providers list — returns known providers with their on-chain service data.
+	r.GET("/api/providers", func(c *gin.Context) {
+		type ProviderInfo struct {
+			Address            string `json:"address"`
+			URL                string `json:"url"`
+			TEESigner          string `json:"tee_signer"`
+			ComputePricePerMin string `json:"compute_price_per_min"`
+			ComputePricePerSec string `json:"compute_price_per_sec"`
+			CreateFee          string `json:"create_fee"`
+			SignerVersion      string `json:"signer_version"`
+		}
+		// For now: just the configured provider.  Extend via KNOWN_PROVIDERS in the future.
+		addrs := []string{cfg.Chain.ProviderAddress}
+		var providers []ProviderInfo
+		for _, addr := range addrs {
+			if addr == "" {
+				continue
+			}
+			svcInfo, err := onchain.GetServiceInfo(c.Request.Context(), common.HexToAddress(addr))
+			if err != nil || svcInfo == nil {
+				continue
+			}
+			perSec := new(big.Int).Div(svcInfo.ComputePricePerMin, big.NewInt(60))
+			providers = append(providers, ProviderInfo{
+				Address:            addr,
+				URL:                svcInfo.URL,
+				TEESigner:          svcInfo.TEESignerAddress.Hex(),
+				ComputePricePerMin: svcInfo.ComputePricePerMin.String(),
+				ComputePricePerSec: perSec.String(),
+				CreateFee:          svcInfo.CreateFee.String(),
+				SignerVersion:      svcInfo.SignerVersion.String(),
+			})
+		}
+		if providers == nil {
+			providers = []ProviderInfo{}
+		}
+		c.JSON(http.StatusOK, providers)
+	})
+
 	r.GET("/info", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"contract_address":    cfg.Chain.ContractAddress,
