@@ -75,7 +75,6 @@ func Load() (*Config, error) {
 		"billing.create_fee":           "CREATE_FEE",
 		"chain.rpc_url":                "RPC_URL",
 		"chain.contract_address":       "SETTLEMENT_CONTRACT",
-		"chain.tee_private_key":        "TEE_SIGNING_KEY",
 		"chain.provider_private_key":   "PROVIDER_PRIVATE_KEY",
 		"chain.provider_address":       "PROVIDER_ADDRESS",
 		"chain.chain_id":               "CHAIN_ID",
@@ -100,7 +99,7 @@ func (c *Config) validate() error {
 		val  string
 		name string
 	}
-	// TEE_SIGNING_KEY and PROVIDER_ADDRESS are optional here: if absent they
+	// TEEPrivateKey and PROVIDER_ADDRESS are optional here: if absent they
 	// are populated at startup by tee.Get() (gRPC call to the tapp-daemon in
 	// a real TDX environment, or MOCK_APP_PRIVATE_KEY in mock mode).
 	for _, r := range []req{
