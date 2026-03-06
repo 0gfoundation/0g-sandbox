@@ -187,11 +187,11 @@ func TestHandleCreate_ForcesAutostopZero(t *testing.T) {
 
 	var fwdBody map[string]any
 	json.Unmarshal((*captured)[0], &fwdBody)
-	if fwdBody["autostopInterval"] != float64(0) {
-		t.Errorf("autostopInterval should be forced to 0, got %v", fwdBody["autostopInterval"])
+	if fwdBody["autoStopInterval"] != float64(0) {
+		t.Errorf("autoStopInterval should be forced to 0, got %v", fwdBody["autoStopInterval"])
 	}
-	if fwdBody["autoarchiveInterval"] != float64(0) {
-		t.Errorf("autoarchiveInterval should be forced to 0, got %v", fwdBody["autoarchiveInterval"])
+	if fwdBody["autoArchiveInterval"] != float64(60) {
+		t.Errorf("autoArchiveInterval should be 60, got %v", fwdBody["autoArchiveInterval"])
 	}
 }
 

@@ -20,10 +20,10 @@ func main() {
 	c, _ := chain.NewSandboxServing(common.HexToAddress("0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210"), eth)
 	opts := &bind.CallOpts{Context: context.Background()}
 
-	acct, _ := c.GetAccount(opts, addr)
+	bal, _ := c.GetBalance(opts, addr, addr)
 	nonce, _ := c.GetLastNonce(opts, addr, addr)
 	earnings, _ := c.GetProviderEarnings(opts, addr)
-	fmt.Printf("balance:            %s neuron\n", acct.Balance)
+	fmt.Printf("balance (self):     %s neuron\n", bal.Balance)
 	fmt.Printf("nonce:              %s\n", nonce)
 	fmt.Printf("earnings:           %s neuron\n", earnings)
 

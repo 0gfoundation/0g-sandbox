@@ -336,9 +336,9 @@ func TestE2E_CreateFeeSettled(t *testing.T) {
 	ctx := context.Background()
 
 	// Pre-flight: user must have deposited.
-	balance, _, _, err := env.onchain.GetAccount(ctx, env.userAddr)
+	balance, _, _, err := env.onchain.GetProviderBalance(ctx, env.userAddr, env.providerAddr)
 	if err != nil {
-		t.Fatalf("GetAccount: %v", err)
+		t.Fatalf("GetProviderBalance: %v", err)
 	}
 	if balance.Sign() == 0 {
 		t.Skip("user balance is 0 — run cmd/setup first")
@@ -378,9 +378,9 @@ func TestE2E_ComputeFeeSettled(t *testing.T) {
 	env := globalE2E
 	ctx := context.Background()
 
-	balance, _, _, err := env.onchain.GetAccount(ctx, env.userAddr)
+	balance, _, _, err := env.onchain.GetProviderBalance(ctx, env.userAddr, env.providerAddr)
 	if err != nil {
-		t.Fatalf("GetAccount: %v", err)
+		t.Fatalf("GetProviderBalance: %v", err)
 	}
 	if balance.Sign() == 0 {
 		t.Skip("user balance is 0 — run cmd/setup first")
@@ -429,7 +429,7 @@ func TestE2E_ComputeFeeSettled(t *testing.T) {
 	t.Logf("compute-fee settled: nonce = %s (expected >= %s, delta = +%s)",
 		nonceAfterStop, afterStop, new(big.Int).Sub(nonceAfterStop, nonceBefore))
 
-	balance2, _, _, _ := env.onchain.GetAccount(ctx, env.userAddr)
+	balance2, _, _, _ := env.onchain.GetProviderBalance(ctx, env.userAddr, env.providerAddr)
 	t.Logf("balance after: %s neuron", balance2)
 }
 
@@ -621,7 +621,8 @@ func (e *e2eEnv) e2eSetupEphemeralAccount(t *testing.T, ctx context.Context, eph
 	// Step 2: Deposit into the contract from the ephemeral account.
 	// recipient = ephAddr so the balance is credited to the ephemeral user.
 	ephAuth.Value = depositWei
-	depositTx, err := contract.Deposit(ephAuth, ephAddr)
+	providerAddr := common.HexToAddress(e.cfg.Chain.ProviderAddress)
+	depositTx, err := contract.Deposit(ephAuth, ephAddr, providerAddr)
 	if err != nil {
 		t.Fatalf("deposit: %v", err)
 	}

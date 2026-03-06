@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>0G Sandbox Billing</title>
+<title>0G Sandbox</title>
 <script src="/static/ethers.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -28,9 +28,24 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-siz
 .dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 0 2px var(--gbg)}
 .btn-connect{background:var(--p);color:#fff;border:none;border-radius:6px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:background .15s}
 .btn-connect:hover{background:var(--pd)}
-.addr-chip{background:var(--pbg);color:var(--p);border:1px solid var(--pbd);border-radius:6px;padding:5px 12px;font-size:12px;font-family:var(--mono)}
-.logout-btn{background:none;border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;color:var(--muted);cursor:pointer;transition:all .15s}
-.logout-btn:hover{border-color:var(--red);color:var(--red)}
+.addr-chip{background:var(--pbg);color:var(--p);border:1px solid var(--pbd);border-radius:6px;padding:5px 12px;font-size:12px;font-family:var(--mono);cursor:pointer;user-select:none;transition:background .15s}
+.addr-chip:hover{background:var(--pbd)}
+
+/* ─ Wallet Popover ─ */
+.wallet-popover{position:fixed;top:64px;right:20px;width:260px;background:var(--surf);border:1px solid var(--border);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.12);z-index:200;overflow:hidden;display:none}
+.wallet-popover.open{display:block}
+.wp-head{padding:14px 16px;border-bottom:1px solid var(--border);background:#fafafa}
+.wp-label{font-size:11px;color:var(--muted);margin-bottom:4px}
+.wp-addr{font-family:var(--mono);font-size:12px;color:var(--text);word-break:break-all;line-height:1.5}
+.wp-body{padding:14px 16px}
+.wp-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.wp-k{font-size:12px;color:var(--muted)}
+.wp-v{font-size:13px;font-weight:600;font-family:var(--mono)}
+.wp-actions{display:flex;gap:8px;margin-top:14px}
+.wp-btn{flex:1;padding:7px 0;border-radius:6px;font-size:12.5px;font-weight:500;cursor:pointer;font-family:inherit;border:1px solid var(--border);background:var(--surf);color:var(--text);transition:all .15s}
+.wp-btn:hover{background:var(--bg)}
+.wp-btn.danger{border-color:var(--rbd);color:var(--red)}
+.wp-btn.danger:hover{background:var(--rbg)}
 
 /* ─ Tabs ─ */
 .tabs{background:var(--surf);border-bottom:1px solid var(--border);padding:0 24px;display:flex;gap:4px}
@@ -164,13 +179,31 @@ tbody tr:hover td{background:#fafafa}
 <header class="topbar">
   <div class="logo">
     <div class="logo-mark">0G</div>
-    Sandbox Billing<span class="logo-sub">Powered by 0G Network</span>
+    0G Sandbox<span class="logo-sub">Powered by 0G Network</span>
   </div>
   <div class="topbar-right">
     <div class="chain-tag" id="chainTag"><div class="dot"></div>0G Galileo</div>
     <button class="btn-connect" id="connectBtn" onclick="connectWallet()">Connect Wallet</button>
   </div>
 </header>
+
+<!-- Wallet Popover -->
+<div class="wallet-popover" id="walletPopover">
+  <div class="wp-head">
+    <div class="wp-label">Wallet Address</div>
+    <div class="wp-addr" id="popAddr"></div>
+  </div>
+  <div class="wp-body">
+    <div class="wp-row">
+      <span class="wp-k">Native Balance</span>
+      <span class="wp-v" id="popBalance">—</span>
+    </div>
+    <div class="wp-actions">
+      <button class="wp-btn" onclick="copyWalletAddr()">Copy Address</button>
+      <button class="wp-btn danger" onclick="logout()">Logout</button>
+    </div>
+  </div>
+</div>
 
 <!-- Tabs -->
 <div class="tabs">
@@ -189,81 +222,14 @@ tbody tr:hover td{background:#fafafa}
   </div>
 
   <div id="userContent" style="display:none">
-    <div class="two-col">
 
-      <!-- ─ Left column ─ -->
-      <div>
-
-        <!-- Account -->
-        <div class="card">
-          <div class="card-head">
-            <span class="card-title">Account</span>
-            <div style="display:flex;align-items:center;gap:8px">
-              <span class="card-meta" id="userAddr"></span>
-              <button class="btn btn-sm btn-ghost" onclick="loadUserData()">↻</button>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="info-row">
-              <span class="ik">Balance</span>
-              <span class="iv big" id="userBalance"><span class="skel" style="width:70px"></span></span>
-            </div>
-            <div class="info-row">
-              <span class="ik">Min Required</span>
-              <span class="iv green" id="infoMinBal">—</span>
-            </div>
-            <div class="info-row">
-              <span class="ik">Pending Refund</span>
-              <span class="iv" id="userRefund"><span class="skel" style="width:50px"></span></span>
-            </div>
-            <div id="balanceWarnBanner" style="display:none;background:var(--obg);border:1px solid #ffd591;border-radius:6px;padding:8px 12px;margin-top:10px;font-size:12px;color:var(--orange)">
-              ⚠ Balance below minimum — sandboxes may be stopped soon.
-            </div>
-          </div>
-        </div>
-
-        <!-- Deposit -->
-        <div class="card">
-          <div class="card-head"><span class="card-title">Deposit</span></div>
-          <div class="card-body">
-            <div class="ia-row">
-              <div class="ia-input-row">
-                <input id="depositAmt" class="ia-input" type="number" step="0.001" min="0.001" value="0.01">
-                <span class="ia-unit">0G</span>
-                <button class="btn btn-prim btn-sm" id="depositBtn" onclick="doDeposit()">⬆ Deposit</button>
-              </div>
-              <div class="ia-hint" id="depositHint"></div>
-              <div class="err" id="depositErr"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Refund -->
-        <div class="card">
-          <div class="card-head"><span class="card-title">Refund</span></div>
-          <div class="card-body">
-            <div class="ia-row">
-              <div class="ia-input-row">
-                <input id="refundAmt" class="ia-input" type="number" step="0.001" min="0.001" placeholder="0.01">
-                <span class="ia-unit">0G</span>
-                <button class="btn btn-ghost btn-sm" onclick="doRefund()">↩ Request</button>
-              </div>
-              <div class="ia-hint">2-hour lock period before withdrawal</div>
-              <div class="err" id="refundErr"></div>
-            </div>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- ─ Right column: Providers + Sandboxes ─ -->
+      <!-- Providers + Sandboxes -->
       <div id="providerSection">
         <div class="empty" style="padding:40px 0">
           <span class="skel" style="width:100%;height:120px;display:block;border-radius:10px"></span>
         </div>
       </div>
 
-    </div>
   </div>
 
 </div>
@@ -430,19 +396,19 @@ function _onAccountsChanged(a) {
 }
 
 const ABI = [
-  "function getAccount(address) view returns (uint256 balance, uint256 pendingRefund, uint256 refundUnlockAt)",
+  "function getBalance(address user, address provider) view returns (uint256 balance, uint256 pendingRefund, uint256 refundUnlockAt)",
   "function isTEEAcknowledged(address user, address provider) view returns (bool)",
   "function providerStake() view returns (uint256)",
   "function services(address) view returns (string url, address teeSignerAddress, uint256 computePricePerMin, uint256 createFee, uint256 signerVersion)",
   "function serviceExists(address) view returns (bool)",
   "function providerEarnings(address) view returns (uint256)",
   "function providerStakes(address) view returns (uint256)",
-  "function deposit(address recipient) payable",
+  "function deposit(address recipient, address provider) payable",
   "function acknowledgeTEESigner(address provider, bool acknowledged)",
   "function addOrUpdateService(string url, address teeSignerAddress, uint256 computePricePerMin, uint256 createFee) payable",
   "function withdrawEarnings()",
-  "function requestRefund(uint256 amount)",
-  "function withdrawRefund()",
+  "function requestRefund(address provider, uint256 amount)",
+  "function withdrawRefund(address provider)",
 ];
 
 window.addEventListener('eip6963:announceProvider', e => eip6963Providers.set(e.detail.info.uuid, e.detail));
@@ -467,6 +433,20 @@ window.onload = async () => {
     if (a.length) { await initWallet(a[0], window.ethereum); return; }
   }
 };
+
+// ── Wallet Popover ────────────────────────────────────────────────────────────
+function toggleWalletPopover(e) {
+  e.stopPropagation();
+  const p = document.getElementById('walletPopover');
+  p.classList.toggle('open');
+}
+document.addEventListener('click', e => {
+  const p = document.getElementById('walletPopover');
+  if (p.classList.contains('open') && !p.contains(e.target)) p.classList.remove('open');
+});
+function copyWalletAddr() {
+  navigator.clipboard.writeText(walletAddr).then(()=>toast('Address copied','success'));
+}
 
 // ── Wallet ────────────────────────────────────────────────────────────────────
 function connectWallet() {
@@ -502,13 +482,13 @@ async function initWallet(addr, prov) {
   signer = await provider.getSigner();
   contract = new ethers.Contract(info.contract_address, ABI, signer);
 
-  document.querySelectorAll('.addr-chip').forEach(el=>el.remove());
+  document.querySelectorAll('.addr-chip,.logout-btn').forEach(el=>el.remove());
   document.getElementById('connectBtn').style.display = 'none';
-  const chip = document.createElement('div'); chip.className='addr-chip'; chip.textContent=shortAddr(addr); chip.title=addr;
+  const chip = document.createElement('div');
+  chip.className='addr-chip'; chip.textContent=shortAddr(addr); chip.title=addr;
+  chip.onclick = toggleWalletPopover;
   document.querySelector('.topbar-right').prepend(chip);
-  const lb = document.createElement('button'); lb.className='btn btn-sm btn-ghost logout-btn'; lb.textContent='Logout'; lb.onclick=logout;
-  document.querySelector('.topbar-right').prepend(lb);
-  document.getElementById('userAddr').textContent = shortAddr(addr);
+  document.getElementById('popAddr').textContent = addr;
 
   document.getElementById('userNoWallet').style.display='none'; document.getElementById('userContent').style.display='';
   document.getElementById('providerNoWallet').style.display='none'; document.getElementById('providerContent').style.display='';
@@ -539,21 +519,20 @@ async function logout() {
   localStorage.removeItem('walletUUID');
   document.querySelectorAll('.addr-chip,.logout-btn').forEach(el=>el.remove());
   document.getElementById('connectBtn').style.display='';
+  document.getElementById('walletPopover').classList.remove('open');
+  document.getElementById('popAddr').textContent='';
+  document.getElementById('popBalance').textContent='—';
   ['userNoWallet','providerNoWallet'].forEach(id=>document.getElementById(id).style.display='');
   ['userContent','providerContent'].forEach(id=>document.getElementById(id).style.display='none');
 }
 
 // ── User Data ─────────────────────────────────────────────────────────────────
 async function loadUserData() {
-  if (!contract || !walletAddr) return;
+  if (!walletAddr) return;
   try {
-    const [balance, pendingRefund] = await contract.getAccount(walletAddr);
-    document.getElementById('userBalance').textContent = fmtNeuron(balance.toString());
-    document.getElementById('userRefund').textContent  = fmtNeuron(pendingRefund.toString());
-    if (info?.min_balance) {
-      const bal=BigInt(balance.toString()), min=BigInt(info.min_balance);
-      document.getElementById('balanceWarnBanner').style.display = (bal>0n && bal<min) ? '' : 'none';
-    }
+    const provider = new ethers.BrowserProvider(_activeProvider);
+    const nativeBal = await provider.getBalance(walletAddr);
+    document.getElementById('popBalance').textContent = fmtNeuron(nativeBal.toString());
   } catch(e) { console.error(e); }
   await loadProviders();
 }
@@ -574,15 +553,18 @@ async function loadProviders() {
       return;
     }
     const sandboxes = sbxList || [];
-    const ackedArr = await Promise.all(
-      providers.map(p => contract.isTEEAcknowledged(walletAddr, p.address).catch(()=>false))
-    );
+    const [ackedArr, balancesArr] = await Promise.all([
+      Promise.all(providers.map(p => contract.isTEEAcknowledged(walletAddr, p.address).catch(()=>false))),
+      Promise.all(providers.map(p => contract.getBalance(walletAddr, p.address).catch(()=>[0n,0n,0n]))),
+    ]);
 
     section.innerHTML = '';
     providers.forEach((p, i) => {
       const isAcked = ackedArr[i];
       const isThis  = info && p.address.toLowerCase() === info.provider_address.toLowerCase();
       const mySbx   = isThis ? sandboxes : [];
+      const [bal, pendingRefund] = balancesArr[i];
+      const balLow  = isAcked && info?.min_balance && BigInt(bal.toString()) < BigInt(info.min_balance) && BigInt(bal.toString()) > 0n;
 
       const card = document.createElement('div');
       card.className = 'card' + (isAcked ? ' pv-subscribed' : '');
@@ -618,6 +600,24 @@ async function loadProviders() {
               <div style="font-family:var(--mono);font-size:12px" title="${p.tee_signer}">${shortAddr(p.tee_signer)}</div>
             </div>
           </div>
+
+          ${isAcked ? `
+          <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <span style="font-size:12px;font-weight:600;color:var(--text2)">Your Balance</span>
+              <span style="font-size:15px;font-weight:700;font-family:var(--mono);color:${balLow?'var(--orange)':'var(--text)'}">${fmtNeuron(bal.toString())}</span>
+            </div>
+            ${BigInt(pendingRefund.toString())>0n ? `<div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">Pending refund: ${fmtNeuron(pendingRefund.toString())}</div>` : ''}
+            ${balLow ? `<div style="font-size:11.5px;color:var(--orange);margin-bottom:8px">⚠ Balance below minimum</div>` : ''}
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <input type="number" step="0.001" min="0.001" value="0.1" id="dep-amt-${p.address}" class="ia-input" style="width:80px">
+              <span class="ia-unit">0G</span>
+              <button class="btn btn-prim btn-sm" onclick="doDeposit('${p.address}',this)">⬆ Deposit</button>
+              <button class="btn btn-ghost btn-sm" onclick="doRefund('${p.address}',this)">↩ Refund</button>
+            </div>
+            <div class="err" id="dep-err-${p.address}" style="margin-top:4px"></div>
+          </div>` : ''}
+
           <div class="pv-sandbox-section">
             <div class="pv-sandbox-header">
               <span style="font-size:12.5px;font-weight:600">Sandboxes</span>
@@ -683,23 +683,26 @@ function _startPoll() {
 function _stopPoll() { if (_pollTimer) { clearInterval(_pollTimer); _pollTimer=null; } }
 
 // ── User Actions ──────────────────────────────────────────────────────────────
-async function doDeposit() {
-  const amt = document.getElementById('depositAmt').value;
-  if (!amt || parseFloat(amt)<=0) { setErr('depositErr','Enter a valid amount'); return; }
-  setErr('depositErr',''); setBusy('depositBtn',true);
-  await sendTx(`Deposit ${amt} 0G`, ()=>contract.deposit(walletAddr,{value:ethers.parseEther(amt)}), {
-    onSuccess: ()=>loadUserData(), errEl:'depositErr',
+async function doDeposit(providerAddr, btn) {
+  const amt = document.getElementById(`dep-amt-${providerAddr}`).value;
+  if (!amt || parseFloat(amt)<=0) { document.getElementById(`dep-err-${providerAddr}`).textContent='Enter a valid amount'; return; }
+  document.getElementById(`dep-err-${providerAddr}`).textContent='';
+  if (btn) { btn.disabled=true; btn.textContent='…'; }
+  await sendTx(`Deposit ${amt} 0G`, ()=>contract.deposit(walletAddr, providerAddr, {value:ethers.parseEther(amt)}), {
+    onSuccess: ()=>{ loadUserData(); loadProviders(); }, errEl:`dep-err-${providerAddr}`,
   });
-  setBusy('depositBtn',false);
+  if (btn) { btn.disabled=false; btn.textContent='⬆ Deposit'; }
 }
 
-async function doRefund() {
-  const amt = document.getElementById('refundAmt').value;
-  if (!amt || parseFloat(amt)<=0) { setErr('refundErr','Enter a valid amount'); return; }
-  setErr('refundErr','');
-  await sendTx('Refund request', ()=>contract.requestRefund(ethers.parseEther(amt)), {
-    onSuccess: ()=>loadUserData(), errEl:'refundErr',
+async function doRefund(providerAddr, btn) {
+  const amt = document.getElementById(`dep-amt-${providerAddr}`).value;
+  if (!amt || parseFloat(amt)<=0) { document.getElementById(`dep-err-${providerAddr}`).textContent='Enter a valid amount'; return; }
+  document.getElementById(`dep-err-${providerAddr}`).textContent='';
+  if (btn) { btn.disabled=true; btn.textContent='…'; }
+  await sendTx('Refund request', ()=>contract.requestRefund(providerAddr, ethers.parseEther(amt)), {
+    onSuccess: ()=>{ loadUserData(); loadProviders(); }, errEl:`dep-err-${providerAddr}`,
   });
+  if (btn) { btn.disabled=false; btn.textContent='↩ Refund'; }
 }
 
 async function fetchSandboxIds() {

@@ -1,10 +1,59 @@
-# 0G Sandbox Billing
+# 0G Sandbox
 
-A Go billing proxy server that sits in front of Daytona (sandbox runtime) and charges users
-in 0G tokens via TEE-signed on-chain vouchers. Users deposit funds into a Solidity settlement
-contract; the proxy creates EIP-712-signed vouchers and settles them on-chain periodically.
+Private, isolated sandboxes for vibe coding — powered by 0G Network.
 
 > 中文版：[README.zh.md](README.zh.md)
+
+---
+
+## Problem
+
+Vibe coding has two conflicting requirements:
+
+1. **Local environments aren't isolated enough.** Running untrusted or experimental code locally
+   risks polluting the development environment, leaking credentials, or causing irreversible
+   side effects. A fully isolated remote sandbox is needed.
+
+2. **Remote servers are controlled by others.** Renting a cloud VM solves isolation, but the
+   host provider can inspect or tamper with the code and data running inside. The sandbox
+   environment itself cannot be trusted.
+
+## Solution
+
+**0G Sandbox** combines [0G Tapp](https://0g.ai) (TEE-based trusted execution) with
+[Daytona](https://daytona.io) (sandbox runtime) to satisfy both requirements simultaneously:
+
+- **Isolation**: each sandbox is a fully containerized Daytona workspace, isolated from the
+  user's local machine and from other users' sandboxes.
+- **Confidentiality**: the billing proxy and its TEE signing key run inside a hardware TEE
+  enclave (TDX) managed by 0G Tapp. The host cannot inspect the workload or forge vouchers.
+  Critically, **the provider never sees the user's code** — sandbox workloads run inside the
+  TEE and are opaque to the infrastructure operator.
+- **Trustless billing**: users deposit funds into a Solidity contract on 0G Network. Compute
+  fees are settled via EIP-712 vouchers signed by the TEE key — no trusted intermediary needed.
+
+### Why not just rent a cloud TDX server?
+
+A cloud TDX instance only secures the execution side. In a vibe coding workflow, the attack
+surface is larger: your **prompts, context, and intermediate outputs** all pass through the AI
+model, and cloud providers offer no confidentiality guarantee for inference.
+
+0G Sandbox is designed to compose with [0G Compute](https://0g.ai) (TEE-based AI inference),
+enabling a fully confidential vibe coding pipeline:
+
+```
+Prompt ──► 0G Compute (AI inference in TEE)
+                │
+                ▼ generated code
+           0G Sandbox (execution in TEE)
+                │
+                ▼ results
+           settled on 0G Network (trustless billing)
+```
+
+At every step — what you write, what the AI generates, what the code produces — the data
+is invisible to any operator, including 0G itself. This end-to-end guarantee is something a
+cloud provider, as a single point of trust, fundamentally cannot offer.
 
 ---
 
@@ -209,6 +258,37 @@ docker compose up
 
 The `billing` service image is pinned to a specific SHA256 digest in `docker-compose.yml`.
 Update the digest after rebuilding: `docker inspect billing:latest --format '{{.Id}}'`.
+
+### Tapp Deployment (Production)
+
+The billing server runs inside a 0G Tapp TEE enclave. Deploy via `tapp-cli`:
+
+```bash
+# Build the image
+docker build -t billing:latest .
+
+# Deploy (or redeploy after changes)
+tapp-cli -s http://<tapp-server>:50051 stop-app  --app-id billing
+tapp-cli -s http://<tapp-server>:50051 start-app --app-id billing -f docker-compose.yml
+
+# Check container status
+tapp-cli -s http://<tapp-server>:50051 get-app-container-status --app-id billing
+
+# Tail logs
+tapp-cli -s http://<tapp-server>:50051 get-app-logs --app-id billing -n 100
+```
+
+The TEE key is automatically generated and managed by the tapp-daemon. Retrieve the
+Ethereum address for provider registration:
+
+```bash
+tapp-cli -s http://<tapp-server>:50051 get-app-key --app-id billing
+# → Ethereum Address: 0x...  ← use as --tee-signer when registering the provider
+```
+
+> **Note**: if the app is redeployed and the TEE key changes, re-register the provider
+> with the new signer address (`cmd/provider register --tee-signer <new-addr>`).
+> This increments `signerVersion` — all users must re-acknowledge before vouchers settle.
 
 ---
 

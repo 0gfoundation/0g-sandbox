@@ -411,9 +411,9 @@ func TestComponent_HappyPath(t *testing.T) {
 
 	fix := deployE2EFixture(t)
 
-	// User deposits 10 0G and acknowledges the TEE signer.
+	// User deposits 10 0G for the provider and acknowledges the TEE signer.
 	fix.userAuth.Value, _ = new(big.Int).SetString("10000000000000000000", 10)
-	if _, err := fix.contract.Deposit(fix.userAuth, fix.userAddr); err != nil {
+	if _, err := fix.contract.Deposit(fix.userAuth, fix.userAddr, fix.providerAddr); err != nil {
 		t.Fatalf("deposit: %v", err)
 	}
 	fix.backend.Commit()

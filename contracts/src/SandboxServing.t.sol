@@ -58,9 +58,9 @@ contract SandboxServingTest is Test {
 
     function test_Deposit() public {
         vm.prank(user);
-        serving.deposit{value: 1 ether}(user);
+        serving.deposit{value: 1 ether}(user, provider);
 
-        (uint256 bal,,) = serving.getAccount(user);
+        (uint256 bal,,) = serving.getBalance(user, provider);
         assertEq(bal, 1 ether);
     }
 
@@ -68,19 +68,19 @@ contract SandboxServingTest is Test {
         address payer = makeAddr("payer");
         vm.deal(payer, 5 ether);
         vm.prank(payer);
-        serving.deposit{value: 2 ether}(user);
+        serving.deposit{value: 2 ether}(user, provider);
 
-        (uint256 bal,,) = serving.getAccount(user);
+        (uint256 bal,,) = serving.getBalance(user, provider);
         assertEq(bal, 2 ether);
     }
 
     function test_RequestRefund_ThenWithdraw() public {
         vm.startPrank(user);
-        serving.deposit{value: 1 ether}(user);
-        serving.requestRefund(0.5 ether);
+        serving.deposit{value: 1 ether}(user, provider);
+        serving.requestRefund(provider, 0.5 ether);
         vm.stopPrank();
 
-        (uint256 bal, uint256 pending,) = serving.getAccount(user);
+        (uint256 bal, uint256 pending,) = serving.getBalance(user, provider);
         assertEq(bal, 0.5 ether);
         assertEq(pending, 0.5 ether);
 
@@ -89,28 +89,28 @@ contract SandboxServingTest is Test {
 
         uint256 before = user.balance;
         vm.prank(user);
-        serving.withdrawRefund();
+        serving.withdrawRefund(provider);
         assertEq(user.balance - before, 0.5 ether);
     }
 
     function test_RequestRefund_Locked() public {
         vm.startPrank(user);
-        serving.deposit{value: 1 ether}(user);
-        serving.requestRefund(0.5 ether);
+        serving.deposit{value: 1 ether}(user, provider);
+        serving.requestRefund(provider, 0.5 ether);
         vm.expectRevert("refund locked");
-        serving.withdrawRefund();
+        serving.withdrawRefund(provider);
         vm.stopPrank();
     }
 
     function test_RequestRefund_ReplacesPrevious() public {
         vm.startPrank(user);
-        serving.deposit{value: 2 ether}(user);
-        serving.requestRefund(1 ether);
+        serving.deposit{value: 2 ether}(user, provider);
+        serving.requestRefund(provider, 1 ether);
         // Replace with a new refund amount
-        serving.requestRefund(0.5 ether);
+        serving.requestRefund(provider, 0.5 ether);
         vm.stopPrank();
 
-        (uint256 bal, uint256 pending,) = serving.getAccount(user);
+        (uint256 bal, uint256 pending,) = serving.getBalance(user, provider);
         assertEq(bal, 1.5 ether);
         assertEq(pending, 0.5 ether);
     }
@@ -157,7 +157,7 @@ contract SandboxServingTest is Test {
     function test_Settle_Success() public {
         // Deposit + acknowledge
         vm.prank(user);
-        serving.deposit{value: 1 ether}(user);
+        serving.deposit{value: 1 ether}(user, provider);
         vm.prank(user);
         serving.acknowledgeTEESigner(provider, true);
 
@@ -168,13 +168,13 @@ contract SandboxServingTest is Test {
         assertEq(uint8(status), uint8(SandboxServing.SettlementStatus.SUCCESS));
 
         assertEq(serving.getProviderEarnings(provider), 1000);
-        (uint256 bal,,) = serving.getAccount(user);
+        (uint256 bal,,) = serving.getBalance(user, provider);
         assertEq(bal, 1 ether - 1000);
     }
 
     function test_Settle_InsufficientBalance() public {
         vm.prank(user);
-        serving.deposit{value: 100}(user); // only 100 neuron
+        serving.deposit{value: 100}(user, provider); // only 100 neuron
         vm.prank(user);
         serving.acknowledgeTEESigner(provider, true);
 
@@ -185,7 +185,7 @@ contract SandboxServingTest is Test {
         assertEq(uint8(status), uint8(SandboxServing.SettlementStatus.INSUFFICIENT_BALANCE));
 
         // All balance drained
-        (uint256 bal, uint256 pending,) = serving.getAccount(user);
+        (uint256 bal, uint256 pending,) = serving.getBalance(user, provider);
         assertEq(bal, 0);
         assertEq(pending, 0);
         assertEq(serving.getProviderEarnings(provider), 100);
@@ -193,7 +193,7 @@ contract SandboxServingTest is Test {
 
     function test_Settle_NotAcknowledged() public {
         vm.prank(user);
-        serving.deposit{value: 1 ether}(user);
+        serving.deposit{value: 1 ether}(user, provider);
         // No acknowledgeTEESigner call
 
         SandboxServing.SandboxVoucher memory v = _makeVoucher(
@@ -205,7 +205,7 @@ contract SandboxServingTest is Test {
 
     function test_Settle_InvalidNonce() public {
         vm.prank(user);
-        serving.deposit{value: 1 ether}(user);
+        serving.deposit{value: 1 ether}(user, provider);
         vm.prank(user);
         serving.acknowledgeTEESigner(provider, true);
 
@@ -221,7 +221,7 @@ contract SandboxServingTest is Test {
 
     function test_Settle_InvalidSignature() public {
         vm.prank(user);
-        serving.deposit{value: 1 ether}(user);
+        serving.deposit{value: 1 ether}(user, provider);
         vm.prank(user);
         serving.acknowledgeTEESigner(provider, true);
 
@@ -237,7 +237,7 @@ contract SandboxServingTest is Test {
 
     function test_Settle_ProviderMismatch() public {
         vm.prank(user);
-        serving.deposit{value: 1 ether}(user);
+        serving.deposit{value: 1 ether}(user, provider);
         vm.prank(user);
         serving.acknowledgeTEESigner(provider, true);
 
@@ -256,14 +256,14 @@ contract SandboxServingTest is Test {
     function test_Settle_LIFOInvariant() public {
         // user has 500 balance + 500 pendingRefund; voucher asks for 400
         vm.startPrank(user);
-        serving.deposit{value: 1000}(user);
-        serving.requestRefund(500);
+        serving.deposit{value: 1000}(user, provider);
+        serving.requestRefund(provider, 500);
         serving.acknowledgeTEESigner(provider, true);
         vm.stopPrank();
 
         _settle(_makeVoucher(user, provider, 400, keccak256("u1"), 1));
 
-        (uint256 bal, uint256 pending,) = serving.getAccount(user);
+        (uint256 bal, uint256 pending,) = serving.getBalance(user, provider);
         // bal was 500, paid 400 → bal = 100; pendingRefund must be ≤ bal
         assertEq(bal, 100);
         assertEq(pending, 100); // excess 400 absorbed from pendingRefund
@@ -272,7 +272,7 @@ contract SandboxServingTest is Test {
 
     function test_WithdrawEarnings() public {
         vm.prank(user);
-        serving.deposit{value: 1 ether}(user);
+        serving.deposit{value: 1 ether}(user, provider);
         vm.prank(user);
         serving.acknowledgeTEESigner(provider, true);
 
@@ -314,13 +314,46 @@ contract SandboxServingTest is Test {
         assertFalse(serving.isTEEAcknowledged(user, provider));
     }
 
+    // ── Admin ────────────────────────────────────────────────────────────────
+
+    function test_SetProviderStake() public {
+        // Test contract is the owner (deployed + initialized the proxy in setUp)
+        assertEq(serving.owner(), address(this));
+        serving.setProviderStake(0.2 ether);
+        assertEq(serving.providerStake(), 0.2 ether);
+    }
+
+    function test_SetProviderStake_OnlyOwner() public {
+        vm.prank(user);
+        vm.expectRevert("not owner");
+        serving.setProviderStake(0.2 ether);
+    }
+
+    function test_TransferOwnership() public {
+        serving.transferOwnership(user);
+        assertEq(serving.owner(), user);
+        // Previous owner can no longer call setProviderStake
+        vm.expectRevert("not owner");
+        serving.setProviderStake(0.3 ether);
+    }
+
+    function test_AddService_StakeReadFromContract() public {
+        // providerStake is set to PROVIDER_STAKE (0.1 ether) in setUp
+        // Sending exactly providerStake should succeed
+        address newProvider = makeAddr("newprovider2");
+        vm.deal(newProvider, 1 ether);
+        vm.prank(newProvider);
+        serving.addOrUpdateService{value: PROVIDER_STAKE}("url2", address(1), 1000, 5000);
+        assertTrue(serving.serviceExists(newProvider));
+    }
+
     // ── Upgrade ──────────────────────────────────────────────────────────────
 
     function test_Upgrade_PreservesState() public {
         // Deposit some state
         vm.prank(user);
-        serving.deposit{value: 1 ether}(user);
-        (uint256 balBefore,,) = serving.getAccount(user);
+        serving.deposit{value: 1 ether}(user, provider);
+        (uint256 balBefore,,) = serving.getBalance(user, provider);
         assertEq(balBefore, 1 ether);
 
         // Deploy a new impl and upgrade the beacon
@@ -331,7 +364,7 @@ contract SandboxServingTest is Test {
         UpgradeableBeacon(beaconAddr).upgradeTo(address(newImpl));
 
         // State must be preserved
-        (uint256 balAfter,,) = serving.getAccount(user);
+        (uint256 balAfter,,) = serving.getBalance(user, provider);
         assertEq(balAfter, 1 ether);
     }
 }

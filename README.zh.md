@@ -1,11 +1,53 @@
-# 0G Sandbox Billing
+# 0G Sandbox
 
-一个 Go 计费代理服务器，部署在 Daytona（沙盒运行时）前，通过 TEE 签名的链上 voucher 以 0G 代币向用户收费。
-用户向 Solidity 结算合约充值；代理生成 EIP-712 签名的 voucher，定期在链上结算。
-
-> **初次了解？** 请先阅读 [`CLAUDE.md`](CLAUDE.md)，了解架构、核心概念、计费流程及服务启动方法。
+专为 Vibe Coding 打造的私有隔离沙盒，由 0G Network 提供支持。
 
 > English version: [README.md](README.md)
+
+---
+
+## 问题
+
+Vibe Coding 面临两个相互矛盾的需求：
+
+1. **本地环境隔离不够彻底。** 在本地运行不受信任或实验性的代码，可能污染开发环境、泄露凭证或产生
+   不可逆的副作用。需要完全隔离的远程沙盒环境。
+
+2. **远程服务器受他人控制。** 租用云服务器虽然解决了隔离问题，但云厂商可以查看或篡改运行其上的
+   代码和数据，沙盒环境本身不可信。
+
+## 解决方案
+
+**0G Sandbox** 将 [0G Tapp](https://0g.ai)（基于 TEE 的可信执行环境）与
+[Daytona](https://daytona.io)（沙盒运行时）相结合，同时满足两个需求：
+
+- **隔离性**：每个沙盒都是完全容器化的 Daytona 工作区，与用户本地环境及其他用户的沙盒完全隔离。
+- **机密性**：计费代理及其 TEE 签名密钥运行在由 0G Tapp 管理的硬件 TEE 飞地（TDX）中，
+  宿主机无法查看工作负载内容，也无法伪造 voucher。
+  最重要的是，**Provider 无法看到用户的代码** —— 沙盒工作负载在 TEE 内运行，对基础设施运营方完全不透明。
+- **无需信任的计费**：用户向 0G Network 上的 Solidity 合约充值，计算费用通过 TEE 密钥签名的
+  EIP-712 voucher 结算，无需可信中介。
+
+### 为什么不直接租云厂商的 TDX 服务器？
+
+云厂商的 TDX 实例只保护了"代码执行"这一段。在 vibe coding 场景中，威胁面远不止于此：
+你的 **prompt、上下文、中间结果**都要经过 AI 模型，而云厂商对推理过程没有任何机密性保证。
+
+0G Sandbox 的设计目标是与 [0G Compute](https://0g.ai)（TEE 内的 AI 推理）结合，
+构建全链路机密的 vibe coding 流程：
+
+```
+Prompt ──► 0G Compute（TEE 内 AI 推理）
+                │
+                ▼ 生成的代码
+           0G Sandbox（TEE 内代码执行）
+                │
+                ▼ 运行结果
+           在 0G Network 链上无信任结算
+```
+
+整个流程的每一步——你写了什么、AI 生成了什么、代码跑出了什么——对任何一方都不可见，
+包括 0G 自己。这是云厂商作为单点信任方根本无法提供的端到端保证。
 
 ---
 
@@ -178,6 +220,36 @@ rm -f /tmp/daytona_gw /tmp/daytona_gw.pub /tmp/daytona_host /tmp/daytona_host.pu
 ```
 
 这些值不得提交到代码仓库（`.gitignore` 已覆盖 `*.key`/`*.pem`；base64 值仅保存在 `.env` 中）。
+
+### Tapp 部署（生产环境）
+
+计费服务运行在 0G Tapp TEE 飞地内，通过 `tapp-cli` 部署：
+
+```bash
+# 构建镜像
+docker build -t billing:latest .
+
+# 部署（或修改后重新部署）
+tapp-cli -s http://<tapp-server>:50051 stop-app  --app-id billing
+tapp-cli -s http://<tapp-server>:50051 start-app --app-id billing -f docker-compose.yml
+
+# 查看容器状态
+tapp-cli -s http://<tapp-server>:50051 get-app-container-status --app-id billing
+
+# 查看日志
+tapp-cli -s http://<tapp-server>:50051 get-app-logs --app-id billing -n 100
+```
+
+TEE 密钥由 tapp-daemon 自动生成和管理。注册 Provider 前先获取其以太坊地址：
+
+```bash
+tapp-cli -s http://<tapp-server>:50051 get-app-key --app-id billing
+# → Ethereum Address: 0x...  ← 作为 --tee-signer 传给 cmd/provider register
+```
+
+> **注意**：若重新部署后 TEE 密钥发生变化，需用新地址重新注册 Provider
+> （`cmd/provider register --tee-signer <新地址>`）。
+> 这会递增 `signerVersion`，所有用户须重新 acknowledge 后 voucher 才能结算。
 
 ---
 

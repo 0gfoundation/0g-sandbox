@@ -35,10 +35,10 @@ type BillingHooks interface {
 	EnsureSession(ctx context.Context, sandboxID, ownerAddr string)
 }
 
-// BalanceChecker looks up the on-chain balance for a wallet address.
+// BalanceChecker looks up the on-chain balance for a user with a specific provider.
 // A nil implementation disables the balance pre-check on create.
 type BalanceChecker interface {
-	GetBalance(ctx context.Context, addr common.Address) (*big.Int, error)
+	GetBalance(ctx context.Context, user, provider common.Address) (*big.Int, error)
 }
 
 // AckChecker checks whether a user has acknowledged the TEE signer.
@@ -131,7 +131,7 @@ func (h *Handler) handleCreate(c *gin.Context) {
 
 	// Pre-check: reject if on-chain balance is below the minimum required.
 	if h.balCheck != nil && h.minBalance != nil {
-		balance, err := h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet))
+		balance, err := h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
 		if err != nil {
 			h.log.Error("balance check", zap.String("wallet", wallet), zap.Error(err))
 			c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})

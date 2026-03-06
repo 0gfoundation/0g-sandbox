@@ -176,9 +176,9 @@ func deployFixture(t *testing.T) (
 	}
 	backend.Commit()
 
-	// User deposits 10 ETH.
+	// User deposits 10 ETH for the provider.
 	userAuth.Value, _ = new(big.Int).SetString("10000000000000000000", 10)
-	_, err = contract.Deposit(userAuth, userAddr)
+	_, err = contract.Deposit(userAuth, userAddr, providerAddr)
 	if err != nil {
 		t.Fatalf("deposit: %v", err)
 	}
@@ -307,16 +307,16 @@ func TestSettleFeesWithTEE_InvalidNonce(t *testing.T) {
 	}
 }
 
-// TestGetAccount_BalanceAfterDeposit verifies the deposited balance is readable.
-func TestGetAccount_BalanceAfterDeposit(t *testing.T) {
-	contract, backend, _, _, userAddr, _, _ := deployFixture(t)
+// TestGetBalance_BalanceAfterDeposit verifies the deposited balance is readable per-provider.
+func TestGetBalance_BalanceAfterDeposit(t *testing.T) {
+	contract, backend, _, providerAddr, userAddr, _, _ := deployFixture(t)
 	_ = backend
 	ctx := context.Background()
 
 	opts := &bind.CallOpts{Context: ctx}
-	result, err := contract.GetAccount(opts, userAddr)
+	result, err := contract.GetBalance(opts, userAddr, providerAddr)
 	if err != nil {
-		t.Fatalf("GetAccount: %v", err)
+		t.Fatalf("GetBalance: %v", err)
 	}
 	expected, _ := new(big.Int).SetString("10000000000000000000", 10) // 10 ETH
 	if result.Balance.Cmp(expected) != 0 {

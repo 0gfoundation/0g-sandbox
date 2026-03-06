@@ -41,7 +41,7 @@ type SandboxServingSandboxVoucher struct {
 
 // SandboxServingMetaData contains all meta data concerning the SandboxServing contract.
 var SandboxServingMetaData = &bind.MetaData{
-	ABI: "[{\"type\":\"constructor\",\"inputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"LOCK_TIME\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"acknowledgeTEESigner\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"acknowledged\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"addOrUpdateService\",\"inputs\":[{\"name\":\"url\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"teeSignerAddress\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"computePricePerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"createFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"payable\"},{\"type\":\"function\",\"name\":\"deposit\",\"inputs\":[{\"name\":\"recipient\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"payable\"},{\"type\":\"function\",\"name\":\"domainSeparator\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getAccount\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"balance\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pendingRefund\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"refundUnlockAt\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getLastNonce\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getProviderEarnings\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"initialize\",\"inputs\":[{\"name\":\"providerStake_\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"isTEEAcknowledged\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"previewSettlementResults\",\"inputs\":[{\"name\":\"vouchers\",\"type\":\"tuple[]\",\"internalType\":\"structSandboxServing.SandboxVoucher[]\",\"components\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"signature\",\"type\":\"bytes\",\"internalType\":\"bytes\"}]}],\"outputs\":[{\"name\":\"statuses\",\"type\":\"uint8[]\",\"internalType\":\"enumSandboxServing.SettlementStatus[]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"providerEarnings\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"providerStake\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"providerStakes\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"requestRefund\",\"inputs\":[{\"name\":\"amount\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"serviceExists\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"services\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"url\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"teeSignerAddress\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"computePricePerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"createFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"signerVersion\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"settleFeesWithTEE\",\"inputs\":[{\"name\":\"vouchers\",\"type\":\"tuple[]\",\"internalType\":\"structSandboxServing.SandboxVoucher[]\",\"components\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"signature\",\"type\":\"bytes\",\"internalType\":\"bytes\"}]}],\"outputs\":[{\"name\":\"statuses\",\"type\":\"uint8[]\",\"internalType\":\"enumSandboxServing.SettlementStatus[]\"}],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"withdrawEarnings\",\"inputs\":[],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"withdrawRefund\",\"inputs\":[],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"event\",\"name\":\"Deposited\",\"inputs\":[{\"name\":\"recipient\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"EarningsWithdrawn\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RefundRequested\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"unlockAt\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RefundWithdrawn\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ServiceUpdated\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"url\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"},{\"name\":\"teeSignerAddress\",\"type\":\"address\",\"indexed\":false,\"internalType\":\"address\"},{\"name\":\"signerVersion\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"TEESignerAcknowledged\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"acknowledged\",\"type\":\"bool\",\"indexed\":false,\"internalType\":\"bool\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"VoucherSettled\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"indexed\":false,\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"status\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumSandboxServing.SettlementStatus\"}],\"anonymous\":false}]",
+	ABI: "[{\"type\":\"constructor\",\"inputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"LOCK_TIME\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"acknowledgeTEESigner\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"acknowledged\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"addOrUpdateService\",\"inputs\":[{\"name\":\"url\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"teeSignerAddress\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"computePricePerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"createFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"payable\"},{\"type\":\"function\",\"name\":\"balanceOfBatch\",\"inputs\":[{\"name\":\"users\",\"type\":\"address[]\",\"internalType\":\"address[]\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"balances\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"deposit\",\"inputs\":[{\"name\":\"recipient\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"payable\"},{\"type\":\"function\",\"name\":\"domainSeparator\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getBalance\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"balance\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pendingRefund\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"refundUnlockAt\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getLastNonce\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getProviderEarnings\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"initialize\",\"inputs\":[{\"name\":\"providerStake_\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"isTEEAcknowledged\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"owner\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"previewSettlementResults\",\"inputs\":[{\"name\":\"vouchers\",\"type\":\"tuple[]\",\"internalType\":\"structSandboxServing.SandboxVoucher[]\",\"components\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"signature\",\"type\":\"bytes\",\"internalType\":\"bytes\"}]}],\"outputs\":[{\"name\":\"statuses\",\"type\":\"uint8[]\",\"internalType\":\"enumSandboxServing.SettlementStatus[]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"providerEarnings\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"providerStake\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"providerStakes\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"requestRefund\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"serviceExists\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"services\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"url\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"teeSignerAddress\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"computePricePerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"createFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"signerVersion\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"setProviderStake\",\"inputs\":[{\"name\":\"newStake\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"settleFeesWithTEE\",\"inputs\":[{\"name\":\"vouchers\",\"type\":\"tuple[]\",\"internalType\":\"structSandboxServing.SandboxVoucher[]\",\"components\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"signature\",\"type\":\"bytes\",\"internalType\":\"bytes\"}]}],\"outputs\":[{\"name\":\"statuses\",\"type\":\"uint8[]\",\"internalType\":\"enumSandboxServing.SettlementStatus[]\"}],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"transferOwnership\",\"inputs\":[{\"name\":\"newOwner\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"withdrawEarnings\",\"inputs\":[],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"withdrawRefund\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"event\",\"name\":\"Deposited\",\"inputs\":[{\"name\":\"recipient\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"EarningsWithdrawn\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"OwnershipTransferred\",\"inputs\":[{\"name\":\"previousOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"newOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ProviderStakeUpdated\",\"inputs\":[{\"name\":\"oldStake\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"newStake\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RefundRequested\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"unlockAt\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RefundWithdrawn\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ServiceUpdated\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"url\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"},{\"name\":\"teeSignerAddress\",\"type\":\"address\",\"indexed\":false,\"internalType\":\"address\"},{\"name\":\"signerVersion\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"TEESignerAcknowledged\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"acknowledged\",\"type\":\"bool\",\"indexed\":false,\"internalType\":\"bool\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"VoucherSettled\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"indexed\":false,\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"status\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumSandboxServing.SettlementStatus\"}],\"anonymous\":false}]",
 }
 
 // SandboxServingABI is the input ABI used to generate the binding from.
@@ -221,6 +221,37 @@ func (_SandboxServing *SandboxServingCallerSession) LOCKTIME() (*big.Int, error)
 	return _SandboxServing.Contract.LOCKTIME(&_SandboxServing.CallOpts)
 }
 
+// BalanceOfBatch is a free data retrieval call binding the contract method 0x8a921690.
+//
+// Solidity: function balanceOfBatch(address[] users, address provider) view returns(uint256[] balances)
+func (_SandboxServing *SandboxServingCaller) BalanceOfBatch(opts *bind.CallOpts, users []common.Address, provider common.Address) ([]*big.Int, error) {
+	var out []interface{}
+	err := _SandboxServing.contract.Call(opts, &out, "balanceOfBatch", users, provider)
+
+	if err != nil {
+		return *new([]*big.Int), err
+	}
+
+	out0 := *abi.ConvertType(out[0], new([]*big.Int)).(*[]*big.Int)
+
+	return out0, err
+
+}
+
+// BalanceOfBatch is a free data retrieval call binding the contract method 0x8a921690.
+//
+// Solidity: function balanceOfBatch(address[] users, address provider) view returns(uint256[] balances)
+func (_SandboxServing *SandboxServingSession) BalanceOfBatch(users []common.Address, provider common.Address) ([]*big.Int, error) {
+	return _SandboxServing.Contract.BalanceOfBatch(&_SandboxServing.CallOpts, users, provider)
+}
+
+// BalanceOfBatch is a free data retrieval call binding the contract method 0x8a921690.
+//
+// Solidity: function balanceOfBatch(address[] users, address provider) view returns(uint256[] balances)
+func (_SandboxServing *SandboxServingCallerSession) BalanceOfBatch(users []common.Address, provider common.Address) ([]*big.Int, error) {
+	return _SandboxServing.Contract.BalanceOfBatch(&_SandboxServing.CallOpts, users, provider)
+}
+
 // DomainSeparator is a free data retrieval call binding the contract method 0xf698da25.
 //
 // Solidity: function domainSeparator() view returns(bytes32)
@@ -252,16 +283,16 @@ func (_SandboxServing *SandboxServingCallerSession) DomainSeparator() ([32]byte,
 	return _SandboxServing.Contract.DomainSeparator(&_SandboxServing.CallOpts)
 }
 
-// GetAccount is a free data retrieval call binding the contract method 0xfbcbc0f1.
+// GetBalance is a free data retrieval call binding the contract method 0xd4fac45d.
 //
-// Solidity: function getAccount(address user) view returns(uint256 balance, uint256 pendingRefund, uint256 refundUnlockAt)
-func (_SandboxServing *SandboxServingCaller) GetAccount(opts *bind.CallOpts, user common.Address) (struct {
+// Solidity: function getBalance(address user, address provider) view returns(uint256 balance, uint256 pendingRefund, uint256 refundUnlockAt)
+func (_SandboxServing *SandboxServingCaller) GetBalance(opts *bind.CallOpts, user common.Address, provider common.Address) (struct {
 	Balance        *big.Int
 	PendingRefund  *big.Int
 	RefundUnlockAt *big.Int
 }, error) {
 	var out []interface{}
-	err := _SandboxServing.contract.Call(opts, &out, "getAccount", user)
+	err := _SandboxServing.contract.Call(opts, &out, "getBalance", user, provider)
 
 	outstruct := new(struct {
 		Balance        *big.Int
@@ -280,26 +311,26 @@ func (_SandboxServing *SandboxServingCaller) GetAccount(opts *bind.CallOpts, use
 
 }
 
-// GetAccount is a free data retrieval call binding the contract method 0xfbcbc0f1.
+// GetBalance is a free data retrieval call binding the contract method 0xd4fac45d.
 //
-// Solidity: function getAccount(address user) view returns(uint256 balance, uint256 pendingRefund, uint256 refundUnlockAt)
-func (_SandboxServing *SandboxServingSession) GetAccount(user common.Address) (struct {
+// Solidity: function getBalance(address user, address provider) view returns(uint256 balance, uint256 pendingRefund, uint256 refundUnlockAt)
+func (_SandboxServing *SandboxServingSession) GetBalance(user common.Address, provider common.Address) (struct {
 	Balance        *big.Int
 	PendingRefund  *big.Int
 	RefundUnlockAt *big.Int
 }, error) {
-	return _SandboxServing.Contract.GetAccount(&_SandboxServing.CallOpts, user)
+	return _SandboxServing.Contract.GetBalance(&_SandboxServing.CallOpts, user, provider)
 }
 
-// GetAccount is a free data retrieval call binding the contract method 0xfbcbc0f1.
+// GetBalance is a free data retrieval call binding the contract method 0xd4fac45d.
 //
-// Solidity: function getAccount(address user) view returns(uint256 balance, uint256 pendingRefund, uint256 refundUnlockAt)
-func (_SandboxServing *SandboxServingCallerSession) GetAccount(user common.Address) (struct {
+// Solidity: function getBalance(address user, address provider) view returns(uint256 balance, uint256 pendingRefund, uint256 refundUnlockAt)
+func (_SandboxServing *SandboxServingCallerSession) GetBalance(user common.Address, provider common.Address) (struct {
 	Balance        *big.Int
 	PendingRefund  *big.Int
 	RefundUnlockAt *big.Int
 }, error) {
-	return _SandboxServing.Contract.GetAccount(&_SandboxServing.CallOpts, user)
+	return _SandboxServing.Contract.GetBalance(&_SandboxServing.CallOpts, user, provider)
 }
 
 // GetLastNonce is a free data retrieval call binding the contract method 0xe3d8bcaf.
@@ -393,6 +424,37 @@ func (_SandboxServing *SandboxServingSession) IsTEEAcknowledged(user common.Addr
 // Solidity: function isTEEAcknowledged(address user, address provider) view returns(bool)
 func (_SandboxServing *SandboxServingCallerSession) IsTEEAcknowledged(user common.Address, provider common.Address) (bool, error) {
 	return _SandboxServing.Contract.IsTEEAcknowledged(&_SandboxServing.CallOpts, user, provider)
+}
+
+// Owner is a free data retrieval call binding the contract method 0x8da5cb5b.
+//
+// Solidity: function owner() view returns(address)
+func (_SandboxServing *SandboxServingCaller) Owner(opts *bind.CallOpts) (common.Address, error) {
+	var out []interface{}
+	err := _SandboxServing.contract.Call(opts, &out, "owner")
+
+	if err != nil {
+		return *new(common.Address), err
+	}
+
+	out0 := *abi.ConvertType(out[0], new(common.Address)).(*common.Address)
+
+	return out0, err
+
+}
+
+// Owner is a free data retrieval call binding the contract method 0x8da5cb5b.
+//
+// Solidity: function owner() view returns(address)
+func (_SandboxServing *SandboxServingSession) Owner() (common.Address, error) {
+	return _SandboxServing.Contract.Owner(&_SandboxServing.CallOpts)
+}
+
+// Owner is a free data retrieval call binding the contract method 0x8da5cb5b.
+//
+// Solidity: function owner() view returns(address)
+func (_SandboxServing *SandboxServingCallerSession) Owner() (common.Address, error) {
+	return _SandboxServing.Contract.Owner(&_SandboxServing.CallOpts)
 }
 
 // PreviewSettlementResults is a free data retrieval call binding the contract method 0x28b60476.
@@ -652,25 +714,25 @@ func (_SandboxServing *SandboxServingTransactorSession) AddOrUpdateService(url s
 	return _SandboxServing.Contract.AddOrUpdateService(&_SandboxServing.TransactOpts, url, teeSignerAddress, computePricePerMin, createFee)
 }
 
-// Deposit is a paid mutator transaction binding the contract method 0xf340fa01.
+// Deposit is a paid mutator transaction binding the contract method 0xf9609f08.
 //
-// Solidity: function deposit(address recipient) payable returns()
-func (_SandboxServing *SandboxServingTransactor) Deposit(opts *bind.TransactOpts, recipient common.Address) (*types.Transaction, error) {
-	return _SandboxServing.contract.Transact(opts, "deposit", recipient)
+// Solidity: function deposit(address recipient, address provider) payable returns()
+func (_SandboxServing *SandboxServingTransactor) Deposit(opts *bind.TransactOpts, recipient common.Address, provider common.Address) (*types.Transaction, error) {
+	return _SandboxServing.contract.Transact(opts, "deposit", recipient, provider)
 }
 
-// Deposit is a paid mutator transaction binding the contract method 0xf340fa01.
+// Deposit is a paid mutator transaction binding the contract method 0xf9609f08.
 //
-// Solidity: function deposit(address recipient) payable returns()
-func (_SandboxServing *SandboxServingSession) Deposit(recipient common.Address) (*types.Transaction, error) {
-	return _SandboxServing.Contract.Deposit(&_SandboxServing.TransactOpts, recipient)
+// Solidity: function deposit(address recipient, address provider) payable returns()
+func (_SandboxServing *SandboxServingSession) Deposit(recipient common.Address, provider common.Address) (*types.Transaction, error) {
+	return _SandboxServing.Contract.Deposit(&_SandboxServing.TransactOpts, recipient, provider)
 }
 
-// Deposit is a paid mutator transaction binding the contract method 0xf340fa01.
+// Deposit is a paid mutator transaction binding the contract method 0xf9609f08.
 //
-// Solidity: function deposit(address recipient) payable returns()
-func (_SandboxServing *SandboxServingTransactorSession) Deposit(recipient common.Address) (*types.Transaction, error) {
-	return _SandboxServing.Contract.Deposit(&_SandboxServing.TransactOpts, recipient)
+// Solidity: function deposit(address recipient, address provider) payable returns()
+func (_SandboxServing *SandboxServingTransactorSession) Deposit(recipient common.Address, provider common.Address) (*types.Transaction, error) {
+	return _SandboxServing.Contract.Deposit(&_SandboxServing.TransactOpts, recipient, provider)
 }
 
 // Initialize is a paid mutator transaction binding the contract method 0xfe4b84df.
@@ -694,25 +756,46 @@ func (_SandboxServing *SandboxServingTransactorSession) Initialize(providerStake
 	return _SandboxServing.Contract.Initialize(&_SandboxServing.TransactOpts, providerStake_)
 }
 
-// RequestRefund is a paid mutator transaction binding the contract method 0xa4b2409e.
+// RequestRefund is a paid mutator transaction binding the contract method 0x99652de7.
 //
-// Solidity: function requestRefund(uint256 amount) returns()
-func (_SandboxServing *SandboxServingTransactor) RequestRefund(opts *bind.TransactOpts, amount *big.Int) (*types.Transaction, error) {
-	return _SandboxServing.contract.Transact(opts, "requestRefund", amount)
+// Solidity: function requestRefund(address provider, uint256 amount) returns()
+func (_SandboxServing *SandboxServingTransactor) RequestRefund(opts *bind.TransactOpts, provider common.Address, amount *big.Int) (*types.Transaction, error) {
+	return _SandboxServing.contract.Transact(opts, "requestRefund", provider, amount)
 }
 
-// RequestRefund is a paid mutator transaction binding the contract method 0xa4b2409e.
+// RequestRefund is a paid mutator transaction binding the contract method 0x99652de7.
 //
-// Solidity: function requestRefund(uint256 amount) returns()
-func (_SandboxServing *SandboxServingSession) RequestRefund(amount *big.Int) (*types.Transaction, error) {
-	return _SandboxServing.Contract.RequestRefund(&_SandboxServing.TransactOpts, amount)
+// Solidity: function requestRefund(address provider, uint256 amount) returns()
+func (_SandboxServing *SandboxServingSession) RequestRefund(provider common.Address, amount *big.Int) (*types.Transaction, error) {
+	return _SandboxServing.Contract.RequestRefund(&_SandboxServing.TransactOpts, provider, amount)
 }
 
-// RequestRefund is a paid mutator transaction binding the contract method 0xa4b2409e.
+// RequestRefund is a paid mutator transaction binding the contract method 0x99652de7.
 //
-// Solidity: function requestRefund(uint256 amount) returns()
-func (_SandboxServing *SandboxServingTransactorSession) RequestRefund(amount *big.Int) (*types.Transaction, error) {
-	return _SandboxServing.Contract.RequestRefund(&_SandboxServing.TransactOpts, amount)
+// Solidity: function requestRefund(address provider, uint256 amount) returns()
+func (_SandboxServing *SandboxServingTransactorSession) RequestRefund(provider common.Address, amount *big.Int) (*types.Transaction, error) {
+	return _SandboxServing.Contract.RequestRefund(&_SandboxServing.TransactOpts, provider, amount)
+}
+
+// SetProviderStake is a paid mutator transaction binding the contract method 0x5d5c2422.
+//
+// Solidity: function setProviderStake(uint256 newStake) returns()
+func (_SandboxServing *SandboxServingTransactor) SetProviderStake(opts *bind.TransactOpts, newStake *big.Int) (*types.Transaction, error) {
+	return _SandboxServing.contract.Transact(opts, "setProviderStake", newStake)
+}
+
+// SetProviderStake is a paid mutator transaction binding the contract method 0x5d5c2422.
+//
+// Solidity: function setProviderStake(uint256 newStake) returns()
+func (_SandboxServing *SandboxServingSession) SetProviderStake(newStake *big.Int) (*types.Transaction, error) {
+	return _SandboxServing.Contract.SetProviderStake(&_SandboxServing.TransactOpts, newStake)
+}
+
+// SetProviderStake is a paid mutator transaction binding the contract method 0x5d5c2422.
+//
+// Solidity: function setProviderStake(uint256 newStake) returns()
+func (_SandboxServing *SandboxServingTransactorSession) SetProviderStake(newStake *big.Int) (*types.Transaction, error) {
+	return _SandboxServing.Contract.SetProviderStake(&_SandboxServing.TransactOpts, newStake)
 }
 
 // SettleFeesWithTEE is a paid mutator transaction binding the contract method 0x8be74119.
@@ -736,6 +819,27 @@ func (_SandboxServing *SandboxServingTransactorSession) SettleFeesWithTEE(vouche
 	return _SandboxServing.Contract.SettleFeesWithTEE(&_SandboxServing.TransactOpts, vouchers)
 }
 
+// TransferOwnership is a paid mutator transaction binding the contract method 0xf2fde38b.
+//
+// Solidity: function transferOwnership(address newOwner) returns()
+func (_SandboxServing *SandboxServingTransactor) TransferOwnership(opts *bind.TransactOpts, newOwner common.Address) (*types.Transaction, error) {
+	return _SandboxServing.contract.Transact(opts, "transferOwnership", newOwner)
+}
+
+// TransferOwnership is a paid mutator transaction binding the contract method 0xf2fde38b.
+//
+// Solidity: function transferOwnership(address newOwner) returns()
+func (_SandboxServing *SandboxServingSession) TransferOwnership(newOwner common.Address) (*types.Transaction, error) {
+	return _SandboxServing.Contract.TransferOwnership(&_SandboxServing.TransactOpts, newOwner)
+}
+
+// TransferOwnership is a paid mutator transaction binding the contract method 0xf2fde38b.
+//
+// Solidity: function transferOwnership(address newOwner) returns()
+func (_SandboxServing *SandboxServingTransactorSession) TransferOwnership(newOwner common.Address) (*types.Transaction, error) {
+	return _SandboxServing.Contract.TransferOwnership(&_SandboxServing.TransactOpts, newOwner)
+}
+
 // WithdrawEarnings is a paid mutator transaction binding the contract method 0xb73c6ce9.
 //
 // Solidity: function withdrawEarnings() returns()
@@ -757,25 +861,25 @@ func (_SandboxServing *SandboxServingTransactorSession) WithdrawEarnings() (*typ
 	return _SandboxServing.Contract.WithdrawEarnings(&_SandboxServing.TransactOpts)
 }
 
-// WithdrawRefund is a paid mutator transaction binding the contract method 0x110f8874.
+// WithdrawRefund is a paid mutator transaction binding the contract method 0xa16c86f7.
 //
-// Solidity: function withdrawRefund() returns()
-func (_SandboxServing *SandboxServingTransactor) WithdrawRefund(opts *bind.TransactOpts) (*types.Transaction, error) {
-	return _SandboxServing.contract.Transact(opts, "withdrawRefund")
+// Solidity: function withdrawRefund(address provider) returns()
+func (_SandboxServing *SandboxServingTransactor) WithdrawRefund(opts *bind.TransactOpts, provider common.Address) (*types.Transaction, error) {
+	return _SandboxServing.contract.Transact(opts, "withdrawRefund", provider)
 }
 
-// WithdrawRefund is a paid mutator transaction binding the contract method 0x110f8874.
+// WithdrawRefund is a paid mutator transaction binding the contract method 0xa16c86f7.
 //
-// Solidity: function withdrawRefund() returns()
-func (_SandboxServing *SandboxServingSession) WithdrawRefund() (*types.Transaction, error) {
-	return _SandboxServing.Contract.WithdrawRefund(&_SandboxServing.TransactOpts)
+// Solidity: function withdrawRefund(address provider) returns()
+func (_SandboxServing *SandboxServingSession) WithdrawRefund(provider common.Address) (*types.Transaction, error) {
+	return _SandboxServing.Contract.WithdrawRefund(&_SandboxServing.TransactOpts, provider)
 }
 
-// WithdrawRefund is a paid mutator transaction binding the contract method 0x110f8874.
+// WithdrawRefund is a paid mutator transaction binding the contract method 0xa16c86f7.
 //
-// Solidity: function withdrawRefund() returns()
-func (_SandboxServing *SandboxServingTransactorSession) WithdrawRefund() (*types.Transaction, error) {
-	return _SandboxServing.Contract.WithdrawRefund(&_SandboxServing.TransactOpts)
+// Solidity: function withdrawRefund(address provider) returns()
+func (_SandboxServing *SandboxServingTransactorSession) WithdrawRefund(provider common.Address) (*types.Transaction, error) {
+	return _SandboxServing.Contract.WithdrawRefund(&_SandboxServing.TransactOpts, provider)
 }
 
 // SandboxServingDepositedIterator is returned from FilterDeposited and is used to iterate over the raw logs and unpacked data for Deposited events raised by the SandboxServing contract.
@@ -848,47 +952,56 @@ func (it *SandboxServingDepositedIterator) Close() error {
 // SandboxServingDeposited represents a Deposited event raised by the SandboxServing contract.
 type SandboxServingDeposited struct {
 	Recipient common.Address
+	Provider  common.Address
 	Sender    common.Address
 	Amount    *big.Int
 	Raw       types.Log // Blockchain specific contextual infos
 }
 
-// FilterDeposited is a free log retrieval operation binding the contract event 0x8752a472e571a816aea92eec8dae9baf628e840f4929fbcc2d155e6233ff68a7.
+// FilterDeposited is a free log retrieval operation binding the contract event 0x4174a9435a04d04d274c76779cad136a41fde6937c56241c09ab9d3c7064a1a9.
 //
-// Solidity: event Deposited(address indexed recipient, address indexed sender, uint256 amount)
-func (_SandboxServing *SandboxServingFilterer) FilterDeposited(opts *bind.FilterOpts, recipient []common.Address, sender []common.Address) (*SandboxServingDepositedIterator, error) {
+// Solidity: event Deposited(address indexed recipient, address indexed provider, address indexed sender, uint256 amount)
+func (_SandboxServing *SandboxServingFilterer) FilterDeposited(opts *bind.FilterOpts, recipient []common.Address, provider []common.Address, sender []common.Address) (*SandboxServingDepositedIterator, error) {
 
 	var recipientRule []interface{}
 	for _, recipientItem := range recipient {
 		recipientRule = append(recipientRule, recipientItem)
+	}
+	var providerRule []interface{}
+	for _, providerItem := range provider {
+		providerRule = append(providerRule, providerItem)
 	}
 	var senderRule []interface{}
 	for _, senderItem := range sender {
 		senderRule = append(senderRule, senderItem)
 	}
 
-	logs, sub, err := _SandboxServing.contract.FilterLogs(opts, "Deposited", recipientRule, senderRule)
+	logs, sub, err := _SandboxServing.contract.FilterLogs(opts, "Deposited", recipientRule, providerRule, senderRule)
 	if err != nil {
 		return nil, err
 	}
 	return &SandboxServingDepositedIterator{contract: _SandboxServing.contract, event: "Deposited", logs: logs, sub: sub}, nil
 }
 
-// WatchDeposited is a free log subscription operation binding the contract event 0x8752a472e571a816aea92eec8dae9baf628e840f4929fbcc2d155e6233ff68a7.
+// WatchDeposited is a free log subscription operation binding the contract event 0x4174a9435a04d04d274c76779cad136a41fde6937c56241c09ab9d3c7064a1a9.
 //
-// Solidity: event Deposited(address indexed recipient, address indexed sender, uint256 amount)
-func (_SandboxServing *SandboxServingFilterer) WatchDeposited(opts *bind.WatchOpts, sink chan<- *SandboxServingDeposited, recipient []common.Address, sender []common.Address) (event.Subscription, error) {
+// Solidity: event Deposited(address indexed recipient, address indexed provider, address indexed sender, uint256 amount)
+func (_SandboxServing *SandboxServingFilterer) WatchDeposited(opts *bind.WatchOpts, sink chan<- *SandboxServingDeposited, recipient []common.Address, provider []common.Address, sender []common.Address) (event.Subscription, error) {
 
 	var recipientRule []interface{}
 	for _, recipientItem := range recipient {
 		recipientRule = append(recipientRule, recipientItem)
+	}
+	var providerRule []interface{}
+	for _, providerItem := range provider {
+		providerRule = append(providerRule, providerItem)
 	}
 	var senderRule []interface{}
 	for _, senderItem := range sender {
 		senderRule = append(senderRule, senderItem)
 	}
 
-	logs, sub, err := _SandboxServing.contract.WatchLogs(opts, "Deposited", recipientRule, senderRule)
+	logs, sub, err := _SandboxServing.contract.WatchLogs(opts, "Deposited", recipientRule, providerRule, senderRule)
 	if err != nil {
 		return nil, err
 	}
@@ -920,9 +1033,9 @@ func (_SandboxServing *SandboxServingFilterer) WatchDeposited(opts *bind.WatchOp
 	}), nil
 }
 
-// ParseDeposited is a log parse operation binding the contract event 0x8752a472e571a816aea92eec8dae9baf628e840f4929fbcc2d155e6233ff68a7.
+// ParseDeposited is a log parse operation binding the contract event 0x4174a9435a04d04d274c76779cad136a41fde6937c56241c09ab9d3c7064a1a9.
 //
-// Solidity: event Deposited(address indexed recipient, address indexed sender, uint256 amount)
+// Solidity: event Deposited(address indexed recipient, address indexed provider, address indexed sender, uint256 amount)
 func (_SandboxServing *SandboxServingFilterer) ParseDeposited(log types.Log) (*SandboxServingDeposited, error) {
 	event := new(SandboxServingDeposited)
 	if err := _SandboxServing.contract.UnpackLog(event, "Deposited", log); err != nil {
@@ -1077,6 +1190,294 @@ func (_SandboxServing *SandboxServingFilterer) ParseEarningsWithdrawn(log types.
 	return event, nil
 }
 
+// SandboxServingOwnershipTransferredIterator is returned from FilterOwnershipTransferred and is used to iterate over the raw logs and unpacked data for OwnershipTransferred events raised by the SandboxServing contract.
+type SandboxServingOwnershipTransferredIterator struct {
+	Event *SandboxServingOwnershipTransferred // Event containing the contract specifics and raw log
+
+	contract *bind.BoundContract // Generic contract to use for unpacking event data
+	event    string              // Event name to use for unpacking event data
+
+	logs chan types.Log        // Log channel receiving the found contract events
+	sub  ethereum.Subscription // Subscription for errors, completion and termination
+	done bool                  // Whether the subscription completed delivering logs
+	fail error                 // Occurred error to stop iteration
+}
+
+// Next advances the iterator to the subsequent event, returning whether there
+// are any more events found. In case of a retrieval or parsing error, false is
+// returned and Error() can be queried for the exact failure.
+func (it *SandboxServingOwnershipTransferredIterator) Next() bool {
+	// If the iterator failed, stop iterating
+	if it.fail != nil {
+		return false
+	}
+	// If the iterator completed, deliver directly whatever's available
+	if it.done {
+		select {
+		case log := <-it.logs:
+			it.Event = new(SandboxServingOwnershipTransferred)
+			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+				it.fail = err
+				return false
+			}
+			it.Event.Raw = log
+			return true
+
+		default:
+			return false
+		}
+	}
+	// Iterator still in progress, wait for either a data or an error event
+	select {
+	case log := <-it.logs:
+		it.Event = new(SandboxServingOwnershipTransferred)
+		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+			it.fail = err
+			return false
+		}
+		it.Event.Raw = log
+		return true
+
+	case err := <-it.sub.Err():
+		it.done = true
+		it.fail = err
+		return it.Next()
+	}
+}
+
+// Error returns any retrieval or parsing error occurred during filtering.
+func (it *SandboxServingOwnershipTransferredIterator) Error() error {
+	return it.fail
+}
+
+// Close terminates the iteration process, releasing any pending underlying
+// resources.
+func (it *SandboxServingOwnershipTransferredIterator) Close() error {
+	it.sub.Unsubscribe()
+	return nil
+}
+
+// SandboxServingOwnershipTransferred represents a OwnershipTransferred event raised by the SandboxServing contract.
+type SandboxServingOwnershipTransferred struct {
+	PreviousOwner common.Address
+	NewOwner      common.Address
+	Raw           types.Log // Blockchain specific contextual infos
+}
+
+// FilterOwnershipTransferred is a free log retrieval operation binding the contract event 0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0.
+//
+// Solidity: event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)
+func (_SandboxServing *SandboxServingFilterer) FilterOwnershipTransferred(opts *bind.FilterOpts, previousOwner []common.Address, newOwner []common.Address) (*SandboxServingOwnershipTransferredIterator, error) {
+
+	var previousOwnerRule []interface{}
+	for _, previousOwnerItem := range previousOwner {
+		previousOwnerRule = append(previousOwnerRule, previousOwnerItem)
+	}
+	var newOwnerRule []interface{}
+	for _, newOwnerItem := range newOwner {
+		newOwnerRule = append(newOwnerRule, newOwnerItem)
+	}
+
+	logs, sub, err := _SandboxServing.contract.FilterLogs(opts, "OwnershipTransferred", previousOwnerRule, newOwnerRule)
+	if err != nil {
+		return nil, err
+	}
+	return &SandboxServingOwnershipTransferredIterator{contract: _SandboxServing.contract, event: "OwnershipTransferred", logs: logs, sub: sub}, nil
+}
+
+// WatchOwnershipTransferred is a free log subscription operation binding the contract event 0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0.
+//
+// Solidity: event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)
+func (_SandboxServing *SandboxServingFilterer) WatchOwnershipTransferred(opts *bind.WatchOpts, sink chan<- *SandboxServingOwnershipTransferred, previousOwner []common.Address, newOwner []common.Address) (event.Subscription, error) {
+
+	var previousOwnerRule []interface{}
+	for _, previousOwnerItem := range previousOwner {
+		previousOwnerRule = append(previousOwnerRule, previousOwnerItem)
+	}
+	var newOwnerRule []interface{}
+	for _, newOwnerItem := range newOwner {
+		newOwnerRule = append(newOwnerRule, newOwnerItem)
+	}
+
+	logs, sub, err := _SandboxServing.contract.WatchLogs(opts, "OwnershipTransferred", previousOwnerRule, newOwnerRule)
+	if err != nil {
+		return nil, err
+	}
+	return event.NewSubscription(func(quit <-chan struct{}) error {
+		defer sub.Unsubscribe()
+		for {
+			select {
+			case log := <-logs:
+				// New log arrived, parse the event and forward to the user
+				event := new(SandboxServingOwnershipTransferred)
+				if err := _SandboxServing.contract.UnpackLog(event, "OwnershipTransferred", log); err != nil {
+					return err
+				}
+				event.Raw = log
+
+				select {
+				case sink <- event:
+				case err := <-sub.Err():
+					return err
+				case <-quit:
+					return nil
+				}
+			case err := <-sub.Err():
+				return err
+			case <-quit:
+				return nil
+			}
+		}
+	}), nil
+}
+
+// ParseOwnershipTransferred is a log parse operation binding the contract event 0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0.
+//
+// Solidity: event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)
+func (_SandboxServing *SandboxServingFilterer) ParseOwnershipTransferred(log types.Log) (*SandboxServingOwnershipTransferred, error) {
+	event := new(SandboxServingOwnershipTransferred)
+	if err := _SandboxServing.contract.UnpackLog(event, "OwnershipTransferred", log); err != nil {
+		return nil, err
+	}
+	event.Raw = log
+	return event, nil
+}
+
+// SandboxServingProviderStakeUpdatedIterator is returned from FilterProviderStakeUpdated and is used to iterate over the raw logs and unpacked data for ProviderStakeUpdated events raised by the SandboxServing contract.
+type SandboxServingProviderStakeUpdatedIterator struct {
+	Event *SandboxServingProviderStakeUpdated // Event containing the contract specifics and raw log
+
+	contract *bind.BoundContract // Generic contract to use for unpacking event data
+	event    string              // Event name to use for unpacking event data
+
+	logs chan types.Log        // Log channel receiving the found contract events
+	sub  ethereum.Subscription // Subscription for errors, completion and termination
+	done bool                  // Whether the subscription completed delivering logs
+	fail error                 // Occurred error to stop iteration
+}
+
+// Next advances the iterator to the subsequent event, returning whether there
+// are any more events found. In case of a retrieval or parsing error, false is
+// returned and Error() can be queried for the exact failure.
+func (it *SandboxServingProviderStakeUpdatedIterator) Next() bool {
+	// If the iterator failed, stop iterating
+	if it.fail != nil {
+		return false
+	}
+	// If the iterator completed, deliver directly whatever's available
+	if it.done {
+		select {
+		case log := <-it.logs:
+			it.Event = new(SandboxServingProviderStakeUpdated)
+			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+				it.fail = err
+				return false
+			}
+			it.Event.Raw = log
+			return true
+
+		default:
+			return false
+		}
+	}
+	// Iterator still in progress, wait for either a data or an error event
+	select {
+	case log := <-it.logs:
+		it.Event = new(SandboxServingProviderStakeUpdated)
+		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+			it.fail = err
+			return false
+		}
+		it.Event.Raw = log
+		return true
+
+	case err := <-it.sub.Err():
+		it.done = true
+		it.fail = err
+		return it.Next()
+	}
+}
+
+// Error returns any retrieval or parsing error occurred during filtering.
+func (it *SandboxServingProviderStakeUpdatedIterator) Error() error {
+	return it.fail
+}
+
+// Close terminates the iteration process, releasing any pending underlying
+// resources.
+func (it *SandboxServingProviderStakeUpdatedIterator) Close() error {
+	it.sub.Unsubscribe()
+	return nil
+}
+
+// SandboxServingProviderStakeUpdated represents a ProviderStakeUpdated event raised by the SandboxServing contract.
+type SandboxServingProviderStakeUpdated struct {
+	OldStake *big.Int
+	NewStake *big.Int
+	Raw      types.Log // Blockchain specific contextual infos
+}
+
+// FilterProviderStakeUpdated is a free log retrieval operation binding the contract event 0xaf9afb0be8799af0bf3b72da97f9e29db192a7fdd6544074ae08a889796bfc1b.
+//
+// Solidity: event ProviderStakeUpdated(uint256 oldStake, uint256 newStake)
+func (_SandboxServing *SandboxServingFilterer) FilterProviderStakeUpdated(opts *bind.FilterOpts) (*SandboxServingProviderStakeUpdatedIterator, error) {
+
+	logs, sub, err := _SandboxServing.contract.FilterLogs(opts, "ProviderStakeUpdated")
+	if err != nil {
+		return nil, err
+	}
+	return &SandboxServingProviderStakeUpdatedIterator{contract: _SandboxServing.contract, event: "ProviderStakeUpdated", logs: logs, sub: sub}, nil
+}
+
+// WatchProviderStakeUpdated is a free log subscription operation binding the contract event 0xaf9afb0be8799af0bf3b72da97f9e29db192a7fdd6544074ae08a889796bfc1b.
+//
+// Solidity: event ProviderStakeUpdated(uint256 oldStake, uint256 newStake)
+func (_SandboxServing *SandboxServingFilterer) WatchProviderStakeUpdated(opts *bind.WatchOpts, sink chan<- *SandboxServingProviderStakeUpdated) (event.Subscription, error) {
+
+	logs, sub, err := _SandboxServing.contract.WatchLogs(opts, "ProviderStakeUpdated")
+	if err != nil {
+		return nil, err
+	}
+	return event.NewSubscription(func(quit <-chan struct{}) error {
+		defer sub.Unsubscribe()
+		for {
+			select {
+			case log := <-logs:
+				// New log arrived, parse the event and forward to the user
+				event := new(SandboxServingProviderStakeUpdated)
+				if err := _SandboxServing.contract.UnpackLog(event, "ProviderStakeUpdated", log); err != nil {
+					return err
+				}
+				event.Raw = log
+
+				select {
+				case sink <- event:
+				case err := <-sub.Err():
+					return err
+				case <-quit:
+					return nil
+				}
+			case err := <-sub.Err():
+				return err
+			case <-quit:
+				return nil
+			}
+		}
+	}), nil
+}
+
+// ParseProviderStakeUpdated is a log parse operation binding the contract event 0xaf9afb0be8799af0bf3b72da97f9e29db192a7fdd6544074ae08a889796bfc1b.
+//
+// Solidity: event ProviderStakeUpdated(uint256 oldStake, uint256 newStake)
+func (_SandboxServing *SandboxServingFilterer) ParseProviderStakeUpdated(log types.Log) (*SandboxServingProviderStakeUpdated, error) {
+	event := new(SandboxServingProviderStakeUpdated)
+	if err := _SandboxServing.contract.UnpackLog(event, "ProviderStakeUpdated", log); err != nil {
+		return nil, err
+	}
+	event.Raw = log
+	return event, nil
+}
+
 // SandboxServingRefundRequestedIterator is returned from FilterRefundRequested and is used to iterate over the raw logs and unpacked data for RefundRequested events raised by the SandboxServing contract.
 type SandboxServingRefundRequestedIterator struct {
 	Event *SandboxServingRefundRequested // Event containing the contract specifics and raw log
@@ -1147,39 +1548,48 @@ func (it *SandboxServingRefundRequestedIterator) Close() error {
 // SandboxServingRefundRequested represents a RefundRequested event raised by the SandboxServing contract.
 type SandboxServingRefundRequested struct {
 	User     common.Address
+	Provider common.Address
 	Amount   *big.Int
 	UnlockAt *big.Int
 	Raw      types.Log // Blockchain specific contextual infos
 }
 
-// FilterRefundRequested is a free log retrieval operation binding the contract event 0x4c7e7010f4fcf12a6ff2436b38a5e3d0ef3e695830216259fccf95a56b2bb04d.
+// FilterRefundRequested is a free log retrieval operation binding the contract event 0x54377dfdebf06f6df53fbda737d2dcd7e141f95bbfb0c1223437e856b9de3ac3.
 //
-// Solidity: event RefundRequested(address indexed user, uint256 amount, uint256 unlockAt)
-func (_SandboxServing *SandboxServingFilterer) FilterRefundRequested(opts *bind.FilterOpts, user []common.Address) (*SandboxServingRefundRequestedIterator, error) {
+// Solidity: event RefundRequested(address indexed user, address indexed provider, uint256 amount, uint256 unlockAt)
+func (_SandboxServing *SandboxServingFilterer) FilterRefundRequested(opts *bind.FilterOpts, user []common.Address, provider []common.Address) (*SandboxServingRefundRequestedIterator, error) {
 
 	var userRule []interface{}
 	for _, userItem := range user {
 		userRule = append(userRule, userItem)
 	}
+	var providerRule []interface{}
+	for _, providerItem := range provider {
+		providerRule = append(providerRule, providerItem)
+	}
 
-	logs, sub, err := _SandboxServing.contract.FilterLogs(opts, "RefundRequested", userRule)
+	logs, sub, err := _SandboxServing.contract.FilterLogs(opts, "RefundRequested", userRule, providerRule)
 	if err != nil {
 		return nil, err
 	}
 	return &SandboxServingRefundRequestedIterator{contract: _SandboxServing.contract, event: "RefundRequested", logs: logs, sub: sub}, nil
 }
 
-// WatchRefundRequested is a free log subscription operation binding the contract event 0x4c7e7010f4fcf12a6ff2436b38a5e3d0ef3e695830216259fccf95a56b2bb04d.
+// WatchRefundRequested is a free log subscription operation binding the contract event 0x54377dfdebf06f6df53fbda737d2dcd7e141f95bbfb0c1223437e856b9de3ac3.
 //
-// Solidity: event RefundRequested(address indexed user, uint256 amount, uint256 unlockAt)
-func (_SandboxServing *SandboxServingFilterer) WatchRefundRequested(opts *bind.WatchOpts, sink chan<- *SandboxServingRefundRequested, user []common.Address) (event.Subscription, error) {
+// Solidity: event RefundRequested(address indexed user, address indexed provider, uint256 amount, uint256 unlockAt)
+func (_SandboxServing *SandboxServingFilterer) WatchRefundRequested(opts *bind.WatchOpts, sink chan<- *SandboxServingRefundRequested, user []common.Address, provider []common.Address) (event.Subscription, error) {
 
 	var userRule []interface{}
 	for _, userItem := range user {
 		userRule = append(userRule, userItem)
 	}
+	var providerRule []interface{}
+	for _, providerItem := range provider {
+		providerRule = append(providerRule, providerItem)
+	}
 
-	logs, sub, err := _SandboxServing.contract.WatchLogs(opts, "RefundRequested", userRule)
+	logs, sub, err := _SandboxServing.contract.WatchLogs(opts, "RefundRequested", userRule, providerRule)
 	if err != nil {
 		return nil, err
 	}
@@ -1211,9 +1621,9 @@ func (_SandboxServing *SandboxServingFilterer) WatchRefundRequested(opts *bind.W
 	}), nil
 }
 
-// ParseRefundRequested is a log parse operation binding the contract event 0x4c7e7010f4fcf12a6ff2436b38a5e3d0ef3e695830216259fccf95a56b2bb04d.
+// ParseRefundRequested is a log parse operation binding the contract event 0x54377dfdebf06f6df53fbda737d2dcd7e141f95bbfb0c1223437e856b9de3ac3.
 //
-// Solidity: event RefundRequested(address indexed user, uint256 amount, uint256 unlockAt)
+// Solidity: event RefundRequested(address indexed user, address indexed provider, uint256 amount, uint256 unlockAt)
 func (_SandboxServing *SandboxServingFilterer) ParseRefundRequested(log types.Log) (*SandboxServingRefundRequested, error) {
 	event := new(SandboxServingRefundRequested)
 	if err := _SandboxServing.contract.UnpackLog(event, "RefundRequested", log); err != nil {
@@ -1292,39 +1702,48 @@ func (it *SandboxServingRefundWithdrawnIterator) Close() error {
 
 // SandboxServingRefundWithdrawn represents a RefundWithdrawn event raised by the SandboxServing contract.
 type SandboxServingRefundWithdrawn struct {
-	User   common.Address
-	Amount *big.Int
-	Raw    types.Log // Blockchain specific contextual infos
+	User     common.Address
+	Provider common.Address
+	Amount   *big.Int
+	Raw      types.Log // Blockchain specific contextual infos
 }
 
-// FilterRefundWithdrawn is a free log retrieval operation binding the contract event 0x3d97f39b86d061200a7834082f5926e58ec10fd85a9d6930f497729d5e6cc35c.
+// FilterRefundWithdrawn is a free log retrieval operation binding the contract event 0xd55b5fe81317b854ac11454adf7e5a9a0adf69184d643ef9ae6bfda6a015c5bc.
 //
-// Solidity: event RefundWithdrawn(address indexed user, uint256 amount)
-func (_SandboxServing *SandboxServingFilterer) FilterRefundWithdrawn(opts *bind.FilterOpts, user []common.Address) (*SandboxServingRefundWithdrawnIterator, error) {
+// Solidity: event RefundWithdrawn(address indexed user, address indexed provider, uint256 amount)
+func (_SandboxServing *SandboxServingFilterer) FilterRefundWithdrawn(opts *bind.FilterOpts, user []common.Address, provider []common.Address) (*SandboxServingRefundWithdrawnIterator, error) {
 
 	var userRule []interface{}
 	for _, userItem := range user {
 		userRule = append(userRule, userItem)
 	}
+	var providerRule []interface{}
+	for _, providerItem := range provider {
+		providerRule = append(providerRule, providerItem)
+	}
 
-	logs, sub, err := _SandboxServing.contract.FilterLogs(opts, "RefundWithdrawn", userRule)
+	logs, sub, err := _SandboxServing.contract.FilterLogs(opts, "RefundWithdrawn", userRule, providerRule)
 	if err != nil {
 		return nil, err
 	}
 	return &SandboxServingRefundWithdrawnIterator{contract: _SandboxServing.contract, event: "RefundWithdrawn", logs: logs, sub: sub}, nil
 }
 
-// WatchRefundWithdrawn is a free log subscription operation binding the contract event 0x3d97f39b86d061200a7834082f5926e58ec10fd85a9d6930f497729d5e6cc35c.
+// WatchRefundWithdrawn is a free log subscription operation binding the contract event 0xd55b5fe81317b854ac11454adf7e5a9a0adf69184d643ef9ae6bfda6a015c5bc.
 //
-// Solidity: event RefundWithdrawn(address indexed user, uint256 amount)
-func (_SandboxServing *SandboxServingFilterer) WatchRefundWithdrawn(opts *bind.WatchOpts, sink chan<- *SandboxServingRefundWithdrawn, user []common.Address) (event.Subscription, error) {
+// Solidity: event RefundWithdrawn(address indexed user, address indexed provider, uint256 amount)
+func (_SandboxServing *SandboxServingFilterer) WatchRefundWithdrawn(opts *bind.WatchOpts, sink chan<- *SandboxServingRefundWithdrawn, user []common.Address, provider []common.Address) (event.Subscription, error) {
 
 	var userRule []interface{}
 	for _, userItem := range user {
 		userRule = append(userRule, userItem)
 	}
+	var providerRule []interface{}
+	for _, providerItem := range provider {
+		providerRule = append(providerRule, providerItem)
+	}
 
-	logs, sub, err := _SandboxServing.contract.WatchLogs(opts, "RefundWithdrawn", userRule)
+	logs, sub, err := _SandboxServing.contract.WatchLogs(opts, "RefundWithdrawn", userRule, providerRule)
 	if err != nil {
 		return nil, err
 	}
@@ -1356,9 +1775,9 @@ func (_SandboxServing *SandboxServingFilterer) WatchRefundWithdrawn(opts *bind.W
 	}), nil
 }
 
-// ParseRefundWithdrawn is a log parse operation binding the contract event 0x3d97f39b86d061200a7834082f5926e58ec10fd85a9d6930f497729d5e6cc35c.
+// ParseRefundWithdrawn is a log parse operation binding the contract event 0xd55b5fe81317b854ac11454adf7e5a9a0adf69184d643ef9ae6bfda6a015c5bc.
 //
-// Solidity: event RefundWithdrawn(address indexed user, uint256 amount)
+// Solidity: event RefundWithdrawn(address indexed user, address indexed provider, uint256 amount)
 func (_SandboxServing *SandboxServingFilterer) ParseRefundWithdrawn(log types.Log) (*SandboxServingRefundWithdrawn, error) {
 	event := new(SandboxServingRefundWithdrawn)
 	if err := _SandboxServing.contract.UnpackLog(event, "RefundWithdrawn", log); err != nil {

@@ -24,11 +24,11 @@ func TestInjectOwner_EmptyBody(t *testing.T) {
 	if labels[ownerLabel] != wallet {
 		t.Errorf("daytona-owner: got %v want %v", labels[ownerLabel], wallet)
 	}
-	if m["autostopInterval"] != float64(0) {
-		t.Errorf("autostopInterval: got %v want 0", m["autostopInterval"])
+	if m["autoStopInterval"] != float64(0) {
+		t.Errorf("autoStopInterval: got %v want 0", m["autoStopInterval"])
 	}
-	if m["autoarchiveInterval"] != float64(0) {
-		t.Errorf("autoarchiveInterval: got %v want 0", m["autoarchiveInterval"])
+	if m["autoArchiveInterval"] != float64(60) {
+		t.Errorf("autoArchiveInterval: got %v want 60", m["autoArchiveInterval"])
 	}
 }
 
@@ -72,8 +72,8 @@ func TestInjectOwner_PreservesOtherFields(t *testing.T) {
 }
 
 func TestInjectOwner_ForcesAutostopToZero(t *testing.T) {
-	// User tries to set autostop; proxy must override to 0
-	body := []byte(`{"autostopInterval":3600,"autoarchiveInterval":7200}`)
+	// User tries to set autostop via either casing; proxy must override with correct values.
+	body := []byte(`{"autostopInterval":3600,"autoarchiveInterval":7200,"autoStopInterval":9999}`)
 	out, err := InjectOwner(body, "0xW")
 	if err != nil {
 		t.Fatal(err)
@@ -82,11 +82,13 @@ func TestInjectOwner_ForcesAutostopToZero(t *testing.T) {
 	var m map[string]any
 	json.Unmarshal(out, &m) //nolint:errcheck
 
-	if m["autostopInterval"] != float64(0) {
-		t.Errorf("autostopInterval should be 0, got %v", m["autostopInterval"])
+	// Proxy always sets autoStopInterval=0 (Daytona's canonical field name).
+	if m["autoStopInterval"] != float64(0) {
+		t.Errorf("autoStopInterval should be 0, got %v", m["autoStopInterval"])
 	}
-	if m["autoarchiveInterval"] != float64(0) {
-		t.Errorf("autoarchiveInterval should be 0, got %v", m["autoarchiveInterval"])
+	// Proxy always sets autoArchiveInterval=60 as a crash-safety fallback.
+	if m["autoArchiveInterval"] != float64(60) {
+		t.Errorf("autoArchiveInterval should be 60, got %v", m["autoArchiveInterval"])
 	}
 }
 

@@ -78,7 +78,7 @@ If balance is 0 or insufficient:
 1. User must transfer 0G to their wallet address first (keep ~0.1 0G for gas)
 2. Then deposit into the contract:
 ```bash
-USER_KEY=0x<key> go run ./cmd/user/ deposit --amount <amount>
+USER_KEY=0x<key> go run ./cmd/user/ deposit --provider 0xB831371eb2703305f1d9F8542163633D0675CEd7 --amount <amount>
 ```
 3. Check balance again to confirm.
 
@@ -172,8 +172,8 @@ USER_KEY=0x<key> go run ./cmd/user/ exec --api http://47.236.111.154:8080 --id <
 # Check on-chain balance
 USER_KEY=$USER_KEY go run ./cmd/user/ balance --provider $PROVIDER
 
-# Deposit 0G tokens into the contract (keep ~0.1 0G for gas)
-USER_KEY=$USER_KEY go run ./cmd/user/ deposit --amount <amount>
+# Deposit 0G tokens into the contract for a specific provider (keep ~0.1 0G for gas)
+USER_KEY=$USER_KEY go run ./cmd/user/ deposit --provider $PROVIDER --amount <amount>
 
 # Authorize the TEE signer (one-time per provider)
 USER_KEY=$USER_KEY go run ./cmd/user/ acknowledge --provider $PROVIDER

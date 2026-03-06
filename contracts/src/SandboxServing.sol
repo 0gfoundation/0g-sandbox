@@ -19,9 +19,9 @@ contract SandboxServing {
     // ─── Structs ──────────────────────────────────────────────────────────────
 
     struct Account {
-        uint256 balance;
-        uint256 pendingRefund;
-        uint256 refundUnlockAt;
+        mapping(address => uint256) balances;        // provider → balance
+        mapping(address => uint256) pendingRefunds;  // provider → pending refund
+        mapping(address => uint256) refundUnlockAts; // provider → refund unlock time
         mapping(address => uint256) lastNonce;       // provider → last settled nonce
         mapping(address => bool)    teeAcknowledged; // provider → legacy bool ack (signerVersion==0)
         mapping(address => uint256) teeAckVersion;   // provider → version user last acked
@@ -72,14 +72,17 @@ contract SandboxServing {
     // slot 7: was immutable, now regular storage (set in initialize)
     bytes32 private _domainSeparator;
 
-    // slots 8–57: reserved for future upgrades
-    uint256[50] private __gap;
+    // slot 8: contract owner (set in initialize, can transfer ownership)
+    address public owner;
+
+    // slots 9–57: reserved for future upgrades
+    uint256[49] private __gap;
 
     // ─── Events ───────────────────────────────────────────────────────────────
 
-    event Deposited(address indexed recipient, address indexed sender, uint256 amount);
-    event RefundRequested(address indexed user, uint256 amount, uint256 unlockAt);
-    event RefundWithdrawn(address indexed user, uint256 amount);
+    event Deposited(address indexed recipient, address indexed provider, address indexed sender, uint256 amount);
+    event RefundRequested(address indexed user, address indexed provider, uint256 amount, uint256 unlockAt);
+    event RefundWithdrawn(address indexed user, address indexed provider, uint256 amount);
     event VoucherSettled(
         address indexed user,
         address indexed provider,
@@ -96,8 +99,15 @@ contract SandboxServing {
         uint256 signerVersion
     );
     event TEESignerAcknowledged(address indexed user, address indexed provider, bool acknowledged);
+    event ProviderStakeUpdated(uint256 oldStake, uint256 newStake);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
     // ─── Modifiers ────────────────────────────────────────────────────────────
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "not owner");
+        _;
+    }
 
     modifier nonReentrant() {
         require(!_locked, "reentrant");
@@ -128,6 +138,7 @@ contract SandboxServing {
     /// @dev address(this) = BeaconProxy address when invoked via delegatecall — correct for EIP-712.
     function initialize(uint256 providerStake_) external initializer {
         providerStake = providerStake_;
+        owner = msg.sender;
         _domainSeparator = keccak256(abi.encode(
             keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
             keccak256(bytes("0G Sandbox Serving")),
@@ -139,37 +150,37 @@ contract SandboxServing {
 
     // ─── Account: deposit / refund ─────────────────────────────────────────────
 
-    /// @notice Deposit ETH into recipient's billing account. Supports third-party top-up.
-    function deposit(address recipient) external payable {
+    /// @notice Deposit ETH into recipient's billing account for a specific provider.
+    function deposit(address recipient, address provider) external payable {
         require(msg.value > 0, "zero deposit");
-        _accounts[recipient].balance += msg.value;
-        emit Deposited(recipient, msg.sender, msg.value);
+        _accounts[recipient].balances[provider] += msg.value;
+        emit Deposited(recipient, provider, msg.sender, msg.value);
     }
 
-    /// @notice Request a refund. Enters a lockTime period before withdrawal is allowed.
-    /// @dev Cancels any existing pending refund first (re-enters balance).
-    function requestRefund(uint256 amount) external {
+    /// @notice Request a refund from a specific provider's balance bucket.
+    /// @dev Cancels any existing pending refund for this provider first (re-enters balance).
+    function requestRefund(address provider, uint256 amount) external {
         Account storage acct = _accounts[msg.sender];
         require(amount > 0, "zero amount");
-        // Re-absorb any previous pending refund
-        acct.balance += acct.pendingRefund;
-        require(acct.balance >= amount, "insufficient balance");
-        acct.balance -= amount;
-        acct.pendingRefund = amount;
-        acct.refundUnlockAt = block.timestamp + LOCK_TIME;
-        emit RefundRequested(msg.sender, amount, acct.refundUnlockAt);
+        // Re-absorb any previous pending refund for this provider
+        acct.balances[provider] += acct.pendingRefunds[provider];
+        require(acct.balances[provider] >= amount, "insufficient balance");
+        acct.balances[provider] -= amount;
+        acct.pendingRefunds[provider] = amount;
+        acct.refundUnlockAts[provider] = block.timestamp + LOCK_TIME;
+        emit RefundRequested(msg.sender, provider, amount, acct.refundUnlockAts[provider]);
     }
 
     /// @notice Withdraw a previously requested refund after the lock period.
-    function withdrawRefund() external nonReentrant {
+    function withdrawRefund(address provider) external nonReentrant {
         Account storage acct = _accounts[msg.sender];
-        require(acct.pendingRefund > 0, "no pending refund");
-        require(block.timestamp >= acct.refundUnlockAt, "refund locked");
-        uint256 amount = acct.pendingRefund;
-        acct.pendingRefund = 0;
+        require(acct.pendingRefunds[provider] > 0, "no pending refund");
+        require(block.timestamp >= acct.refundUnlockAts[provider], "refund locked");
+        uint256 amount = acct.pendingRefunds[provider];
+        acct.pendingRefunds[provider] = 0;
         (bool ok,) = msg.sender.call{value: amount}("");
         require(ok, "transfer failed");
-        emit RefundWithdrawn(msg.sender, amount);
+        emit RefundWithdrawn(msg.sender, provider, amount);
     }
 
     // ─── Settlement ───────────────────────────────────────────────────────────
@@ -208,22 +219,22 @@ contract SandboxServing {
         // Commit nonce before any state changes (prevents replay even on partial failures)
         acct.lastNonce[v.provider] = v.nonce;
 
-        if (acct.balance >= v.totalFee) {
+        if (acct.balances[v.provider] >= v.totalFee) {
             // Full payment
-            acct.balance -= v.totalFee;
+            acct.balances[v.provider] -= v.totalFee;
             providerEarnings[v.provider] += v.totalFee;
-            // Restore LIFO invariant: pendingRefund ≤ balance.
+            // Restore LIFO invariant: pendingRefunds[provider] ≤ balances[provider].
             // The excess is simply cancelled — it is NOT transferred to the provider.
-            if (acct.pendingRefund > acct.balance) {
-                acct.pendingRefund = acct.balance;
+            if (acct.pendingRefunds[v.provider] > acct.balances[v.provider]) {
+                acct.pendingRefunds[v.provider] = acct.balances[v.provider];
             }
             emit VoucherSettled(v.user, v.provider, v.totalFee, v.usageHash, v.nonce, SettlementStatus.SUCCESS);
             return SettlementStatus.SUCCESS;
         } else {
-            // Drain everything (balance + pendingRefund)
-            uint256 paid = acct.balance + acct.pendingRefund;
-            acct.balance = 0;
-            acct.pendingRefund = 0;
+            // Drain everything (balance + pendingRefund for this provider)
+            uint256 paid = acct.balances[v.provider] + acct.pendingRefunds[v.provider];
+            acct.balances[v.provider] = 0;
+            acct.pendingRefunds[v.provider] = 0;
             providerEarnings[v.provider] += paid;
             emit VoucherSettled(v.user, v.provider, v.totalFee, v.usageHash, v.nonce, SettlementStatus.INSUFFICIENT_BALANCE);
             return SettlementStatus.INSUFFICIENT_BALANCE;
@@ -256,7 +267,7 @@ contract SandboxServing {
         if (!_verifySignature(v)) {
             return SettlementStatus.INVALID_SIGNATURE;
         }
-        if (acct.balance >= v.totalFee) {
+        if (acct.balances[v.provider] >= v.totalFee) {
             return SettlementStatus.SUCCESS;
         }
         return SettlementStatus.INSUFFICIENT_BALANCE;
@@ -311,6 +322,21 @@ contract SandboxServing {
         (bool ok,) = msg.sender.call{value: amount}("");
         require(ok, "transfer failed");
         emit EarningsWithdrawn(msg.sender, amount);
+    }
+
+    // ─── Admin ────────────────────────────────────────────────────────────────
+
+    /// @notice Update the minimum stake required for new provider registration.
+    function setProviderStake(uint256 newStake) external onlyOwner {
+        emit ProviderStakeUpdated(providerStake, newStake);
+        providerStake = newStake;
+    }
+
+    /// @notice Transfer contract ownership to a new address.
+    function transferOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "zero address");
+        emit OwnershipTransferred(owner, newOwner);
+        owner = newOwner;
     }
 
     // ─── Provider Management ──────────────────────────────────────────────────
@@ -371,13 +397,24 @@ contract SandboxServing {
 
     // ─── View Functions ───────────────────────────────────────────────────────
 
-    function getAccount(address user)
+    function getBalance(address user, address provider)
         external
         view
         returns (uint256 balance, uint256 pendingRefund, uint256 refundUnlockAt)
     {
         Account storage a = _accounts[user];
-        return (a.balance, a.pendingRefund, a.refundUnlockAt);
+        return (a.balances[provider], a.pendingRefunds[provider], a.refundUnlockAts[provider]);
+    }
+
+    function balanceOfBatch(address[] calldata users, address provider)
+        external
+        view
+        returns (uint256[] memory balances)
+    {
+        balances = new uint256[](users.length);
+        for (uint256 i = 0; i < users.length; i++) {
+            balances[i] = _accounts[users[i]].balances[provider];
+        }
     }
 
     function getLastNonce(address user, address provider) external view returns (uint256) {

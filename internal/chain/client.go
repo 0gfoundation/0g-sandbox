@@ -342,9 +342,10 @@ func (c *Client) IsAcknowledged(ctx context.Context, user common.Address) (bool,
 	return ok, nil
 }
 
-// GetBalance returns only the on-chain balance for a user (satisfies proxy.BalanceChecker).
-func (c *Client) GetBalance(ctx context.Context, user common.Address) (*big.Int, error) {
-	balance, _, _, err := c.GetAccount(ctx, user)
+// GetBalance returns the on-chain balance for a user with a specific provider.
+// Satisfies proxy.BalanceChecker.
+func (c *Client) GetBalance(ctx context.Context, user, provider common.Address) (*big.Int, error) {
+	balance, _, _, err := c.GetProviderBalance(ctx, user, provider)
 	return balance, err
 }
 
@@ -404,12 +405,13 @@ func (c *Client) GetServiceInfo(ctx context.Context, provider common.Address) (*
 	}, nil
 }
 
-// GetAccount returns a user's balance, pendingRefund, and refundUnlockAt.
-func (c *Client) GetAccount(ctx context.Context, user common.Address) (balance, pendingRefund, refundUnlockAt *big.Int, err error) {
+// GetProviderBalance returns a user's balance, pendingRefund, and refundUnlockAt
+// for a specific provider.
+func (c *Client) GetProviderBalance(ctx context.Context, user, provider common.Address) (balance, pendingRefund, refundUnlockAt *big.Int, err error) {
 	opts := &bind.CallOpts{Context: ctx}
-	result, err := c.contract.GetAccount(opts, user)
+	result, err := c.contract.GetBalance(opts, user, provider)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("GetAccount: %w", err)
+		return nil, nil, nil, fmt.Errorf("GetBalance: %w", err)
 	}
 	return result.Balance, result.PendingRefund, result.RefundUnlockAt, nil
 }

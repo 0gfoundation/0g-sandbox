@@ -1,10 +1,19 @@
-# CLAUDE.md — 0G Sandbox Billing
+# CLAUDE.md — 0G Sandbox
 
 ## What This Is
 
-A Go billing proxy server that sits in front of Daytona (sandbox runtime) and charges users
-in 0G tokens via TEE-signed on-chain vouchers. Users deposit funds into a Solidity contract;
-the server creates signed vouchers and settles them on-chain periodically.
+**0G Sandbox** provides private, isolated sandboxes for vibe coding, solving two problems
+simultaneously:
+
+1. **Isolation**: local environments aren't isolated enough for running untrusted or
+   experimental code — each sandbox is a fully containerized Daytona workspace.
+2. **Confidentiality**: remote servers are controlled by the host provider — the billing
+   proxy and TEE signing key run inside a hardware TDX enclave managed by 0G Tapp, so
+   the host cannot inspect workloads or forge billing vouchers. The provider never sees
+   the user's code; sandbox workloads are opaque to the infrastructure operator.
+
+The billing layer is a Go proxy server in front of Daytona that charges users in 0G tokens
+via TEE-signed EIP-712 vouchers settled on-chain against a Solidity contract.
 
 ---
 

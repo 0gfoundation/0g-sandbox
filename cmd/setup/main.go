@@ -93,9 +93,28 @@ func main() {
 	if !ok {
 		fatalf("invalid --create-fee: %s", *createFee)
 	}
+
+	// Read providerStake from contract; attach it as msg.value on first registration.
+	callOpts := &bind.CallOpts{Context: ctx}
+	isRegistered, err := contract.ServiceExists(callOpts, addr)
+	if err != nil {
+		fatalf("ServiceExists: %v", err)
+	}
+	if !isRegistered {
+		requiredStake, err := contract.ProviderStake(callOpts)
+		if err != nil {
+			fatalf("ProviderStake: %v", err)
+		}
+		if requiredStake.Sign() > 0 {
+			auth.Value = requiredStake
+			fmt.Printf("      stake required: %s neuron (first registration)\n", requiredStake.String())
+		}
+	}
+
 	fmt.Printf("      price/min: %s neuron\n", pricePerMinBig.String())
 	fmt.Printf("      create fee: %s neuron\n", createFeeBig.String())
 	tx, err := contract.AddOrUpdateService(auth, *serviceURL, addr, pricePerMinBig, createFeeBig)
+	auth.Value = big.NewInt(0) // reset after call
 	if err != nil {
 		fatalf("AddOrUpdateService: %v", err)
 	}
@@ -106,10 +125,11 @@ func main() {
 	fmt.Println("      confirmed ✓")
 
 	// ── 2. Deposit ────────────────────────────────────────────────────────────
-	fmt.Printf("\n[2/3] Deposit %.4f 0G...\n", *depositEth)
+	// Deposit for self as provider (setup uses a single key for provider/user).
+	fmt.Printf("\n[2/3] Deposit %.4f 0G (for provider %s)...\n", *depositEth, addr.Hex())
 	depositWei := ogToNeuron(*depositEth)
 	auth.Value = depositWei
-	tx, err = contract.Deposit(auth, addr)
+	tx, err = contract.Deposit(auth, addr, addr)
 	if err != nil {
 		fatalf("Deposit: %v", err)
 	}
@@ -134,12 +154,12 @@ func main() {
 	fmt.Println("      confirmed ✓")
 
 	// ── Summary ───────────────────────────────────────────────────────────────
-	account, err := contract.GetAccount(&bind.CallOpts{Context: ctx}, addr)
+	bal, err := contract.GetBalance(&bind.CallOpts{Context: ctx}, addr, addr)
 	if err != nil {
-		fatalf("GetAccount: %v", err)
+		fatalf("GetBalance: %v", err)
 	}
 	fmt.Printf("\nSetup complete!\n")
-	fmt.Printf("  on-chain balance: %s neuron\n", account.Balance.String())
+	fmt.Printf("  on-chain balance (for self as provider): %s neuron\n", bal.Balance.String())
 	fmt.Printf("  provider/user:    %s\n", addr.Hex())
 }
 

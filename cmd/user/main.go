@@ -153,27 +153,31 @@ func runBalance(args []string) {
 	}
 
 	opts := &bind.CallOpts{Context: ctx}
-	acct, err := contract.GetAccount(opts, walletAddr)
-	if err != nil {
-		fatalf("GetAccount: %v", err)
-	}
 	fmt.Printf("Address:         %s\n", walletAddr.Hex())
 	fmt.Printf("Wallet balance:  %s neuron  (%.6f 0G)  ← for gas\n", nativeBal, neuronTo0G(nativeBal))
-	fmt.Printf("Contract balance:%s neuron  (%.6f 0G)  ← for sandbox\n", acct.Balance, neuronTo0G(acct.Balance))
 
 	if *providerHex != "" {
 		providerAddr := common.HexToAddress(*providerHex)
+		bal, err := contract.GetBalance(opts, walletAddr, providerAddr)
+		if err != nil {
+			fatalf("GetBalance: %v", err)
+		}
+		fmt.Printf("Contract balance:%s neuron  (%.6f 0G)  ← for sandbox (provider %s)\n",
+			bal.Balance, neuronTo0G(bal.Balance), providerAddr.Hex())
+
 		nonce, err := contract.GetLastNonce(opts, walletAddr, providerAddr)
 		if err != nil {
 			fatalf("GetLastNonce: %v", err)
 		}
-		fmt.Printf("Nonce (vs provider %s): %s\n", providerAddr.Hex(), nonce)
+		fmt.Printf("Nonce (vs provider): %s\n", nonce)
 
 		earnings, err := contract.GetProviderEarnings(opts, providerAddr)
 		if err != nil {
 			fatalf("GetProviderEarnings: %v", err)
 		}
 		fmt.Printf("Provider earnings: %s neuron  (%.6f 0G)\n", earnings, neuronTo0G(earnings))
+	} else {
+		fmt.Println("(use --provider <addr> to see per-provider balance)")
 	}
 }
 
@@ -182,12 +186,18 @@ func runBalance(args []string) {
 func runDeposit(args []string) {
 	fs := flag.NewFlagSet("deposit", flag.ExitOnError)
 	cf := addChainFlags(fs)
-	keyHex   := fs.String("key",      "", "User private key (hex); or set USER_KEY env")
-	amount   := fs.Float64("amount",  0.01, "Amount to deposit in 0G (e.g. 0.01)")
+	keyHex      := fs.String("key",      "", "User private key (hex); or set USER_KEY env")
+	amount      := fs.Float64("amount",  0.01, "Amount to deposit in 0G (e.g. 0.01)")
+	providerHex := fs.String("provider", "", "Provider address to deposit for (required)")
 	_ = fs.Parse(args)
+
+	if *providerHex == "" {
+		fatalf("--provider is required")
+	}
 
 	privKey := mustLoadKey(*keyHex)
 	userAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	providerAddr := common.HexToAddress(*providerHex)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
@@ -205,11 +215,12 @@ func runDeposit(args []string) {
 	auth.Value = depositWei
 
 	fmt.Printf("User:     %s\n", userAddr.Hex())
+	fmt.Printf("Provider: %s\n", providerAddr.Hex())
 	fmt.Printf("Amount:   %.6f 0G (%s neuron)\n", *amount, depositWei)
 	fmt.Printf("Contract: %s\n", cf.contract)
 
 	fmt.Println("\n[1/1] Deposit...")
-	tx, err := contract.Deposit(auth, userAddr)
+	tx, err := contract.Deposit(auth, userAddr, providerAddr)
 	if err != nil {
 		fatalf("Deposit: %v", err)
 	}
@@ -220,9 +231,10 @@ func runDeposit(args []string) {
 	}
 
 	opts := &bind.CallOpts{Context: ctx}
-	acct, _ := contract.GetAccount(opts, userAddr)
+	bal, _ := contract.GetBalance(opts, userAddr, providerAddr)
 	fmt.Println("      confirmed ✓")
-	fmt.Printf("\nNew balance: %s neuron  (%.6f 0G)\n", acct.Balance, neuronTo0G(acct.Balance))
+	fmt.Printf("\nNew balance (for provider %s): %s neuron  (%.6f 0G)\n",
+		providerAddr.Hex(), bal.Balance, neuronTo0G(bal.Balance))
 }
 
 // ── acknowledge ──────────────────────────────────────────────────────────────
@@ -601,22 +613,22 @@ func printSandboxOutput(id, command, output string, exitCode int) {
 	}
 	bottomFill := strings.Repeat("─", inner-runeWidth(statusMark))
 
-	fmt.Printf(cyan+"┌"+strings.Repeat("─", inner)+"┐"+reset+"\n")
-	fmt.Printf(cyan+"│"+reset+"%s"+cyan+"│"+reset+"\n", labelPadded)
+	fmt.Print(cyan + "┌" + strings.Repeat("─", inner) + "┐" + reset + "\n")
+	fmt.Print(cyan + "│" + reset + labelPadded + cyan + "│" + reset + "\n")
 
 	if output != "" {
-		fmt.Printf(cyan+"├"+strings.Repeat("─", inner)+"┤"+reset+"\n")
+		fmt.Print(cyan + "├" + strings.Repeat("─", inner) + "┤" + reset + "\n")
 		lineWidth := inner - 2 // 1 space padding each side
 		for _, line := range strings.Split(strings.TrimRight(output, "\n"), "\n") {
 			runes := []rune(line)
 			for len(runes) > lineWidth {
-				fmt.Printf(cyan+"│"+reset+" %s "+cyan+"│"+reset+"\n", string(runes[:lineWidth]))
+				fmt.Print(cyan + "│" + reset + " " + string(runes[:lineWidth]) + " " + cyan + "│" + reset + "\n")
 				runes = runes[lineWidth:]
 			}
-			fmt.Printf(cyan+"│"+reset+" %-*s "+cyan+"│"+reset+"\n", lineWidth, string(runes))
+			fmt.Printf("%s│%s %-*s %s│%s\n", cyan, reset, lineWidth, string(runes), cyan, reset)
 		}
 	}
-	fmt.Printf(borderColor+"└"+bottomFill+statusMark+"┘"+reset+"\n")
+	fmt.Print(borderColor + "└" + bottomFill + statusMark + "┘" + reset + "\n")
 }
 
 // ── toolbox ──────────────────────────────────────────────────────────────────
