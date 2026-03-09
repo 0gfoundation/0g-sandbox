@@ -394,20 +394,15 @@ Show the token to the user clearly. Then say:
 
 **Step 3 — SSH tunnel (user executes on LOCAL machine)**
 
-Give the user this command (use single quotes around password to avoid zsh `!` expansion):
+Give the user this **single-line** command (single quotes to avoid zsh `!` expansion):
 
 ```bash
-# If sshpass is available (brew install hudochenkov/sshpass/sshpass on Mac):
-sshpass -p '<SSH_TOKEN>' ssh -N -L 13284:localhost:3284 \
-  -p 2222 -o StrictHostKeyChecking=no '<SSH_TOKEN>@HOST' &
-
-# If sshpass not available, use regular ssh (will prompt for password):
 ssh -N -L 13284:localhost:3284 -p 2222 -o StrictHostKeyChecking=no '<SSH_TOKEN>@HOST' &
-# Enter password when prompted: <SSH_TOKEN>
 ```
 
 > ⚠️ Use port **13284** (not 3284) — local 3284 may already be in use.
 > ⚠️ zsh users: always wrap SSH token in **single quotes** — `!` triggers history expansion in double quotes.
+> ℹ️ No password needed — the SSH token serves as both username and authentication credential.
 
 Wait for user to confirm tunnel is running, then:
 
@@ -433,34 +428,43 @@ Then present the user with this tutorial:
 > **SSH Setup Tutorial (run on your local machine)**
 >
 > ```bash
-> # 1. Connect to sandbox (password = SSH Token)
+> # 1. Connect to sandbox (no password needed — token is username AND auth credential)
 > ssh -p <PORT> -o StrictHostKeyChecking=no '<SSH_TOKEN>@<HOST>'
+> ```
 >
+> ```bash
 > # 2. Set gateway mode (required, or gateway refuses to start)
 > openclaw config set gateway.mode local
+> ```
 >
+> ```bash
 > # 3. Start OpenClaw Gateway (replace with your API Key)
 > export ANTHROPIC_API_KEY=sk-ant-YOUR-KEY
 > nohup bash -c 'openclaw gateway run --bind lan --port 3284 > /tmp/openclaw.log 2>&1' &
 > sleep 3 && grep "listening on" /tmp/openclaw.log
+> ```
 >
+> ```bash
 > # 4. Get auth token
 > node -e "console.log(require('/root/.openclaw/openclaw.json').gateway.auth.token)"
+> ```
 >
+> ```bash
 > # 5. Exit SSH
 > exit
 > ```
 >
 > ```bash
-> # 6. Establish SSH Tunnel on local machine (new terminal window, single quotes to avoid zsh ! expansion)
+> # 6. Establish SSH Tunnel — new terminal window, single-line, single quotes to avoid zsh ! expansion
 > ssh -N -L 13284:localhost:3284 -p <PORT> -o StrictHostKeyChecking=no '<SSH_TOKEN>@<HOST>' &
-> # Enter password: <SSH_TOKEN>
 > ```
 >
 > 7. Open browser (**must use `#token=` hash fragment format**):
 >    **http://localhost:13284/#token=`<openclaw-token>`**
 >
 > **Notes:**
+> - No password needed — SSH token is both username and auth credential
+> - Always use **single-line** commands to avoid copy-paste issues with line continuations
 > - Local port 3284 may be in use → use 13284 or another port
 > - zsh: always wrap tokens containing `!` in single quotes
 > - SSH Token expires after 60 min → re-run `ssh-access` to refresh tunnel
