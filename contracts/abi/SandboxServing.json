@@ -50,12 +50,17 @@
         "internalType": "address"
       },
       {
-        "name": "computePricePerMin",
+        "name": "pricePerCPUPerMin",
         "type": "uint256",
         "internalType": "uint256"
       },
       {
         "name": "createFee",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "pricePerMemGBPerMin",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -406,7 +411,7 @@
         "internalType": "address"
       },
       {
-        "name": "computePricePerMin",
+        "name": "pricePerCPUPerMin",
         "type": "uint256",
         "internalType": "uint256"
       },
@@ -417,6 +422,11 @@
       },
       {
         "name": "signerVersion",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "pricePerMemGBPerMin",
         "type": "uint256",
         "internalType": "uint256"
       }

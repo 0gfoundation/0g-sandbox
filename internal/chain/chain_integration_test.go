@@ -170,7 +170,7 @@ func deployFixture(t *testing.T) (
 	pricePerMin := big.NewInt(100)
 	createFee := big.NewInt(0)
 	providerAuth.Value = big.NewInt(0)
-	_, err = contract.AddOrUpdateService(providerAuth, "https://provider.test", teeSigner, pricePerMin, createFee)
+	_, err = contract.AddOrUpdateService(providerAuth, "https://provider.test", teeSigner, pricePerMin, createFee, big.NewInt(0))
 	if err != nil {
 		t.Fatalf("addOrUpdateService: %v", err)
 	}

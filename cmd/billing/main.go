@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -27,6 +28,7 @@ import (
 	"github.com/0gfoundation/0g-sandbox-billing/internal/daytona"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/events"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/proxy"
+	"github.com/0gfoundation/0g-sandbox-billing/internal/registry"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/settler"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/tee"
 	"github.com/0gfoundation/0g-sandbox-billing/web"
@@ -80,24 +82,55 @@ func main() {
 	}
 
 	// ── Pricing: on-chain service registration is the source of truth ────────
-	// Read computePricePerSec and createFee from the on-chain service record so
-	// that users can verify the actual billing rate on the contract explorer.
-	// Fall back to env vars only when the service is not yet registered (dev /
-	// first-time setup).
-	computePricePerSec, createFee, err := onchain.GetServicePricing(ctx, common.HexToAddress(cfg.Chain.ProviderAddress))
+	// Read per-resource prices and createFee from the contract so users can
+	// verify the actual billing rate on the chain explorer.
+	// Fall back to env vars only when the service is not yet registered.
+	chainCPUPerSec, chainMemPerSec, createFee, err := onchain.GetServicePricing(ctx, common.HexToAddress(cfg.Chain.ProviderAddress))
 	if err != nil {
 		log.Warn("could not read on-chain service pricing; falling back to env vars", zap.Error(err))
 	}
-	if computePricePerSec == nil || computePricePerSec.Sign() == 0 {
+
+	// Per-CPU price: on-chain takes priority; fall back to env var.
+	pricePerCPUPerSec := chainCPUPerSec
+	if pricePerCPUPerSec == nil || pricePerCPUPerSec.Sign() == 0 {
+		pricePerCPUPerSec = new(big.Int)
+		if cfg.Billing.PricePerCPUPerSec != "0" && cfg.Billing.PricePerCPUPerSec != "" {
+			if _, ok := pricePerCPUPerSec.SetString(cfg.Billing.PricePerCPUPerSec, 10); !ok {
+				log.Fatal("invalid PRICE_PER_CPU_PER_SEC")
+			}
+		}
+		log.Info("using env PRICE_PER_CPU_PER_SEC (service not on-chain or zero)", zap.String("value", pricePerCPUPerSec.String()))
+	} else {
+		log.Info("using on-chain pricePerCPUPerSec", zap.String("value", pricePerCPUPerSec.String()))
+	}
+
+	// Per-mem price: on-chain takes priority; fall back to env var.
+	pricePerMemGBPerSec := chainMemPerSec
+	if pricePerMemGBPerSec == nil || pricePerMemGBPerSec.Sign() == 0 {
+		pricePerMemGBPerSec = new(big.Int)
+		if cfg.Billing.PricePerMemGBPerSec != "0" && cfg.Billing.PricePerMemGBPerSec != "" {
+			if _, ok := pricePerMemGBPerSec.SetString(cfg.Billing.PricePerMemGBPerSec, 10); !ok {
+				log.Fatal("invalid PRICE_PER_MEM_GB_PER_SEC")
+			}
+		}
+		log.Info("using env PRICE_PER_MEM_GB_PER_SEC (service not on-chain or zero)", zap.String("value", pricePerMemGBPerSec.String()))
+	} else {
+		log.Info("using on-chain pricePerMemGBPerSec", zap.String("value", pricePerMemGBPerSec.String()))
+	}
+
+	// Flat compute price (legacy fallback when both per-resource prices are 0).
+	// Seeded from env var; not read from chain anymore (chain now stores per-resource).
+	computePricePerSec := new(big.Int)
+	if pricePerCPUPerSec.Sign() == 0 && pricePerMemGBPerSec.Sign() == 0 {
 		var ok bool
 		computePricePerSec, ok = new(big.Int).SetString(cfg.Billing.ComputePricePerSec, 10)
 		if !ok {
 			log.Fatal("invalid COMPUTE_PRICE_PER_SEC")
 		}
-		log.Info("using env COMPUTE_PRICE_PER_SEC (service not on-chain)", zap.String("value", computePricePerSec.String()))
-	} else {
-		log.Info("using on-chain compute price", zap.String("per_sec", computePricePerSec.String()))
+		log.Info("using flat COMPUTE_PRICE_PER_SEC (both per-resource prices are 0)", zap.String("value", computePricePerSec.String()))
 	}
+
+	// Create fee: on-chain takes priority; fall back to env var.
 	if createFee == nil || createFee.Sign() == 0 {
 		var ok bool
 		createFee, ok = new(big.Int).SetString(cfg.Billing.CreateFee, 10)
@@ -128,6 +161,8 @@ func main() {
 		cfg.Chain.ProviderAddress,
 		computePricePerSec,
 		createFee,
+		pricePerCPUPerSec,
+		pricePerMemGBPerSec,
 		signer,
 		log,
 	)
@@ -161,13 +196,15 @@ func main() {
 	// Public providers list — returns known providers with their on-chain service data.
 	r.GET("/api/providers", func(c *gin.Context) {
 		type ProviderInfo struct {
-			Address            string `json:"address"`
-			URL                string `json:"url"`
-			TEESigner          string `json:"tee_signer"`
-			ComputePricePerMin string `json:"compute_price_per_min"`
-			ComputePricePerSec string `json:"compute_price_per_sec"`
-			CreateFee          string `json:"create_fee"`
-			SignerVersion      string `json:"signer_version"`
+			Address               string `json:"address"`
+			URL                   string `json:"url"`
+			TEESigner             string `json:"tee_signer"`
+			PricePerCPUPerMin     string `json:"price_per_cpu_per_min"`
+			PricePerCPUPerSec     string `json:"price_per_cpu_per_sec"`
+			PricePerMemGBPerMin   string `json:"price_per_mem_gb_per_min"`
+			PricePerMemGBPerSec   string `json:"price_per_mem_gb_per_sec"`
+			CreateFee             string `json:"create_fee"`
+			SignerVersion         string `json:"signer_version"`
 		}
 		// For now: just the configured provider.  Extend via KNOWN_PROVIDERS in the future.
 		addrs := []string{cfg.Chain.ProviderAddress}
@@ -180,15 +217,18 @@ func main() {
 			if err != nil || svcInfo == nil {
 				continue
 			}
-			perSec := new(big.Int).Div(svcInfo.ComputePricePerMin, big.NewInt(60))
+			cpuPerSec := new(big.Int).Div(svcInfo.PricePerCPUPerMin, big.NewInt(60))
+			memPerSec := new(big.Int).Div(svcInfo.PricePerMemGBPerMin, big.NewInt(60))
 			providers = append(providers, ProviderInfo{
-				Address:            addr,
-				URL:                svcInfo.URL,
-				TEESigner:          svcInfo.TEESignerAddress.Hex(),
-				ComputePricePerMin: svcInfo.ComputePricePerMin.String(),
-				ComputePricePerSec: perSec.String(),
-				CreateFee:          svcInfo.CreateFee.String(),
-				SignerVersion:      svcInfo.SignerVersion.String(),
+				Address:             addr,
+				URL:                 svcInfo.URL,
+				TEESigner:           svcInfo.TEESignerAddress.Hex(),
+				PricePerCPUPerMin:   svcInfo.PricePerCPUPerMin.String(),
+				PricePerCPUPerSec:   cpuPerSec.String(),
+				PricePerMemGBPerMin: svcInfo.PricePerMemGBPerMin.String(),
+				PricePerMemGBPerSec: memPerSec.String(),
+				CreateFee:           svcInfo.CreateFee.String(),
+				SignerVersion:       svcInfo.SignerVersion.String(),
 			})
 		}
 		if providers == nil {
@@ -208,6 +248,67 @@ func main() {
 			"voucher_interval_sec": cfg.Billing.VoucherIntervalSec,
 			"min_balance":         minBalance.String(),
 		})
+	})
+
+	// Public snapshots list — no signing required; snapshots are provider-managed
+	// base images visible to all users.
+	r.GET("/api/snapshots", func(c *gin.Context) {
+		snaps, err := dtona.ListSnapshots(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "upstream error"})
+			return
+		}
+		if snaps == nil {
+			snaps = []daytona.Snapshot{}
+		}
+		c.JSON(http.StatusOK, snaps)
+	})
+
+	// Registry images — lists Docker images in the internal registry.
+	// Used by the provider dashboard to populate the snapshot image dropdown.
+	r.GET("/api/registry/images", func(c *gin.Context) {
+		registryURL := cfg.Daytona.RegistryURL
+		httpClient := &http.Client{Timeout: 10 * time.Second}
+		resp, err := httpClient.Get(registryURL + "/v2/_catalog")
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "registry unavailable"})
+			return
+		}
+		defer resp.Body.Close()
+		var catalog struct {
+			Repositories []string `json:"repositories"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&catalog); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "decode catalog"})
+			return
+		}
+		var images []string
+		for _, repo := range catalog.Repositories {
+			// Skip internal Daytona sandbox images and backup archives.
+			base := repo
+			if idx := strings.LastIndex(repo, "/"); idx >= 0 {
+				base = repo[idx+1:]
+			}
+			if strings.HasPrefix(base, "daytona-") || strings.HasPrefix(base, "backup-") {
+				continue
+			}
+			tagsResp, err := httpClient.Get(registryURL + "/v2/" + repo + "/tags/list")
+			if err != nil {
+				continue
+			}
+			var tagList struct {
+				Tags []string `json:"tags"`
+			}
+			json.NewDecoder(tagsResp.Body).Decode(&tagList) //nolint:errcheck
+			tagsResp.Body.Close()
+			for _, tag := range tagList.Tags {
+				images = append(images, "registry:6000/"+repo+":"+tag)
+			}
+		}
+		if images == nil {
+			images = []string{}
+		}
+		c.JSON(http.StatusOK, images)
 	})
 
 	// Public sandbox list — no signing required, filters by ?wallet= query param.
@@ -240,6 +341,38 @@ func main() {
 
 	api := r.Group("/api", auth.Middleware(rdb))
 	proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, minBalance, computePricePerSec, cfg.Chain.ProviderAddress, rdb, log).Register(api)
+
+	// Provider-only: pull an image from an external registry into the internal registry.
+	// The import runs synchronously (crane.Copy) — may take minutes for large images.
+	api.POST("/registry/pull", func(c *gin.Context) {
+		wallet := c.GetString("wallet_address")
+		if !strings.EqualFold(wallet, cfg.Chain.ProviderAddress) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "provider only"})
+			return
+		}
+		var req struct {
+			Src      string `json:"src"`      // e.g. "docker.io/library/ubuntu:22.04"
+			Name     string `json:"name"`     // target repo name under registry:6000/daytona/
+			Tag      string `json:"tag"`      // target tag (must not be "latest")
+			Username string `json:"username"` // optional src registry username
+			Password string `json:"password"` // optional src registry password
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
+		if req.Src == "" || req.Name == "" || req.Tag == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "src, name, and tag are required"})
+			return
+		}
+		dst, err := registry.Copy(c.Request.Context(), req.Src, req.Name, req.Tag, req.Username, req.Password)
+		if err != nil {
+			log.Warn("registry pull failed", zap.Error(err))
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"image": dst})
+	})
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),

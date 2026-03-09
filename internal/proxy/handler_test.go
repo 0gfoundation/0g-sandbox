@@ -29,11 +29,11 @@ type mockBilling struct {
 	archives []string
 }
 
-func (m *mockBilling) OnCreate(_ context.Context, sandboxID, _ string) {
+func (m *mockBilling) OnCreate(_ context.Context, sandboxID, _ string, _, _ int) {
 	m.mu.Lock(); defer m.mu.Unlock()
 	m.creates = append(m.creates, sandboxID)
 }
-func (m *mockBilling) OnStart(_ context.Context, sandboxID, _ string) {
+func (m *mockBilling) OnStart(_ context.Context, sandboxID, _ string, _, _ int) {
 	m.mu.Lock(); defer m.mu.Unlock()
 	m.starts = append(m.starts, sandboxID)
 }

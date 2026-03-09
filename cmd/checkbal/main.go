@@ -17,7 +17,7 @@ func main() {
 	eth, _ := ethclient.Dial("https://evmrpc-testnet.0g.ai")
 	privKey, _ := crypto.HexToECDSA("859c3bd1baf85767059b81448d0902d2bb649d137f0df460eb576915d15d58eb")
 	addr := crypto.PubkeyToAddress(privKey.PublicKey)
-	c, _ := chain.NewSandboxServing(common.HexToAddress("0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210"), eth)
+	c, _ := chain.NewSandboxServing(common.HexToAddress("0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3"), eth)
 	opts := &bind.CallOpts{Context: context.Background()}
 
 	bal, _ := c.GetBalance(opts, addr, addr)
@@ -33,10 +33,12 @@ func main() {
 		fmt.Println("services error:", err)
 		return
 	}
-	fmt.Printf("computePricePerMin: %s neuron/min\n", svc.ComputePricePerMin)
-	perSec := new(big.Int).Div(svc.ComputePricePerMin, big.NewInt(60))
-	fmt.Printf("computePricePerSec: %s neuron/sec (÷60)\n", perSec)
-	fmt.Printf("expected per 60s:   %s neuron\n", new(big.Int).Mul(perSec, big.NewInt(60)))
+	fmt.Printf("pricePerCPUPerMin:  %s neuron/min\n", svc.PricePerCPUPerMin)
+	cpuPerSec := new(big.Int).Div(svc.PricePerCPUPerMin, big.NewInt(60))
+	fmt.Printf("pricePerCPUPerSec:  %s neuron/sec (÷60)\n", cpuPerSec)
+	fmt.Printf("pricePerMemGBPerMin:%s neuron/GB/min\n", svc.PricePerMemGBPerMin)
+	memPerSec := new(big.Int).Div(svc.PricePerMemGBPerMin, big.NewInt(60))
+	fmt.Printf("pricePerMemGBPerSec:%s neuron/GB/sec (÷60)\n", memPerSec)
 	fmt.Printf("createFee:          %s neuron\n", svc.CreateFee)
 	fmt.Printf("signerVersion:      %s\n", svc.SignerVersion)
 

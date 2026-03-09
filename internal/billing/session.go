@@ -17,6 +17,7 @@ type Session struct {
 	Provider      string
 	StartTime     int64
 	LastVoucherAt int64
+	PricePerSec   string // neuron/sec as decimal; empty = use flat rate fallback
 }
 
 func sessionKey(sandboxID string) string {
@@ -31,6 +32,7 @@ func CreateSession(ctx context.Context, rdb *redis.Client, s Session) error {
 		"provider", s.Provider,
 		"start_time", s.StartTime,
 		"last_voucher_at", s.LastVoucherAt,
+		"price_per_sec", s.PricePerSec,
 	).Err()
 }
 
@@ -90,5 +92,6 @@ func sessionFromMap(m map[string]string) (*Session, error) {
 		Provider:      m["provider"],
 		StartTime:     startTime,
 		LastVoucherAt: lastVoucherAt,
+		PricePerSec:   m["price_per_sec"],
 	}, nil
 }

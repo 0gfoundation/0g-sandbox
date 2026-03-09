@@ -30,9 +30,10 @@ contract SandboxServing {
     struct Service {
         string  url;
         address teeSignerAddress;
-        uint256 computePricePerMin;
+        uint256 pricePerCPUPerMin;    // was computePricePerMin (renamed, same storage slot)
         uint256 createFee;
-        uint256 signerVersion; // incremented on every signer/price/fee change
+        uint256 signerVersion;        // incremented on every signer/price/fee change
+        uint256 pricePerMemGBPerMin;  // appended (safe: extends into __gap territory)
     }
 
     struct SandboxVoucher {
@@ -343,13 +344,15 @@ contract SandboxServing {
 
     /// @notice Register or update provider service.
     /// @dev First registration requires staking providerStake ETH.
-    ///      Any change to teeSignerAddress, computePricePerMin, or createFee increments
-    ///      signerVersion, requiring all users to re-acknowledge before vouchers settle.
+    ///      Any change to teeSignerAddress, pricePerCPUPerMin, pricePerMemGBPerMin,
+    ///      or createFee increments signerVersion, requiring all users to
+    ///      re-acknowledge before vouchers settle.
     function addOrUpdateService(
         string  calldata url,
         address teeSignerAddress,
-        uint256 computePricePerMin,
-        uint256 createFee
+        uint256 pricePerCPUPerMin,
+        uint256 createFee,
+        uint256 pricePerMemGBPerMin
     ) external payable {
         bool isNew = !serviceExists[msg.sender];
         if (isNew) {
@@ -360,15 +363,17 @@ contract SandboxServing {
 
         Service storage svc = services[msg.sender];
         bool serviceChanged = !isNew && (
-            svc.teeSignerAddress   != teeSignerAddress   ||
-            svc.computePricePerMin != computePricePerMin ||
-            svc.createFee          != createFee
+            svc.teeSignerAddress    != teeSignerAddress    ||
+            svc.pricePerCPUPerMin   != pricePerCPUPerMin   ||
+            svc.pricePerMemGBPerMin != pricePerMemGBPerMin ||
+            svc.createFee           != createFee
         );
 
         svc.url                = url;
         svc.teeSignerAddress   = teeSignerAddress;
-        svc.computePricePerMin = computePricePerMin;
+        svc.pricePerCPUPerMin  = pricePerCPUPerMin;
         svc.createFee          = createFee;
+        svc.pricePerMemGBPerMin = pricePerMemGBPerMin;
         if (serviceChanged) {
             svc.signerVersion += 1;
         }

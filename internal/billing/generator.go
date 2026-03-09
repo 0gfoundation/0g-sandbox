@@ -70,7 +70,15 @@ func runGeneration(
 				return
 			}
 
-			totalFee := new(big.Int).Mul(big.NewInt(elapsedSec), computePricePerSec)
+			// Use the per-sandbox rate stored in the session; fall back to the
+		// global flat rate for sessions created before per-resource pricing.
+		price := computePricePerSec
+		if s.PricePerSec != "" {
+			if p, ok := new(big.Int).SetString(s.PricePerSec, 10); ok && p.Sign() > 0 {
+				price = p
+			}
+		}
+		totalFee := new(big.Int).Mul(big.NewInt(elapsedSec), price)
 			v := &voucher.SandboxVoucher{
 				SandboxID: s.SandboxID,
 				User:      common.HexToAddress(s.Owner),

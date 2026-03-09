@@ -16,8 +16,9 @@ type Config struct {
 }
 
 type DaytonaConfig struct {
-	APIURL   string `mapstructure:"api_url"`
-	AdminKey string `mapstructure:"admin_key"`
+	APIURL      string `mapstructure:"api_url"`
+	AdminKey    string `mapstructure:"admin_key"`
+	RegistryURL string `mapstructure:"registry_url"`
 }
 
 type RedisConfig struct {
@@ -26,9 +27,11 @@ type RedisConfig struct {
 }
 
 type BillingConfig struct {
-	VoucherIntervalSec int64  `mapstructure:"voucher_interval_sec"`
-	ComputePricePerSec string `mapstructure:"compute_price_per_sec"`
-	CreateFee          string `mapstructure:"create_fee"`
+	VoucherIntervalSec  int64  `mapstructure:"voucher_interval_sec"`
+	ComputePricePerSec  string `mapstructure:"compute_price_per_sec"`  // flat rate (fallback)
+	PricePerCPUPerSec   string `mapstructure:"price_per_cpu_per_sec"`  // per CPU core/sec
+	PricePerMemGBPerSec string `mapstructure:"price_per_mem_gb_per_sec"` // per GB memory/sec
+	CreateFee           string `mapstructure:"create_fee"`
 }
 
 type ChainConfig struct {
@@ -51,8 +54,11 @@ func Load() (*Config, error) {
 	v.SetDefault("server.port", 8080)
 	v.SetDefault("billing.voucher_interval_sec", 3600)
 	v.SetDefault("billing.compute_price_per_sec", "16667")
+	v.SetDefault("billing.price_per_cpu_per_sec", "0")
+	v.SetDefault("billing.price_per_mem_gb_per_sec", "0")
 	v.SetDefault("billing.create_fee", "5000000")
 	v.SetDefault("redis.addr", "redis:6379")
+	v.SetDefault("daytona.registry_url", "http://registry:6000")
 
 	// Config file (optional)
 	v.SetConfigName("config")
@@ -68,11 +74,14 @@ func Load() (*Config, error) {
 	bindings := map[string]string{
 		"daytona.api_url":              "DAYTONA_API_URL",
 		"daytona.admin_key":            "DAYTONA_ADMIN_KEY",
+		"daytona.registry_url":         "REGISTRY_URL",
 		"redis.addr":                   "REDIS_ADDR",
 		"redis.password":               "REDIS_PASSWORD",
 		"billing.voucher_interval_sec": "VOUCHER_INTERVAL_SEC",
-		"billing.compute_price_per_sec": "COMPUTE_PRICE_PER_SEC",
-		"billing.create_fee":           "CREATE_FEE",
+		"billing.compute_price_per_sec":   "COMPUTE_PRICE_PER_SEC",
+		"billing.price_per_cpu_per_sec":   "PRICE_PER_CPU_PER_SEC",
+		"billing.price_per_mem_gb_per_sec": "PRICE_PER_MEM_GB_PER_SEC",
+		"billing.create_fee":               "CREATE_FEE",
 		"chain.rpc_url":                "RPC_URL",
 		"chain.contract_address":       "SETTLEMENT_CONTRACT",
 		"chain.provider_private_key":   "PROVIDER_PRIVATE_KEY",

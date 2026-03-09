@@ -13,8 +13,22 @@ import (
 // Sandbox represents a Daytona sandbox resource.
 type Sandbox struct {
 	ID     string            `json:"id"`
+	Name   string            `json:"name"`
 	State  string            `json:"state"`
 	Labels map[string]string `json:"labels"`
+	CPU    int               `json:"cpu"`
+	Memory int               `json:"memory"` // GB
+}
+
+// Snapshot represents a Daytona snapshot resource.
+type Snapshot struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	ImageName string `json:"imageName"`
+	State     string `json:"state"`
+	CPU       int    `json:"cpu"`
+	Mem       int    `json:"mem"`
+	Disk      int    `json:"disk"`
 }
 
 // Client is an authenticated Daytona REST client.
@@ -146,6 +160,43 @@ func (c *Client) WaitStopped(ctx context.Context, id string) error {
 		case <-time.After(2 * time.Second):
 		}
 	}
+}
+
+// GetSnapshot returns a single snapshot by ID (UUID). Returns nil, nil when not found.
+func (c *Client) GetSnapshot(ctx context.Context, id string) (*Snapshot, error) {
+	resp, err := c.do(ctx, http.MethodGet, "/api/snapshots/"+id, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("daytona GetSnapshot %s: status %d", id, resp.StatusCode)
+	}
+	var s Snapshot
+	return &s, json.NewDecoder(resp.Body).Decode(&s)
+}
+
+// ListSnapshots returns all Daytona snapshots.
+func (c *Client) ListSnapshots(ctx context.Context) ([]Snapshot, error) {
+	resp, err := c.do(ctx, http.MethodGet, "/api/snapshots", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("daytona list snapshots: %s", b)
+	}
+	var page struct {
+		Items []Snapshot `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		return nil, fmt.Errorf("decode snapshots: %w", err)
+	}
+	return page.Items, nil
 }
 
 // BaseURL returns the configured base URL (used by reverse proxy).

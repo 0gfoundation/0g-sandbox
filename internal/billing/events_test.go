@@ -79,11 +79,14 @@ func newTestHandler(t *testing.T, ms *mockSigner) (*EventHandler, func(sandboxID
 	t.Helper()
 	rdb, _ := newTestRedis(t)
 	ctx := context.Background()
+	// zero unit prices → computePrice falls back to flat pricePerSec
 	h := NewEventHandler(
 		rdb,
 		testProvider,
 		big.NewInt(pricePerSec),
 		big.NewInt(createFeeVal),
+		new(big.Int), // pricePerCPUPerSec = 0
+		new(big.Int), // pricePerMemGBPerSec = 0
 		ms,
 		zap.NewNop(),
 	)
@@ -99,7 +102,7 @@ func TestOnCreate_EmitsVoucher(t *testing.T) {
 	ctx := context.Background()
 
 	before := time.Now().Unix()
-	h.OnCreate(ctx, testSandbox, testOwner)
+	h.OnCreate(ctx, testSandbox, testOwner, 1, 1)
 	after := time.Now().Unix()
 
 	v := ms.last()
@@ -144,8 +147,8 @@ func TestOnCreate_MonotonicallyIncrementsNonce(t *testing.T) {
 	h, _ := newTestHandler(t, ms)
 	ctx := context.Background()
 
-	h.OnCreate(ctx, "sb-a", testOwner)
-	h.OnCreate(ctx, "sb-b", testOwner)
+	h.OnCreate(ctx, "sb-a", testOwner, 1, 1)
+	h.OnCreate(ctx, "sb-b", testOwner, 1, 1)
 
 	if ms.count() != 2 {
 		t.Fatalf("expected 2 vouchers, got %d", ms.count())
@@ -161,7 +164,7 @@ func TestOnCreate_IncrNonceError_NoVoucher(t *testing.T) {
 	ms := &mockSigner{incrErr: errors.New("nonce service down")}
 	h, _ := newTestHandler(t, ms)
 
-	h.OnCreate(context.Background(), testSandbox, testOwner)
+	h.OnCreate(context.Background(), testSandbox, testOwner, 1, 1)
 
 	if ms.count() != 0 {
 		t.Errorf("expected 0 vouchers on nonce error, got %d", ms.count())
@@ -173,7 +176,7 @@ func TestOnCreate_SignEnqueueError_NoSessionCreated(t *testing.T) {
 	h, _ := newTestHandler(t, ms)
 
 	// Should not panic
-	h.OnCreate(context.Background(), testSandbox, testOwner)
+	h.OnCreate(context.Background(), testSandbox, testOwner, 1, 1)
 }
 
 // ── OnStart ───────────────────────────────────────────────────────────────────
@@ -184,7 +187,7 @@ func TestOnStart_CreatesSession(t *testing.T) {
 	ctx := context.Background()
 
 	before := time.Now().Unix()
-	h.OnStart(ctx, testSandbox, testOwner)
+	h.OnStart(ctx, testSandbox, testOwner, 1, 1)
 	after := time.Now().Unix()
 
 	sess, err := get(testSandbox)
@@ -220,7 +223,7 @@ func TestOnStart_IdempotentIfSessionExists(t *testing.T) {
 	h, get := newTestHandler(t, ms)
 	ctx := context.Background()
 
-	h.OnStart(ctx, testSandbox, testOwner)
+	h.OnStart(ctx, testSandbox, testOwner, 1, 1)
 	sess1, _ := get(testSandbox)
 	if sess1 == nil {
 		t.Fatal("expected session after first OnStart")
@@ -228,7 +231,7 @@ func TestOnStart_IdempotentIfSessionExists(t *testing.T) {
 	origStart := sess1.StartTime
 
 	time.Sleep(2 * time.Millisecond) // ensure clock would differ if overwritten
-	h.OnStart(ctx, testSandbox, testOwner)
+	h.OnStart(ctx, testSandbox, testOwner, 1, 1)
 
 	sess2, _ := get(testSandbox)
 	if sess2 == nil {
@@ -258,7 +261,7 @@ func TestOnStop_NoSession_NoVoucher(t *testing.T) {
 func TestOnStop_EmitsFinalVoucher(t *testing.T) {
 	ms := &mockSigner{}
 	rdb, _ := newTestRedis(t)
-	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(createFeeVal), ms, zap.NewNop())
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(createFeeVal), new(big.Int), new(big.Int), ms, zap.NewNop())
 	ctx := context.Background()
 
 	// Session started 180 seconds ago
@@ -292,7 +295,7 @@ func TestOnStop_EmitsFinalVoucher(t *testing.T) {
 func TestOnStop_DeletesSession(t *testing.T) {
 	ms := &mockSigner{}
 	rdb, _ := newTestRedis(t)
-	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(createFeeVal), ms, zap.NewNop())
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(createFeeVal), new(big.Int), new(big.Int), ms, zap.NewNop())
 	ctx := context.Background()
 
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
@@ -314,7 +317,7 @@ func TestOnStop_DeletesSession(t *testing.T) {
 func TestOnStop_ZeroMinutes_NoVoucher(t *testing.T) {
 	ms := &mockSigner{}
 	rdb, _ := newTestRedis(t)
-	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(createFeeVal), ms, zap.NewNop())
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(createFeeVal), new(big.Int), new(big.Int), ms, zap.NewNop())
 	ctx := context.Background()
 
 	// LastVoucherAt = now → elapsed ≈ 0 s → no voucher
@@ -339,7 +342,7 @@ func TestOnStop_ZeroMinutes_NoVoucher(t *testing.T) {
 func TestOnStop_SignEnqueueError_StillDeletesSession(t *testing.T) {
 	ms := &mockSigner{enqErr: errors.New("enqueue failed")}
 	rdb, _ := newTestRedis(t)
-	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(createFeeVal), ms, zap.NewNop())
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(createFeeVal), new(big.Int), new(big.Int), ms, zap.NewNop())
 	ctx := context.Background()
 
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
@@ -360,7 +363,7 @@ func TestOnStop_SignEnqueueError_StillDeletesSession(t *testing.T) {
 func TestOnDelete_BehavesLikeOnStop(t *testing.T) {
 	ms := &mockSigner{}
 	rdb, _ := newTestRedis(t)
-	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(createFeeVal), ms, zap.NewNop())
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(createFeeVal), new(big.Int), new(big.Int), ms, zap.NewNop())
 	ctx := context.Background()
 
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
@@ -386,7 +389,7 @@ func TestOnDelete_BehavesLikeOnStop(t *testing.T) {
 func TestOnArchive_DelegatesToDelete(t *testing.T) {
 	ms := &mockSigner{}
 	rdb, _ := newTestRedis(t)
-	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(createFeeVal), ms, zap.NewNop())
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(createFeeVal), new(big.Int), new(big.Int), ms, zap.NewNop())
 	ctx := context.Background()
 
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck

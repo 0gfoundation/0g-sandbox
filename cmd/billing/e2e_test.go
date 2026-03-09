@@ -151,9 +151,9 @@ func deployE2EFixture(t *testing.T) *e2eFixture {
 		t.Fatalf("bind contract: %v", err)
 	}
 
-	// Register service (TEE signer == providerAddr, price 100 neuron/min, no create fee)
+	// Register service (TEE signer == providerAddr, 100 neuron/CPU/min, 0 mem fee, no create fee)
 	_, err = contract.AddOrUpdateService(providerAuth, "https://provider.test",
-		providerAddr, big.NewInt(100), big.NewInt(0))
+		providerAddr, big.NewInt(100), big.NewInt(0), big.NewInt(0))
 	if err != nil {
 		t.Fatalf("addOrUpdateService: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestComponent_HappyPath(t *testing.T) {
 	signer := billing.NewSigner(fix.providerKey, e2eChainID, fix.proxyAddr, fix.providerAddr,
 		rdb, &e2eNonceReader{fix.contract}, zap.NewNop())
 	bh := billing.NewEventHandler(rdb, fix.providerAddr.Hex(),
-		big.NewInt(0), big.NewInt(100), signer, zap.NewNop())
+		big.NewInt(0), big.NewInt(100), new(big.Int), new(big.Int), signer, zap.NewNop())
 
 	srv := buildServer(t, dtona, bh, rdb)
 
@@ -517,7 +517,7 @@ func TestComponent_InsufficientBalance(t *testing.T) {
 	signer := billing.NewSigner(fix.providerKey, e2eChainID, fix.proxyAddr, fix.providerAddr,
 		rdb, &e2eNonceReader{fix.contract}, zap.NewNop())
 	bh := billing.NewEventHandler(rdb, fix.providerAddr.Hex(),
-		big.NewInt(0), big.NewInt(100), signer, zap.NewNop())
+		big.NewInt(0), big.NewInt(100), new(big.Int), new(big.Int), signer, zap.NewNop())
 
 	srv := buildServer(t, dtona, bh, rdb)
 
@@ -581,8 +581,8 @@ func TestComponent_InsufficientBalance(t *testing.T) {
 // Used by tests that only care about proxy/ownership behavior, not billing.
 type noopBillingHooks struct{}
 
-func (n *noopBillingHooks) OnCreate(_ context.Context, _, _ string)       {}
-func (n *noopBillingHooks) OnStart(_ context.Context, _, _ string)        {}
+func (n *noopBillingHooks) OnCreate(_ context.Context, _, _ string, _, _ int) {}
+func (n *noopBillingHooks) OnStart(_ context.Context, _, _ string, _, _ int)  {}
 func (n *noopBillingHooks) OnStop(_ context.Context, _ string)            {}
 func (n *noopBillingHooks) OnDelete(_ context.Context, _ string)          {}
 func (n *noopBillingHooks) OnArchive(_ context.Context, _ string)         {}

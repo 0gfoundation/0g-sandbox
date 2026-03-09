@@ -255,7 +255,8 @@ tbody tr:hover td{background:#fafafa}
             <div class="info-row"><span class="ik">Registered</span><span id="svcRegistered">—</span></div>
             <div class="info-row"><span class="ik">Service URL</span><span class="iv" id="svcUrl">—</span></div>
             <div class="info-row"><span class="ik">TEE Signer</span><span class="iv purple" id="svcTEE">—</span></div>
-            <div class="info-row"><span class="ik">Compute Price/min</span><span class="iv" id="svcPrice">—</span></div>
+            <div class="info-row"><span class="ik">CPU Price/min</span><span class="iv" id="svcCPUPrice">—</span></div>
+            <div class="info-row"><span class="ik">Mem Price/GB/min</span><span class="iv" id="svcMemPrice">—</span></div>
             <div class="info-row"><span class="ik">Create Fee</span><span class="iv" id="svcFee">—</span></div>
             <div class="info-row"><span class="ik">Required Stake</span><span class="iv" id="svcStake">—</span></div>
           </div>
@@ -288,6 +289,20 @@ tbody tr:hover td{background:#fafafa}
         </div>
       </div>
 
+    </div>
+
+    <div class="card" style="margin-top:4px">
+      <div class="card-head">
+        <span class="card-title">Snapshots</span>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm btn-ghost" onclick="loadProviderSnapshots()">↻</button>
+          <button class="btn btn-sm btn-ghost" onclick="openModal('importModal')">↓ Import Image</button>
+          <button class="btn btn-sm btn-prim" onclick="openSnapshotModal()">+ New</button>
+        </div>
+      </div>
+      <div class="card-body" style="padding:0">
+        <div id="snapshotTable"><div class="empty">Click ↻ to load snapshots.</div></div>
+      </div>
     </div>
 
     <div class="card" style="margin-top:4px">
@@ -333,6 +348,11 @@ tbody tr:hover td{background:#fafafa}
       <input id="sandboxName" type="text" placeholder="my-sandbox" maxlength="60">
       <div class="hint">Leave blank to auto-generate a name.</div>
     </div>
+    <div class="field">
+      <label>Snapshot (optional)</label>
+      <select id="snapshotSelect"><option value="">— Default (no snapshot) —</option></select>
+      <div class="hint">Select a pre-built environment, or leave blank for the default image.</div>
+    </div>
     <div id="createErr"></div>
     <div class="modal-btns">
       <button class="btn btn-ghost" onclick="closeModal('createModal')">Cancel</button>
@@ -361,7 +381,8 @@ tbody tr:hover td{background:#fafafa}
     <div class="modal-title">Register / Update Service</div>
     <div class="field"><label>Service URL</label><input id="svcUrlInput" type="text" placeholder="https://your-daytona-url"></div>
     <div class="field"><label>TEE Signer Address</label><input id="svcTEEInput" type="text" placeholder="0x..."></div>
-    <div class="field"><label>Compute Price / min (neuron)</label><input id="svcPriceInput" type="number" value="1000020" min="0"></div>
+    <div class="field"><label>CPU Price / min (neuron)</label><input id="svcCPUPriceInput" type="number" value="1000000000000000" min="0"></div>
+    <div class="field"><label>Mem Price / GB / min (neuron)</label><input id="svcMemPriceInput" type="number" value="500000000000000" min="0"></div>
     <div class="field"><label>Create Fee (neuron)</label><input id="svcFeeInput" type="number" value="5000000" min="0"></div>
     <div class="field">
       <label>Stake (0G) — required for first registration</label>
@@ -371,6 +392,41 @@ tbody tr:hover td{background:#fafafa}
     <div class="modal-btns">
       <button class="btn btn-ghost" onclick="closeModal('serviceModal')">Cancel</button>
       <button class="btn btn-prim" onclick="doRegisterService()">Submit</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="snapshotModal">
+  <div class="modal">
+    <div class="modal-title">Register Snapshot</div>
+    <div class="field"><label>Image</label><select id="snapImageSelect" style="width:100%"><option value="">Loading…</option></select></div>
+    <div class="field"><label>Name</label><input id="snapNameInput" type="text" placeholder="my-snapshot"></div>
+    <div class="field"><label>Resources</label><select id="snapPresetSelect" style="width:100%">
+      <option value="1:1:3">Small — 1 CPU / 1 GB RAM / 3 GB Disk</option>
+      <option value="2:4:10">Medium — 2 CPU / 4 GB RAM / 10 GB Disk</option>
+      <option value="4:8:20">Large — 4 CPU / 8 GB RAM / 20 GB Disk</option>
+    </select></div>
+    <div class="err" id="snapshotErr"></div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost" onclick="closeModal('snapshotModal')">Cancel</button>
+      <button class="btn btn-prim" id="snapshotSubmitBtn" onclick="doRegisterSnapshot()">Register</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="importModal">
+  <div class="modal">
+    <div class="modal-title">Import Image from External Registry</div>
+    <div class="field"><label>Source Image</label><input id="importSrc" type="text" placeholder="e.g. docker.io/library/ubuntu:22.04"></div>
+    <div class="field"><label>Username <span style="color:var(--muted);font-weight:400">(optional)</span></label><input id="importUser" type="text" placeholder="registry username"></div>
+    <div class="field"><label>Password <span style="color:var(--muted);font-weight:400">(optional)</span></label><input id="importPass" type="password" placeholder="registry password or token"></div>
+    <div class="field"><label>Target Name</label><input id="importName" type="text" placeholder="my-image (stored as registry:6000/daytona/my-image)"></div>
+    <div class="field"><label>Target Tag</label><input id="importTag" type="text" placeholder="1.0.0 (not latest)"></div>
+    <div class="err" id="importErr"></div>
+    <div id="importProgress" style="display:none;font-size:12px;color:var(--muted);margin-top:4px">Pulling image… this may take a few minutes for large images.</div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost" onclick="closeModal('importModal')">Cancel</button>
+      <button class="btn btn-prim" id="importSubmitBtn" onclick="doImportImage()">Import</button>
     </div>
   </div>
 </div>
@@ -399,13 +455,13 @@ const ABI = [
   "function getBalance(address user, address provider) view returns (uint256 balance, uint256 pendingRefund, uint256 refundUnlockAt)",
   "function isTEEAcknowledged(address user, address provider) view returns (bool)",
   "function providerStake() view returns (uint256)",
-  "function services(address) view returns (string url, address teeSignerAddress, uint256 computePricePerMin, uint256 createFee, uint256 signerVersion)",
+  "function services(address) view returns (string url, address teeSignerAddress, uint256 pricePerCPUPerMin, uint256 createFee, uint256 signerVersion, uint256 pricePerMemGBPerMin)",
   "function serviceExists(address) view returns (bool)",
   "function providerEarnings(address) view returns (uint256)",
   "function providerStakes(address) view returns (uint256)",
   "function deposit(address recipient, address provider) payable",
   "function acknowledgeTEESigner(address provider, bool acknowledged)",
-  "function addOrUpdateService(string url, address teeSignerAddress, uint256 computePricePerMin, uint256 createFee) payable",
+  "function addOrUpdateService(string url, address teeSignerAddress, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin) payable",
   "function withdrawEarnings()",
   "function requestRefund(address provider, uint256 amount)",
   "function withdrawRefund(address provider)",
@@ -638,17 +694,23 @@ async function loadProviders() {
   }
 }
 
+function sandboxLabel(s) {
+  const name = s.name && s.name !== s.id ? s.name : null;
+  return name
+    ? `<span style="font-weight:500">${name}</span> <span class="pv-sandbox-id" style="font-size:11px">${s.id?.slice(0,8)}…</span>`
+    : `<span class="pv-sandbox-id">${s.id?.slice(0,14)||'—'}…</span>`;
+}
 function renderSandboxRows(sandboxes) {
   if (!sandboxes?.length) return '<div class="pv-sandbox-empty"><div style="font-size:22px;margin-bottom:6px">📭</div>No sandboxes yet. Create one to get started.</div>';
   return sandboxes.map(s => `
     <div class="pv-sandbox-row">
-      <span class="pv-sandbox-id">${s.id?.slice(0,14)||'—'}…</span>
+      <span style="flex:1;min-width:0">${sandboxLabel(s)}</span>
       ${stateTag(s.state)}
       <div class="pv-sandbox-actions">
         ${(s.state||'').toLowerCase()==='started' ? `<button class="btn btn-sm btn-ghost" onclick="doSSH('${s.id}')">SSH</button>` : ''}
-        ${['started','starting'].includes((s.state||'').toLowerCase()) ? `<button class="btn btn-sm btn-danger" onclick="doStop('${s.id}')">Stop</button>` : ''}
+        ${['started','starting'].includes((s.state||'').toLowerCase()) ? `<button class="btn btn-sm btn-danger" onclick="doStop('${s.id}','${(s.name&&s.name!==s.id?s.name:s.id?.slice(0,8))||s.id}')">Stop</button>` : ''}
         ${['archived','stopped'].includes((s.state||'').toLowerCase()) ? `<button class="btn btn-sm btn-prim" onclick="doStart('${s.id}')">Start</button>` : ''}
-        ${(s.state||'').toLowerCase()==='error' ? `<button class="btn btn-sm btn-ghost" onclick="doDelete('${s.id}')">Delete</button>` : ''}
+        ${['archived','stopped','error'].includes((s.state||'').toLowerCase()) ? `<button class="btn btn-sm btn-ghost" onclick="doDelete('${s.id}','${(s.name&&s.name!==s.id?s.name:s.id?.slice(0,8))||s.id}')">Delete</button>` : ''}
       </div>
     </div>`).join('');
 }
@@ -712,15 +774,20 @@ async function fetchSandboxIds() {
 
 async function doCreate() {
   const name=document.getElementById('sandboxName').value.trim();
+  const snapshot=document.getElementById('snapshotSelect').value;
   setErr('createErr',''); setLoading('createErr','');
   const btn=document.getElementById('createBtn'); btn.disabled=true; btn.textContent='Creating… (may take ~60s)';
   const prevIds=await fetchSandboxIds();
+  const body={};
+  if (name) body.name=name;
+  if (snapshot) body.snapshot=snapshot;
   try {
     const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),180000);
-    const resp=await signedFetch('POST','/api/sandbox',name?{name}:{},ctrl.signal); clearTimeout(timer);
+    const resp=await signedFetch('POST','/api/sandbox',body,ctrl.signal); clearTimeout(timer);
     let data={}; try{ data=await resp.json(); }catch(_){}
     if (!resp.ok) {
       if (resp.status===402) { setErr('createErr',`Insufficient balance (have ${fmtNeuron(data.balance)}, need ${fmtNeuron(data.required)}). Deposit first.`); return; }
+      if (resp.status===409) { setErr('createErr',`Name "${name}" is already taken — choose a different name.`); return; }
       setLoading('createErr','Checking if sandbox was created…');
       await new Promise(r=>setTimeout(r,3000));
       const created=[...(await fetchSandboxIds())].find(id=>!prevIds.has(id));
@@ -739,8 +806,8 @@ async function doCreate() {
   btn.disabled=false; btn.textContent='Create & Start';
 }
 
-async function doStop(id) {
-  if (!confirm(`Stop sandbox ${id}?`)) return;
+async function doStop(id, label) {
+  if (!confirm(`Stop sandbox "${label||id}"?`)) return;
   const r=await signedFetch('POST',`/api/sandbox/${id}/stop`).catch(e=>{toast(e.message,'error');return null});
   if (!r) return;
   if (!r.ok) { const d=await r.json().catch(()=>{}); toast(d?.error||'Failed','error'); return; }
@@ -754,8 +821,8 @@ async function doStart(id) {
   toast('Sandbox starting…','success'); await loadProviders();
 }
 
-async function doDelete(id) {
-  if (!confirm(`Delete sandbox ${id}? This cannot be undone.`)) return;
+async function doDelete(id, label) {
+  if (!confirm(`Delete sandbox "${label||id}"? This cannot be undone.`)) return;
   const r=await signedFetch('DELETE',`/api/sandbox/${id}`).catch(e=>{toast(e.message,'error');return null});
   if (!r) return;
   if (!r.ok) { let d={}; try{d=await r.json();}catch(_){} toast(d.error||'Failed to delete','error'); return; }
@@ -828,7 +895,8 @@ async function loadProviderData() {
       const svc=await contract.services(walletAddr);
       document.getElementById('svcUrl').textContent=svc.url||'—';
       document.getElementById('svcTEE').textContent=shortAddr(svc.teeSignerAddress); document.getElementById('svcTEE').title=svc.teeSignerAddress;
-      document.getElementById('svcPrice').textContent=fmtNeuron(svc.computePricePerMin.toString())+'/min';
+      document.getElementById('svcCPUPrice').textContent=fmtNeuron(svc.pricePerCPUPerMin.toString())+'/min';
+      document.getElementById('svcMemPrice').textContent=fmtNeuron(svc.pricePerMemGBPerMin.toString())+'/GB/min';
       document.getElementById('svcFee').textContent=fmtNeuron(svc.createFee.toString());
     }
     const stake=await contract.providerStake(); document.getElementById('svcStake').textContent=fmtNeuron(stake.toString());
@@ -839,12 +907,12 @@ async function loadProviderData() {
 
 async function doRegisterService() {
   const url=document.getElementById('svcUrlInput').value.trim(), tee=document.getElementById('svcTEEInput').value.trim(),
-        price=document.getElementById('svcPriceInput').value, fee=document.getElementById('svcFeeInput').value,
-        stake=document.getElementById('svcStakeInput').value;
+        cpuPrice=document.getElementById('svcCPUPriceInput').value, memPrice=document.getElementById('svcMemPriceInput').value,
+        fee=document.getElementById('svcFeeInput').value, stake=document.getElementById('svcStakeInput').value;
   if (!url||!tee) { setErr('serviceErr','URL and TEE address are required'); return; }
   setErr('serviceErr','');
   const value=stake&&parseFloat(stake)>0?ethers.parseEther(stake):0n;
-  await sendTx('Service update',()=>contract.addOrUpdateService(url,tee,BigInt(price),BigInt(fee),{value}),{
+  await sendTx('Service update',()=>contract.addOrUpdateService(url,tee,BigInt(cpuPrice),BigInt(fee),BigInt(memPrice),{value}),{
     onSuccess:async()=>{ closeModal('serviceModal'); await loadProviderData(); }, errEl:'serviceErr',
   });
 }
@@ -866,6 +934,97 @@ async function doArchiveAll() {
   finally { btn.disabled=false; btn.textContent='Archive All (Pre-deploy)'; }
 }
 
+// ── Snapshot Management (Provider) ────────────────────────────────────────────
+async function loadProviderSnapshots() {
+  const el=document.getElementById('snapshotTable');
+  el.innerHTML='<div class="empty">Loading…</div>';
+  try {
+    const snaps=await fetch('/api/snapshots').then(r=>r.ok?r.json():[]).catch(()=>[]);
+    if (!snaps.length) { el.innerHTML='<div class="empty">No snapshots yet.</div>'; return; }
+    const statColor={active:'green',pending:'orange',error:'red',pulling:'orange'};
+    el.innerHTML=`<table><thead><tr><th>Name</th><th>Image</th><th>Spec</th><th>Status</th><th></th></tr></thead><tbody>${
+      snaps.map(s=>`<tr>
+        <td style="font-weight:500">${s.name}</td>
+        <td style="font-size:11px;color:var(--muted);word-break:break-all">${s.imageName}</td>
+        <td style="white-space:nowrap">${s.cpu}C / ${s.mem}GB / ${s.disk}GB disk</td>
+        <td><span class="badge ${statColor[s.state]||'red'}">${s.state}</span></td>
+        <td><button class="btn btn-sm btn-warn" onclick="doDeleteSnapshot('${s.id}','${s.name}')">Delete</button></td>
+      </tr>`).join('')
+    }</tbody></table>`;
+  } catch(e) { el.innerHTML=`<div class="empty">Error: ${e.message}</div>`; }
+}
+
+async function openSnapshotModal() {
+  openModal('snapshotModal');
+  loadRegistryImages();
+}
+
+async function loadRegistryImages() {
+  const sel=document.getElementById('snapImageSelect');
+  sel.innerHTML='<option value="">Loading…</option>';
+  try {
+    const images=await fetch('/api/registry/images').then(r=>r.ok?r.json():[]).catch(()=>[]);
+    if (!images.length) { sel.innerHTML='<option value="">No images in registry</option>'; return; }
+    sel.innerHTML=images.map(img=>`<option value="${img}">${img}</option>`).join('');
+  } catch(e) { sel.innerHTML='<option value="">Error loading images</option>'; }
+}
+
+async function doRegisterSnapshot() {
+  const image=document.getElementById('snapImageSelect').value;
+  const name=document.getElementById('snapNameInput').value.trim();
+  const preset=document.getElementById('snapPresetSelect').value;
+  const [cpu,mem,disk]=preset.split(':').map(Number);
+  if (!image||!name) { setErr('snapshotErr','Image and name are required'); return; }
+  setErr('snapshotErr','');
+  const btn=document.getElementById('snapshotSubmitBtn'); btn.disabled=true; btn.textContent='Registering…';
+  try {
+    const resp=await signedFetch('POST','/api/snapshots',{imageName:image,name,cpu,memory:mem,disk});
+    const data=await resp.json().catch(()=>({}));
+    if (!resp.ok) { setErr('snapshotErr',data.error||`HTTP ${resp.status}`); return; }
+    toast(`Snapshot "${name}" registered (state: pending → active in ~30s)`,'success');
+    closeModal('snapshotModal');
+    document.getElementById('snapNameInput').value='';
+    await loadProviderSnapshots();
+  } catch(e) { setErr('snapshotErr',e.message); }
+  finally { btn.disabled=false; btn.textContent='Register'; }
+}
+
+async function doDeleteSnapshot(id, name) {
+  if (!confirm(`Delete snapshot "${name}"?`)) return;
+  const resp=await signedFetch('DELETE',`/api/snapshots/${id}`).catch(e=>{toast(e.message,'error');return null});
+  if (!resp) return;
+  if (resp.ok) { toast(`Snapshot "${name}" deleted`,'success'); await loadProviderSnapshots(); return; }
+  const d=await resp.json().catch(()=>{}); toast(d?.error||`Delete failed (HTTP ${resp.status})`,'error');
+}
+
+async function doImportImage() {
+  const src=document.getElementById('importSrc').value.trim();
+  const username=document.getElementById('importUser').value.trim();
+  const password=document.getElementById('importPass').value;
+  const name=document.getElementById('importName').value.trim();
+  const tag=document.getElementById('importTag').value.trim();
+  if (!src||!name||!tag) { setErr('importErr','Source image, target name, and tag are required'); return; }
+  setErr('importErr','');
+  const btn=document.getElementById('importSubmitBtn'); btn.disabled=true; btn.textContent='Importing…';
+  document.getElementById('importProgress').style.display='block';
+  try {
+    const resp=await signedFetch('POST','/api/registry/pull',{src,username,password,name,tag});
+    const data=await resp.json().catch(()=>({}));
+    if (!resp.ok) { setErr('importErr',data.error||`HTTP ${resp.status}`); return; }
+    toast(`Image imported: ${data.image}`,'success');
+    closeModal('importModal');
+    document.getElementById('importSrc').value='';
+    document.getElementById('importUser').value='';
+    document.getElementById('importPass').value='';
+    document.getElementById('importName').value='';
+    document.getElementById('importTag').value='';
+  } catch(e) { setErr('importErr',e.message); }
+  finally {
+    btn.disabled=false; btn.textContent='Import';
+    document.getElementById('importProgress').style.display='none';
+  }
+}
+
 // ── Auth-signed fetch ─────────────────────────────────────────────────────────
 function genUUID() {
   if (crypto.randomUUID) return crypto.randomUUID();
@@ -884,8 +1043,21 @@ function switchTab(name) {
   document.getElementById('tab'+name[0].toUpperCase()+name.slice(1)).classList.add('active');
   document.getElementById('content'+name[0].toUpperCase()+name.slice(1)).classList.add('active');
   if (name==='user'&&walletAddr) loadProviders();
+  if (name==='provider'&&walletAddr) { loadProviderData(); loadProviderSnapshots(); }
 }
-function openModal(id)  { document.getElementById(id).classList.add('open'); }
+async function loadSnapshots() {
+  try {
+    const snaps=await fetch('/api/snapshots').then(r=>r.ok?r.json():[]).catch(()=>[]);
+    const sel=document.getElementById('snapshotSelect');
+    sel.innerHTML='<option value="">— Default (no snapshot) —</option>';
+    (snaps||[]).filter(s=>s.state==='active').forEach(s=>{
+      const opt=document.createElement('option');
+      opt.value=s.name; opt.textContent=`${s.name}  (${s.cpu}C / ${s.mem}GB)`;
+      sel.appendChild(opt);
+    });
+  } catch(_) {}
+}
+function openModal(id)  { document.getElementById(id).classList.add('open'); if(id==='createModal') loadSnapshots(); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) m.classList.remove('open'); }));
 

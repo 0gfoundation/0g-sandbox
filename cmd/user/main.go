@@ -93,6 +93,8 @@ func main() {
 		runSSHAccess(os.Args[2:])
 	case "providers":
 		runProviders(os.Args[2:])
+	case "snapshots":
+		runListSnapshots(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
 		printUsage()
@@ -103,7 +105,7 @@ func main() {
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "usage: user <subcommand> [flags]")
 	fmt.Fprintln(os.Stderr, "  chain:  balance | deposit | acknowledge")
-	fmt.Fprintln(os.Stderr, "  api:    providers | create | list | start | stop | delete | exec | toolbox | ssh-access")
+	fmt.Fprintln(os.Stderr, "  api:    providers | create | list | start | stop | delete | exec | toolbox | ssh-access | snapshots")
 }
 
 // ── Shared chain flags ───────────────────────────────────────────────────────
@@ -336,12 +338,15 @@ func runProviders(args []string) {
 			fmt.Printf("[%d] %s  (error reading service: %v)\n\n", i+1, addr.Hex(), err)
 			continue
 		}
-		pricePerSec := new(big.Int).Div(svc.ComputePricePerMin, big.NewInt(60))
+		cpuPerSec := new(big.Int).Div(svc.PricePerCPUPerMin, big.NewInt(60))
+		memPerSec := new(big.Int).Div(svc.PricePerMemGBPerMin, big.NewInt(60))
 		fmt.Printf("[%d] %s\n", i+1, addr.Hex())
 		fmt.Printf("    URL:         %s\n", svc.Url)
 		fmt.Printf("    Create fee:  %.4f 0G\n", neuronTo0G(svc.CreateFee))
-		fmt.Printf("    Compute:     %.6f 0G/sec  (%.4f 0G/min)\n",
-			neuronTo0G(pricePerSec), neuronTo0G(svc.ComputePricePerMin))
+		fmt.Printf("    CPU price:   %.6f 0G/CPU/sec  (%.4f 0G/CPU/min)\n",
+			neuronTo0G(cpuPerSec), neuronTo0G(svc.PricePerCPUPerMin))
+		fmt.Printf("    Mem price:   %.6f 0G/GB/sec   (%.4f 0G/GB/min)\n",
+			neuronTo0G(memPerSec), neuronTo0G(svc.PricePerMemGBPerMin))
 		fmt.Printf("    TEE signer:  %s (v%s)\n", svc.TeeSignerAddress.Hex(), svc.SignerVersion)
 		fmt.Println()
 	}
@@ -363,16 +368,36 @@ func mustParseBigInt(s string) *big.Int {
 
 func runCreate(args []string) {
 	fs := flag.NewFlagSet("create", flag.ExitOnError)
-	apiURL  := fs.String("api", "http://localhost:8080", "Billing proxy URL")
-	keyHex  := fs.String("key", "",                     "User private key (hex); or set USER_KEY env")
-	image   := fs.String("image", "",                   "Sandbox image (optional)")
+	apiURL   := fs.String("api",      "http://localhost:8080", "Billing proxy URL")
+	keyHex   := fs.String("key",      "",                     "User private key (hex); or set USER_KEY env")
+	snapshot := fs.String("snapshot", "",                     "Snapshot name to use as the sandbox base (optional)")
+	class    := fs.String("class",    "",                     "Sandbox class: small | medium | large (optional)")
+	cpu      := fs.Int("cpu",         0,                      "CPU cores (optional, overrides class)")
+	memory   := fs.Int("memory",      0,                      "Memory in GB (optional, overrides class)")
+	disk     := fs.Int("disk",        0,                      "Disk in GB (optional, overrides class)")
 	_ = fs.Parse(args)
+
+	if *class != "" && *class != "small" && *class != "medium" && *class != "large" {
+		fatalf("--class must be one of: small, medium, large")
+	}
 
 	privKey := mustLoadKey(*keyHex)
 
 	body := map[string]any{}
-	if *image != "" {
-		body["image"] = *image
+	if *snapshot != "" {
+		body["snapshot"] = *snapshot
+	}
+	if *class != "" {
+		body["class"] = *class
+	}
+	if *cpu > 0 {
+		body["cpu"] = *cpu
+	}
+	if *memory > 0 {
+		body["memory"] = *memory
+	}
+	if *disk > 0 {
+		body["disk"] = *disk
 	}
 	payloadBytes, _ := json.Marshal(body)
 
@@ -772,6 +797,52 @@ func runSSHAccess(args []string) {
 		fmt.Fprintf(os.Stderr, "Token expires: %s\n", result.ExpiresAt)
 	}
 	fmt.Fprintf(os.Stderr, "Password: %s\n", result.Token)
+}
+
+// runListSnapshots lists available Daytona snapshots.
+func runListSnapshots(args []string) {
+	fs := flag.NewFlagSet("snapshots", flag.ExitOnError)
+	apiURL := fs.String("api", "http://localhost:8080", "0G Sandbox service URL")
+	keyHex := fs.String("key", "",                     "User private key (hex); or set USER_KEY env")
+	_ = fs.Parse(args)
+
+	privKey := mustLoadKey(*keyHex)
+	msg, sig, walletAddr := signRequest(privKey, "list", "", json.RawMessage(`{}`))
+
+	req, err := http.NewRequest(http.MethodGet, *apiURL+"/api/snapshots", nil)
+	if err != nil {
+		fatalf("build request: %v", err)
+	}
+	req.Header.Set("X-Wallet-Address", walletAddr)
+	req.Header.Set("X-Signed-Message", msg)
+	req.Header.Set("X-Wallet-Signature", sig)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fatalf("snapshots: %v", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		fatalf("snapshots: HTTP %d: %s", resp.StatusCode, respBody)
+	}
+
+	var result struct {
+		Items []any `json:"items"`
+		Total int   `json:"total"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		fmt.Println(string(respBody))
+		return
+	}
+	if result.Total == 0 {
+		fmt.Println("No snapshots.")
+		return
+	}
+	for _, s := range result.Items {
+		fmt.Println(prettyJSON(s))
+	}
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

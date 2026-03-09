@@ -171,7 +171,7 @@ The server starts on port 8080 (`PORT` env var) and exposes:
 `#1e3de4` blue primary, `#f5f5f5` background, white cards, `Roboto Mono` for addresses/numbers,
 Inter for body text.
 
-**Tracked issue**: [#14 — connect dashboard to real billing data](https://github.com/0gfoundation/0g-sandbox-billing/issues/14)
+**Tracked issue**: [#14 — connect dashboard to real billing data](https://github.com/0gfoundation/0g-sandbox/issues/14)
 (add `/admin/*` endpoints returning live Redis data; update dashboard to `fetch()` them).
 
 ---

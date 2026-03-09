@@ -27,8 +27,8 @@ import (
 // BillingHooks is satisfied by billing.EventHandler.
 // Decoupled here so proxy tests can use a mock.
 type BillingHooks interface {
-	OnCreate(ctx context.Context, sandboxID, ownerAddr string)
-	OnStart(ctx context.Context, sandboxID, ownerAddr string)
+	OnCreate(ctx context.Context, sandboxID, ownerAddr string, cpu, memGB int)
+	OnStart(ctx context.Context, sandboxID, ownerAddr string, cpu, memGB int)
 	OnStop(ctx context.Context, sandboxID string)
 	OnDelete(ctx context.Context, sandboxID string)
 	OnArchive(ctx context.Context, sandboxID string)
@@ -98,7 +98,9 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/sandbox", h.handleList)
 	rg.GET("/sandbox/paginated", h.handleList)
 	rg.GET("/volumes", h.handleListGeneric("daytona-owner"))
-	rg.GET("/snapshots", h.handleListGeneric("daytona-owner"))
+	rg.POST("/snapshots", h.handleSnapshotCreate)
+	rg.DELETE("/snapshots/:id", h.handleSnapshotDelete)
+
 
 	// ── DELETE /sandbox/:id (no action suffix, safe to register separately) ─
 	rg.DELETE("/sandbox/:id", h.withOwner(h.handleDelete))
@@ -187,9 +189,8 @@ func (h *Handler) handleCreate(c *gin.Context) {
 
 	if result.StatusCode >= 200 && result.StatusCode < 300 {
 		if id := extractID(upstream.Body.Bytes()); id != "" {
-			// Detach from the request context: billing events must not fail
-			// if the HTTP connection closes before the goroutine runs.
-			go h.billing.OnCreate(context.WithoutCancel(c.Request.Context()), id, wallet)
+			cpu, memGB := extractResources(upstream.Body.Bytes())
+			go h.billing.OnCreate(context.WithoutCancel(c.Request.Context()), id, wallet, cpu, memGB)
 		}
 	}
 }
@@ -218,7 +219,14 @@ func (h *Handler) handleStart(c *gin.Context) {
 
 	h.rp.ServeHTTP(safeWriter{c.Writer}, c.Request)
 	if c.Writer.Status() >= 200 && c.Writer.Status() < 300 {
-		go h.billing.OnStart(context.WithoutCancel(c.Request.Context()), id, wallet)
+		go func() {
+			ctx := context.WithoutCancel(c.Request.Context())
+			cpu, memGB := 0, 0
+			if sb, err := h.dtona.GetSandbox(ctx, id); err == nil {
+				cpu, memGB = sb.CPU, sb.Memory
+			}
+			h.billing.OnStart(ctx, id, wallet, cpu, memGB)
+		}()
 	}
 }
 
@@ -489,10 +497,70 @@ func (h *Handler) handleList(c *gin.Context) {
 
 func (h *Handler) handleListGeneric(_ string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// For volumes/snapshots: forward and let Daytona handle; filter TODO
 		h.forward(c)
 	}
 }
+
+// handleListSnapshots lists all Daytona snapshots. Snapshots are provider-managed
+// base images; any authenticated user may see and use them.
+func (h *Handler) handleListSnapshots(c *gin.Context) {
+	h.forward(c)
+}
+
+// handleSnapshotCreate registers a Docker image as a named Daytona snapshot.
+// Provider-only: accepts {name, imageName}, forwards to Daytona internally.
+func (h *Handler) handleSnapshotCreate(c *gin.Context) {
+	wallet := c.GetString("wallet_address")
+	if !strings.EqualFold(wallet, h.providerAddress) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "provider only"})
+		return
+	}
+	h.forward(c)
+}
+
+// handleSnapshotDelete deletes a snapshot by ID. Provider-only.
+//
+// Daytona has a bug where DELETE succeeds but then the audit log INSERT fails
+// because the admin key carries no actorId in the request context, causing a
+// spurious 500. We detect this case: if Daytona returns 500, we verify the
+// snapshot is actually gone and return 200 if so.
+func (h *Handler) handleSnapshotDelete(c *gin.Context) {
+	wallet := c.GetString("wallet_address")
+	if !strings.EqualFold(wallet, h.providerAddress) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "provider only"})
+		return
+	}
+
+	rec := httptest.NewRecorder()
+	h.rp.ServeHTTP(rec, c.Request)
+
+	if rec.Code != http.StatusInternalServerError {
+		copyRecorder(c, rec)
+		return
+	}
+
+	// 500: verify whether the snapshot was actually deleted despite the error.
+	snapshotID := c.Param("id")
+	snap, err := h.dtona.GetSnapshot(c.Request.Context(), snapshotID)
+	if err == nil && snap == nil {
+		// Snapshot is gone — the delete succeeded; audit log bug caused the 500.
+		c.Status(http.StatusOK)
+		return
+	}
+
+	// Snapshot still exists or verification failed — forward the original error.
+	copyRecorder(c, rec)
+}
+
+func copyRecorder(c *gin.Context, rec *httptest.ResponseRecorder) {
+	for k, vs := range rec.Header() {
+		for _, v := range vs {
+			c.Header(k, v)
+		}
+	}
+	c.Data(rec.Code, rec.Header().Get("Content-Type"), rec.Body.Bytes())
+}
+
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -573,4 +641,15 @@ func extractID(body []byte) string {
 		return m.ID
 	}
 	return ""
+}
+
+// extractResources parses cpu and memory from a Daytona sandbox JSON response.
+// Returns (0, 0) if parsing fails; callers fall back to flat-rate billing.
+func extractResources(body []byte) (cpu, memGB int) {
+	var m struct {
+		CPU    int `json:"cpu"`
+		Memory int `json:"memory"`
+	}
+	json.NewDecoder(bytes.NewReader(body)).Decode(&m) //nolint:errcheck
+	return m.CPU, m.Memory
 }

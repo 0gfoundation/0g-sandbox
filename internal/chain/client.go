@@ -350,35 +350,37 @@ func (c *Client) GetBalance(ctx context.Context, user, provider common.Address) 
 }
 
 // GetServicePricing reads the provider's on-chain service registration and
-// returns (computePricePerSec, createFee).  The contract stores price per
-// minute; this method converts it to per-second for the billing engine.
-// Returns (nil, nil, nil) when the service is not yet registered (exists=false).
-func (c *Client) GetServicePricing(ctx context.Context, provider common.Address) (pricePerSec, createFee *big.Int, err error) {
+// returns (pricePerCPUPerSec, pricePerMemGBPerSec, createFee).
+// The contract stores prices per minute; this method converts to per-second.
+// Returns (nil, nil, nil, nil) when the service is not yet registered.
+func (c *Client) GetServicePricing(ctx context.Context, provider common.Address) (pricePerCPUPerSec, pricePerMemGBPerSec, createFee *big.Int, err error) {
 	opts := &bind.CallOpts{Context: ctx}
 	exists, err := c.contract.ServiceExists(opts, provider)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ServiceExists: %w", err)
+		return nil, nil, nil, fmt.Errorf("ServiceExists: %w", err)
 	}
 	if !exists {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	svc, err := c.contract.Services(opts, provider)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Services: %w", err)
+		return nil, nil, nil, fmt.Errorf("Services: %w", err)
 	}
-	// Convert per-minute → per-second (integer division; truncation is fine for
-	// internal accounting — the voucher amounts are summed over many seconds).
-	perSec := new(big.Int).Div(svc.ComputePricePerMin, big.NewInt(60))
-	return perSec, svc.CreateFee, nil
+	// Convert per-minute → per-second (integer division; truncation fine for
+	// internal accounting — voucher amounts are summed over many seconds).
+	cpuPerSec := new(big.Int).Div(svc.PricePerCPUPerMin, big.NewInt(60))
+	memPerSec := new(big.Int).Div(svc.PricePerMemGBPerMin, big.NewInt(60))
+	return cpuPerSec, memPerSec, svc.CreateFee, nil
 }
 
 // ServiceInfo holds the full on-chain service registration for a provider.
 type ServiceInfo struct {
-	URL                string
-	TEESignerAddress   common.Address
-	ComputePricePerMin *big.Int
-	CreateFee          *big.Int
-	SignerVersion      *big.Int
+	URL                 string
+	TEESignerAddress    common.Address
+	PricePerCPUPerMin   *big.Int
+	PricePerMemGBPerMin *big.Int
+	CreateFee           *big.Int
+	SignerVersion       *big.Int
 }
 
 // GetServiceInfo returns the full on-chain service data for a provider.
@@ -397,11 +399,12 @@ func (c *Client) GetServiceInfo(ctx context.Context, provider common.Address) (*
 		return nil, fmt.Errorf("Services: %w", err)
 	}
 	return &ServiceInfo{
-		URL:                svc.Url,
-		TEESignerAddress:   svc.TeeSignerAddress,
-		ComputePricePerMin: svc.ComputePricePerMin,
-		CreateFee:          svc.CreateFee,
-		SignerVersion:      svc.SignerVersion,
+		URL:                 svc.Url,
+		TEESignerAddress:    svc.TeeSignerAddress,
+		PricePerCPUPerMin:   svc.PricePerCPUPerMin,
+		PricePerMemGBPerMin: svc.PricePerMemGBPerMin,
+		CreateFee:           svc.CreateFee,
+		SignerVersion:       svc.SignerVersion,
 	}, nil
 }
 

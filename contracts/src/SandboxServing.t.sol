@@ -49,8 +49,9 @@ contract SandboxServingTest is Test {
         serving.addOrUpdateService{value: PROVIDER_STAKE}(
             "https://provider.example.com",
             teeSigner,
-            1000,   // computePricePerMin
-            5000    // createFee
+            1000,   // pricePerCPUPerMin
+            5000,   // createFee
+            500     // pricePerMemGBPerMin
         );
     }
 
@@ -292,13 +293,13 @@ contract SandboxServingTest is Test {
         vm.deal(newProvider, 1 ether);
         vm.prank(newProvider);
         vm.expectRevert("insufficient stake");
-        serving.addOrUpdateService{value: 0.01 ether}("url", address(1), 1000, 5000);
+        serving.addOrUpdateService{value: 0.01 ether}("url", address(1), 1000, 5000, 500);
     }
 
     function test_UpdateService_NoStakeRequired() public {
         vm.prank(provider);
         serving.addOrUpdateService{value: 0}(
-            "https://updated.example.com", teeSigner, 2000, 6000
+            "https://updated.example.com", teeSigner, 2000, 6000, 1000
         );
         // Verify it doesn't revert and service still exists
         assertTrue(serving.serviceExists(provider));
@@ -343,7 +344,7 @@ contract SandboxServingTest is Test {
         address newProvider = makeAddr("newprovider2");
         vm.deal(newProvider, 1 ether);
         vm.prank(newProvider);
-        serving.addOrUpdateService{value: PROVIDER_STAKE}("url2", address(1), 1000, 5000);
+        serving.addOrUpdateService{value: PROVIDER_STAKE}("url2", address(1), 1000, 5000, 500);
         assertTrue(serving.serviceExists(newProvider));
     }
 

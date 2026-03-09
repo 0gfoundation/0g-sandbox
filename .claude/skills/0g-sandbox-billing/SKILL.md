@@ -90,14 +90,29 @@ USER_KEY=0x<key> go run ./cmd/user/ acknowledge \
 ```
 This is a one-time on-chain transaction. Must be done before creating any sandbox.
 
-### D. Create sandbox
+### D. Choose snapshot (optional)
+
+First list available snapshots:
+```bash
+go run ./cmd/user/ snapshots --api http://47.236.111.154:8080
+```
+Ask the user: **"是否需要预装特定环境（如 Rust、Python 等）？如果有合适的快照，建议使用。"**
+
+- If a suitable snapshot exists (state: active), use `--snapshot <name>` when creating.
+- If no snapshot fits, create without `--snapshot` (default Ubuntu-based image).
+
+### E. Create sandbox
 
 ```bash
+# Without snapshot (default image)
 USER_KEY=0x<key> go run ./cmd/user/ create --api http://47.236.111.154:8080
+
+# With snapshot
+USER_KEY=0x<key> go run ./cmd/user/ create --api http://47.236.111.154:8080 --snapshot <name>
 ```
 Note the sandbox ID from the response. Billing starts immediately.
 
-### E. Set up vibe coding
+### F. Set up vibe coding
 
 Ask the user: **"Do you want to sync local code, or work purely in the remote sandbox?"**
 
@@ -152,7 +167,7 @@ USER_KEY=0x<key> go run ./cmd/user/ exec --api http://47.236.111.154:8080 --id <
   --cmd "/bin/sh -c 'cd /home/daytona/project && python3 main.py'"
 ```
 
-### F. Common issues during onboarding
+### G. Common issues during onboarding
 
 | Situation | Action |
 |-----------|--------|
@@ -289,6 +304,118 @@ USER_KEY=$USER_KEY go run ./cmd/user/ toolbox --api $API --id <id> --action git/
 
 ---
 
+## Provider Concepts
+
+### Roles
+- **Provider key** (`PROVIDER_KEY` / `PROVIDER_PRIVATE_KEY`) — signs settlement txs (`msg.sender == provider`). The provider address is derived from this key.
+- **TEE key** (`MOCK_APP_PRIVATE_KEY`) — signs vouchers (EIP-712, off-chain). In dev, same as provider key. In production, fetched from TDX enclave via tapp-daemon.
+
+### Stake
+- `providerStake` is set by the contract owner during `initialize()` or via `setProviderStake()`.
+- **First registration** requires attaching `msg.value >= providerStake`.
+- **Updates** (URL, price, signer) require no additional stake.
+- `cmd/setup` auto-reads `providerStake` from the contract and attaches it automatically.
+
+### Pricing
+- `pricePerCPUPerMin` + `pricePerMemGBPerMin` — per-resource billing in neuron/min
+- `createFee` — one-time fee per sandbox creation
+- Updating price or signer increments `signerVersion`; all users must re-acknowledge.
+
+---
+
+## Provider Operations
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+export RPC=https://evmrpc-testnet.0g.ai
+export CHAIN_ID=16602
+export CONTRACT=0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210
+export PROVIDER_KEY=0x<provider-private-key>
+```
+
+### Deploy a new contract (first time only)
+
+```bash
+go run ./cmd/deploy/ \
+  --rpc $RPC --key $PROVIDER_KEY --chain-id $CHAIN_ID \
+  --stake <neuron>   # e.g. 100000000000000000 = 0.1 0G; 0 for no stake
+# → prints: Proxy (stable): 0x...  ← set as SETTLEMENT_CONTRACT
+```
+
+### Register / update service on-chain
+
+```bash
+MOCK_TEE=true MOCK_APP_PRIVATE_KEY=$PROVIDER_KEY \
+go run ./cmd/setup/ \
+  --rpc $RPC --chain-id $CHAIN_ID --contract $CONTRACT \
+  --url https://your-provider-url:8080 \
+  --price-per-min 1000000000000000 \   # neuron/min
+  --create-fee 60000000000000000 \     # neuron per sandbox creation
+  --deposit 1                          # 0G to deposit for self-testing (0 on update)
+```
+
+`cmd/setup` auto-attaches the required stake on first registration.
+
+### Check provider status
+
+```bash
+MOCK_TEE=true MOCK_APP_PRIVATE_KEY=$PROVIDER_KEY \
+go run ./cmd/checkbal/ --rpc $RPC --contract $CONTRACT
+```
+
+### Withdraw earnings
+
+```bash
+PROVIDER_KEY=0x<key> go run ./cmd/provider/ withdraw \
+  --api http://47.236.111.154:8080
+```
+
+### Admin: update required stake (owner only)
+
+```bash
+cast send $CONTRACT "setProviderStake(uint256)" <neuron> \
+  --rpc-url $RPC --private-key $OWNER_KEY
+```
+
+### Admin: transfer ownership
+
+```bash
+cast send $CONTRACT "transferOwnership(address)" <newOwner> \
+  --rpc-url $RPC --private-key $OWNER_KEY
+```
+
+---
+
+## Running the Billing Server (local dev)
+
+```bash
+MOCK_TEE=true \
+MOCK_APP_PRIVATE_KEY=$PROVIDER_KEY \
+PROVIDER_PRIVATE_KEY=$PROVIDER_KEY \
+DAYTONA_API_URL=http://localhost:3000 \
+DAYTONA_ADMIN_KEY=<key> \
+SETTLEMENT_CONTRACT=$CONTRACT \
+RPC_URL=$RPC \
+CHAIN_ID=$CHAIN_ID \
+go run ./cmd/billing/
+```
+
+Key env vars:
+
+| Var | Description |
+|-----|-------------|
+| `SETTLEMENT_CONTRACT` | BeaconProxy address |
+| `RPC_URL` | EVM RPC endpoint |
+| `CHAIN_ID` | Chain ID (16602 for 0G Galileo) |
+| `MOCK_TEE=true` | Use mock TEE key (dev only) |
+| `MOCK_APP_PRIVATE_KEY` | TEE signing key (dev only) |
+| `PROVIDER_PRIVATE_KEY` | Key for settlement txs (defaults to TEE key if unset) |
+| `COMPUTE_PRICE_PER_SEC` | Override per-second price (neuron); default 16667 |
+| `VOUCHER_INTERVAL_SEC` | Voucher emission interval; default 3600 |
+| `PORT` | HTTP port; default 8080 |
+
+---
+
 ## Operator: Deploy / Redeploy
 
 ```bash
@@ -330,6 +457,11 @@ go run ./cmd/upgrade/ \
 | GET | `/healthz` | none | Liveness probe |
 | GET | `/dashboard` | none | Operator dashboard |
 | GET | `/api/providers` | none | On-chain service info |
+| GET | `/api/snapshots` | none | List all snapshots (public) |
+| POST | `/api/snapshots` | EIP-191 (provider) | Register snapshot |
+| DELETE | `/api/snapshots/:id` | EIP-191 (provider) | Delete snapshot by UUID |
+| GET | `/api/registry/images` | none | List images in internal registry |
+| POST | `/api/registry/pull` | EIP-191 (provider) | Import image from external registry |
 | POST | `/api/sandbox` | EIP-191 | Create sandbox |
 | GET | `/api/sandbox` | EIP-191 | List own sandboxes |
 | GET | `/api/sandbox/:id` | EIP-191 | Get sandbox |
@@ -341,13 +473,87 @@ go run ./cmd/upgrade/ \
 
 ---
 
+## Provider: Snapshot Management
+
+Snapshots are provider-managed base images that users can choose when creating sandboxes.
+
+### Full workflow: import → register → (use) → delete
+
+**Step 1 — Import image from external registry into internal registry**
+
+Via dashboard (`/dashboard` → Provider tab → ↓ Import Image), or via API:
+```bash
+# Public image (no auth)
+PROVIDER_KEY=0x<key> go run ./cmd/provider/ ... # no CLI — use dashboard or curl
+
+# API call (provider-only, EIP-191)
+curl -X POST http://47.236.111.154:8080/api/registry/pull \
+  -H "..." \
+  -d '{"src":"docker.io/library/ubuntu:22.04","name":"ubuntu","tag":"22.04"}'
+# → {"image":"registry:6000/daytona/ubuntu:22.04"}
+```
+
+**Step 2 — Register image as a named snapshot**
+
+```bash
+PROVIDER_KEY=0x<key> go run ./cmd/provider/ snapshot \
+  --api   http://47.236.111.154:8080 \
+  --image registry:6000/daytona/ubuntu:22.04 \
+  --name  ubuntu-2204 \
+  --cpu 2 --memory 4 --disk 10
+```
+
+Wait for `state: active` (~30s while Daytona pulls the image).
+
+**Step 3 — Users create sandboxes from the snapshot**
+
+```bash
+USER_KEY=0x<key> go run ./cmd/user/ create \
+  --api http://47.236.111.154:8080 \
+  --snapshot ubuntu-2204
+```
+
+**Step 4 — Delete snapshot when no longer needed**
+
+```bash
+# First find the UUID
+PROVIDER_KEY=0x<key> go run ./cmd/provider/ snapshots --api http://47.236.111.154:8080
+
+# Then delete by UUID (not name)
+PROVIDER_KEY=0x<key> go run ./cmd/provider/ delete-snapshot \
+  --api http://47.236.111.154:8080 \
+  --id  <snapshot-uuid>
+```
+
+### Tiered snapshots (small/medium/large variants)
+
+```bash
+PROVIDER_KEY=0x<key> go run ./cmd/provider/ snapshot \
+  --api   http://47.236.111.154:8080 \
+  --image registry:6000/daytona/rust-sandbox:1.0.0 \
+  --name  rust-sandbox \
+  --tiers
+# → creates rust-sandbox-small (1C/1G/3G), rust-sandbox-medium (2C/4G/10G), rust-sandbox-large (4C/8G/20G)
+```
+
+### Key notes
+- Delete snapshot uses **UUID** not name (Daytona bug: name lookup returns SQL error)
+- Tag must not be `:latest` — use explicit version tags
+- `exec` inside sandbox does NOT load `.bashrc` — wrap env-dependent commands with `sh -c '. ~/.cargo/env && ...'`
+
+---
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `insufficient balance` on create | Balance < 0.12 0G | `deposit` more |
+| `insufficient stake` on addOrUpdateService | First registration without stake | `cmd/setup` handles automatically; or attach `msg.value >= providerStake` |
 | `PROVIDER_MISMATCH` on settlement | `msg.sender` ≠ provider | Check `PROVIDER_PRIVATE_KEY` in `.env` |
-| `INVALID_NONCE` on settlement | Redis nonce stale | Restart billing service |
+| `INVALID_NONCE` on settlement | Redis nonce stale | Restart billing service (seeds nonce from chain on startup) |
+| `not owner` on setProviderStake | Wrong key | Use the deployer key that initialized the proxy |
+| Users get `NOT_ACKNOWLEDGED` after price change | `signerVersion` incremented | Users must re-call `acknowledge` |
 | Sandbox create → 403 | `maxCpuPerSandbox=0` | Check `ADMIN_MAX_CPU_PER_SANDBOX` in compose |
 | TEE key fetch fails | tapp-daemon unreachable | Use `MOCK_TEE=true` for dev |
 | SSH token expired | 60-min TTL | Re-run `ssh-access` |
+| Settlement tx reverts | Provider not funded for gas | Check `PROVIDER_PRIVATE_KEY` wallet has 0G for gas |

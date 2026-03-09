@@ -77,6 +77,181 @@ Done. Set PROVIDER_ADDRESS=0xB831371eb2703305f1d9F8542163633D0675CEd7 in your .e
 
 ---
 
+### `push-image`
+
+Load a local Docker image into the deployment's internal registry via the runner
+container. Required before registering a custom image as a snapshot.
+
+```bash
+go run ./cmd/provider/ push-image \
+  --image   <local-image:tag> \
+  [--name   <registry-name:tag>] \
+  [--runner <runner-container>] \
+  [--registry <registry-addr>]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--image` | (required) | Local Docker image name, e.g. `rust-sandbox:1.0.0` |
+| `--name` | same as `--image` | Name to use inside the registry |
+| `--runner` | `0g-sandbox-billing-runner-1` | Runner container name |
+| `--registry` | `registry:6000` | Internal registry address |
+
+Image tag must **not** be `:latest` — use an explicit version.
+
+**Example**
+
+```bash
+# Build locally
+docker build -t rust-sandbox:1.0.0 -f rust.Dockerfile .
+
+# Push into internal registry
+go run ./cmd/provider/ push-image --image rust-sandbox:1.0.0
+
+# → prints the full registry path to use in the next step:
+#   provider snapshot --image registry:6000/daytona/rust-sandbox:1.0.0 --name rust-sandbox
+```
+
+---
+
+### Import Image (dashboard / HTTP API)
+
+Pull an image from an external registry directly into the internal registry
+(`registry:6000/daytona/`). This avoids the need to `docker save | docker load`
+through the runner container, and works when the billing service runs inside a TEE.
+
+**Via dashboard** — open `/dashboard`, go to the Provider tab, click **↓ Import Image**,
+and fill in:
+
+| Field | Description |
+|-------|-------------|
+| Source Image | Full image ref, e.g. `docker.io/library/alpine:3.19` |
+| Username | Source registry username (leave blank for public images) |
+| Password | Source registry password or token |
+| Target Name | Name under `registry:6000/daytona/`, e.g. `my-image` |
+| Target Tag | Version tag — must not be `latest` |
+
+**Via HTTP API** (provider-only, EIP-191 auth required):
+
+```bash
+curl -X POST http://47.236.111.154:8080/api/registry/pull \
+  -H "Content-Type: application/json" \
+  -H "X-Wallet-Address: 0x<provider-address>" \
+  -H "X-Signed-Message: <base64-signed-msg>" \
+  -H "X-Wallet-Signature: <sig>" \
+  -d '{
+    "src":      "docker.io/library/alpine:3.19",
+    "name":     "alpine",
+    "tag":      "3.19",
+    "username": "",
+    "password": ""
+  }'
+# → {"image":"registry:6000/daytona/alpine:3.19"}
+```
+
+> The pull runs synchronously and may take several minutes for large images.
+> After import, use `snapshot` to register the image as a named snapshot.
+
+---
+
+### `snapshot`
+
+Register a Docker image (already in the internal registry) as a named Daytona
+snapshot. The snapshot becomes a base image users can choose when creating sandboxes.
+
+```bash
+PROVIDER_KEY=0x<hex> go run ./cmd/provider/ snapshot \
+  --api    <0g-sandbox-url> \
+  --image  <registry-image> \
+  [--name   <snapshot-name>] \
+  [--cpu    <cores>] \
+  [--memory <gb>] \
+  [--disk   <gb>] \
+  [--tiers]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--api` | `http://localhost:8080` | 0G Sandbox service URL |
+| `--image` | (required) | Full registry image path |
+| `--name` | derived from `--image` | Snapshot name shown to users |
+| `--cpu` | `1` | CPU cores for sandboxes using this snapshot |
+| `--memory` | `1` | Memory in GB |
+| `--disk` | `3` | Disk in GB |
+| `--tiers` | false | Auto-create three variants: `<name>-small` (1C/1G/3G), `<name>-medium` (2C/4G/10G), `<name>-large` (4C/8G/20G) |
+| `--key` | `PROVIDER_KEY` env | Provider private key |
+
+**Example — single snapshot**
+
+```bash
+PROVIDER_KEY=0x<hex> go run ./cmd/provider/ snapshot \
+  --api    http://47.236.111.154:8080 \
+  --image  registry:6000/daytona/rust-sandbox:1.0.0 \
+  --name   rust-sandbox \
+  --cpu    2 \
+  --memory 4 \
+  --disk   10
+```
+
+**Example — tiered snapshots**
+
+```bash
+PROVIDER_KEY=0x<hex> go run ./cmd/provider/ snapshot \
+  --api   http://47.236.111.154:8080 \
+  --image registry:6000/daytona/rust-sandbox:1.0.0 \
+  --name  rust-sandbox \
+  --tiers
+# → creates rust-sandbox-small, rust-sandbox-medium, rust-sandbox-large
+```
+
+Wait for `state: active` (Daytona pulls the image), then users can create sandboxes:
+
+```bash
+USER_KEY=0x<hex> go run ./cmd/user/ create \
+  --api      http://47.236.111.154:8080 \
+  --snapshot rust-sandbox
+```
+
+---
+
+### `delete-snapshot`
+
+Delete a snapshot by its UUID. The UUID can be found via `provider snapshots` or
+the provider dashboard.
+
+```bash
+PROVIDER_KEY=0x<hex> go run ./cmd/provider/ delete-snapshot \
+  --api <0g-sandbox-url> \
+  --id  <snapshot-uuid>
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--api` | `http://localhost:8080` | 0G Sandbox service URL |
+| `--id` | (required) | Snapshot UUID (not name) |
+| `--key` | `PROVIDER_KEY` env | Provider private key |
+
+**Example**
+
+```bash
+PROVIDER_KEY=0x<hex> go run ./cmd/provider/ delete-snapshot \
+  --api http://47.236.111.154:8080 \
+  --id  a1b2c3d4-e5f6-7890-abcd-ef1234567890
+```
+
+---
+
+### `snapshots`
+
+List all available snapshots.
+
+```bash
+PROVIDER_KEY=0x<hex> go run ./cmd/provider/ snapshots \
+  --api <0g-sandbox-url>
+```
+
+---
+
 ## `cmd/user` — User Operations
 
 ### Chain subcommands
@@ -226,16 +401,16 @@ Create a new sandbox. Requires sufficient on-chain balance and prior `acknowledg
 
 ```bash
 go run ./cmd/user/ create \
-  --api   <0g-sandbox-url> \
-  [--key  <hex>] \
-  [--image <snapshot>]
+  --api        <0g-sandbox-url> \
+  [--key       <hex>] \
+  [--snapshot  <snapshot-name>]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--api` | `http://localhost:8080` | 0G Sandbox service URL |
 | `--key` | `USER_KEY` env | User private key |
-| `--image` | — | Custom sandbox snapshot (optional) |
+| `--snapshot` | — | Snapshot name to use as the sandbox base (optional) |
 
 **Example**
 
@@ -300,6 +475,18 @@ Delete a sandbox. Only the sandbox owner can delete it.
 go run ./cmd/user/ delete \
   --api  <0g-sandbox-url> \
   --id   <sandbox-id> \
+  [--key <hex>]
+```
+
+---
+
+#### `snapshots`
+
+List snapshots available for use when creating sandboxes.
+
+```bash
+go run ./cmd/user/ snapshots \
+  --api  <0g-sandbox-url> \
   [--key <hex>]
 ```
 
