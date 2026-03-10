@@ -57,6 +57,40 @@ cloud provider, as a single point of trust, fundamentally cannot offer.
 
 ---
 
+## Quickstart: OpenClaw in a Private Sandbox
+
+The fastest way to spin up an [OpenClaw](https://github.com/0gfoundation/open-claw) AI gateway
+inside a 0G Private Sandbox is to let Claude do the work for you.
+
+**Prerequisites**: [Claude Code](https://claude.ai/claude-code) installed.
+
+```bash
+# 1. Clone this repo
+git clone https://github.com/0gfoundation/0g-sandbox.git
+cd 0g-sandbox
+
+# 2. Start Claude Code
+claude
+```
+
+Then just describe what you want in plain language, for example:
+
+> "I want to use 0G private sandbox to play with OpenClaw"
+
+Claude will walk you through the rest. When asked for configuration details, the key piece
+of information you need is:
+
+| Item | Value |
+|------|-------|
+| **Testnet contract** | `0xd7e0CD227e602FedBb93c36B1F5bf415398508a4` |
+| **RPC** | `https://evmrpc-testnet.0g.ai` |
+| **Chain ID** | `16602` |
+
+Claude will handle onboarding, wallet setup, deposit, sandbox creation, and OpenClaw
+configuration automatically.
+
+---
+
 ## Contract Architecture
 
 ```
