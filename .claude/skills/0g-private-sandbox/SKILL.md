@@ -17,7 +17,33 @@ When this skill activates, output the following message verbatim and wait for al
 
 ---
 
-Before we begin, I need to confirm a few settings:
+Before we begin, I need to confirm a few settings.
+
+**Prerequisites** — this skill uses `go run ./cmd/user/` commands which require:
+- **Go** installed at `/usr/local/go/bin/go`
+- The **0g-sandbox-billing repo** cloned locally
+
+Check now:
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go version
+ls cmd/user/
+```
+
+If Go is missing, install it:
+```bash
+# Linux (amd64)
+curl -L https://go.dev/dl/go1.23.4.linux-amd64.tar.gz | sudo tar -C /usr/local -xz
+export PATH=$PATH:/usr/local/go/bin
+```
+
+If the repo is missing, clone it:
+```bash
+git clone https://github.com/0gfoundation/0g-sandbox-billing.git
+cd 0g-sandbox-billing
+```
+
+---
 
 **1. Network**
 - `1` — 0G Galileo Testnet (RPC: https://evmrpc-testnet.0g.ai, Chain ID: 16602)
@@ -263,6 +289,10 @@ PORT=$(echo "$SSH_LINE" | grep -o '\-p [0-9]*' | awk '{print $2}')
 USER_HOST=$(echo "$SSH_LINE" | awk '{print $NF}')
 TOKEN=$(echo "$SSH_OUTPUT" | grep '^Password:' | awk '{print $2}')
 
+# ⚠️ Known issue: SSH via domain hangs (CLB TCP listener not configured).
+# If SSH/rsync fails, replace the domain in USER_HOST with the direct IP:
+# USER_HOST=$(echo "$USER_HOST" | sed 's/private-sandbox-testnet.0g.ai/43.106.147.28/')
+
 # Initial full sync
 # NOTE: rsync may exit 255 even on success — verify files instead of exit code
 sshpass -p $TOKEN rsync -avz \
@@ -403,6 +433,7 @@ ssh -N -L 13284:localhost:3284 -p 2222 -o StrictHostKeyChecking=no '<SSH_TOKEN>@
 > ⚠️ Use port **13284** (not 3284) — local 3284 may already be in use.
 > ⚠️ zsh users: always wrap SSH token in **single quotes** — `!` triggers history expansion in double quotes.
 > ℹ️ No password needed — the SSH token serves as both username and authentication credential.
+> ⚠️ Known issue: SSH via domain (`private-sandbox-testnet.0g.ai`) hangs on port 2222. Replace HOST with `43.106.147.28` if the tunnel hangs.
 
 Wait for user to confirm tunnel is running, then:
 
@@ -532,8 +563,8 @@ USER_KEY=$USER_KEY go run ./cmd/user/ toolbox \
 
 ### Concepts
 
-- **Provider key** (`PROVIDER_KEY`) — signs settlement txs; provider address derived from this key
-- **TEE key** (`MOCK_APP_PRIVATE_KEY`) — signs vouchers (EIP-712). Dev: same as provider key. Prod: fetched from TDX enclave.
+- **Provider key** (`PROVIDER_KEY`) — stakes and registers service; provider address derived from this key
+- **TEE key** — signs vouchers (EIP-712) and settlement txs. Prod: fetched from TDX enclave. Dev: set `MOCK_TEE=true` + `MOCK_APP_PRIVATE_KEY`.
 - **Stake**: first registration requires `msg.value >= providerStake`. Updates (URL/price/signer) need no extra stake.
 - **Pricing**: `pricePerCPUPerMin` + `pricePerMemGBPerMin` in neuron/min. `createFee` per sandbox creation.
 - Updating price or signer increments `signerVersion` — all users must re-acknowledge.
@@ -545,20 +576,19 @@ export PROVIDER_KEY=0x<provider-private-key>
 ### Register / update service on-chain
 
 ```bash
-MOCK_TEE=true MOCK_APP_PRIVATE_KEY=$PROVIDER_KEY \
-go run ./cmd/setup/ \
-  --rpc $RPC --chain-id $CHAIN_ID --contract $SETTLEMENT_CONTRACT \
-  --url https://your-provider-url:8080 \
-  --price-per-min 1000000000000000 \
-  --create-fee 60000000000000000 \
-  --deposit 1
+PROVIDER_KEY=$PROVIDER_KEY go run ./cmd/provider/ register \
+  --rpc $RPC --contract $SETTLEMENT_CONTRACT \
+  --url https://your-provider-url \
+  --price-per-cpu 1000000000000000 \
+  --price-per-mem 500000000000000 \
+  --fee 60000000000000000
 ```
 
 ### Check provider status
 
 ```bash
-MOCK_TEE=true MOCK_APP_PRIVATE_KEY=$PROVIDER_KEY \
-go run ./cmd/checkbal/ --rpc $RPC --contract $SETTLEMENT_CONTRACT
+PROVIDER_KEY=$PROVIDER_KEY go run ./cmd/provider/ status \
+  --rpc $RPC --contract $SETTLEMENT_CONTRACT
 ```
 
 ### Withdraw earnings
@@ -612,8 +642,7 @@ PROVIDER_KEY=$PROVIDER_KEY go run ./cmd/provider/ delete-snapshot --api $API --i
 
 ```bash
 MOCK_TEE=true \
-MOCK_APP_PRIVATE_KEY=$PROVIDER_KEY \
-PROVIDER_PRIVATE_KEY=$PROVIDER_KEY \
+MOCK_APP_PRIVATE_KEY=0x<tee-key> \
 DAYTONA_API_URL=http://localhost:3000 \
 DAYTONA_ADMIN_KEY=<key> \
 SETTLEMENT_CONTRACT=$SETTLEMENT_CONTRACT \
@@ -628,8 +657,7 @@ go run ./cmd/billing/
 | `RPC_URL` | EVM RPC endpoint |
 | `CHAIN_ID` | Chain ID (16602 testnet / 16661 mainnet) |
 | `MOCK_TEE=true` | Use mock TEE key (dev only) |
-| `MOCK_APP_PRIVATE_KEY` | TEE signing key (dev only) |
-| `PROVIDER_PRIVATE_KEY` | Key for settlement txs |
+| `MOCK_APP_PRIVATE_KEY` | TEE signing key (dev only); signs vouchers and settlement txs |
 | `COMPUTE_PRICE_PER_SEC` | Per-second price (neuron); default 16667 |
 | `VOUCHER_INTERVAL_SEC` | Voucher interval; default 3600 |
 | `PORT` | HTTP port; default 8080 |
@@ -725,7 +753,7 @@ cast send $SETTLEMENT_CONTRACT "transferOwnership(address)" <newOwner> \
 | `deposit: insufficient funds` | Wallet has no 0G | Transfer 0G to wallet first, then deposit |
 | `GetBalance` revert | Wrong contract address | Check `SETTLEMENT_CONTRACT` is current |
 | `NOT_ACKNOWLEDGED` after price change | `signerVersion` incremented | Re-run `acknowledge` |
-| `PROVIDER_MISMATCH` on settlement | Wrong `PROVIDER_PRIVATE_KEY` | Check key matches provider address |
+| `PROVIDER_MISMATCH` on settlement | Wrong provider in voucher | Check TEE key matches registered provider |
 | `INVALID_NONCE` on settlement | Redis nonce stale | Restart billing service |
 | Sandbox state is `stopped` | Auto-stopped or billing stopped it | Run `start` before `exec` |
 | SSH token expired | 60-min TTL | Re-run `ssh-access` |
@@ -734,3 +762,4 @@ cast send $SETTLEMENT_CONTRACT "transferOwnership(address)" <newOwner> \
 | Toolbox 403 | Wrong owner | Confirm `SANDBOX_ID` belongs to `USER_KEY` |
 | Sandbox create → 403 | `maxCpuPerSandbox=0` | Check `ADMIN_MAX_CPU_PER_SANDBOX` env |
 | TEE key fetch fails | tapp-daemon unreachable | Use `MOCK_TEE=true` for dev |
+| Settlement tx fails: `insufficient funds` | TEE address has no gas | Send 0G to TEE address for gas fees |
