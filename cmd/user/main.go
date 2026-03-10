@@ -116,11 +116,18 @@ type chainFlags struct {
 	contract string
 }
 
+func envOrDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
 func addChainFlags(fs *flag.FlagSet) *chainFlags {
 	cf := &chainFlags{}
-	fs.StringVar(&cf.rpc,      "rpc",      "https://evmrpc-testnet.0g.ai",                "RPC endpoint")
-	fs.Int64Var(&cf.chainID,   "chain-id", 16602,                                          "Chain ID")
-	fs.StringVar(&cf.contract, "contract", "0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3", "Settlement contract address")
+	fs.StringVar(&cf.rpc,      "rpc",      envOrDefault("RPC_URL", "https://evmrpc-testnet.0g.ai"),                       "RPC endpoint")
+	fs.Int64Var(&cf.chainID,   "chain-id", 16602,                                                                          "Chain ID")
+	fs.StringVar(&cf.contract, "contract", envOrDefault("SETTLEMENT_CONTRACT", "0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3"), "Settlement contract address")
 	return cf
 }
 

@@ -186,7 +186,7 @@ contract SandboxServing {
 
     // ─── Settlement ───────────────────────────────────────────────────────────
 
-    /// @notice Settle a batch of TEE-signed vouchers. Only the provider can submit their own vouchers.
+    /// @notice Settle a batch of TEE-signed vouchers. Anyone can submit; provider is identified by v.provider.
     function settleFeesWithTEE(SandboxVoucher[] calldata vouchers)
         external
         nonReentrant
@@ -199,7 +199,7 @@ contract SandboxServing {
     }
 
     function _settleOne(SandboxVoucher calldata v) internal returns (SettlementStatus) {
-        if (v.provider != msg.sender || !serviceExists[v.provider]) {
+        if (!serviceExists[v.provider]) {
             return SettlementStatus.PROVIDER_MISMATCH;
         }
 
@@ -255,7 +255,7 @@ contract SandboxServing {
     }
 
     function _previewOne(SandboxVoucher calldata v) internal view returns (SettlementStatus) {
-        if (v.provider != msg.sender || !serviceExists[v.provider]) {
+        if (!serviceExists[v.provider]) {
             return SettlementStatus.PROVIDER_MISMATCH;
         }
         Account storage acct = _accounts[v.user];

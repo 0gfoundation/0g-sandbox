@@ -55,8 +55,8 @@ type Client struct {
 	contract     *SandboxServing
 	contractAddr common.Address
 	chainID      *big.Int
-	teeKey       *ecdsa.PrivateKey // signs vouchers (EIP-712, off-chain)
-	providerKey  *ecdsa.PrivateKey // sends settlement txs (msg.sender == provider)
+	teeKey       *ecdsa.PrivateKey // signs vouchers (EIP-712, off-chain) and settlement txs
+	providerAddr common.Address    // registered provider address (from PROVIDER_ADDRESS or TEE key)
 }
 
 func NewClient(cfg *config.Config) (*Client, error) {
@@ -70,14 +70,12 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		return nil, fmt.Errorf("parse tee private key: %w", err)
 	}
 
-	// Provider key signs settlement txs (msg.sender must equal v.provider).
-	// Falls back to TEE key when not set (e.g. single-key setups where TEE == provider).
-	providerKey := teeKey
-	if cfg.Chain.ProviderPrivateKey != "" {
-		providerKey, err = crypto.HexToECDSA(cfg.Chain.ProviderPrivateKey)
-		if err != nil {
-			return nil, fmt.Errorf("parse provider private key: %w", err)
-		}
+	// Provider address: explicit config takes priority, otherwise derived from TEE key.
+	var providerAddr common.Address
+	if cfg.Chain.ProviderAddress != "" {
+		providerAddr = common.HexToAddress(cfg.Chain.ProviderAddress)
+	} else {
+		providerAddr = crypto.PubkeyToAddress(teeKey.PublicKey)
 	}
 
 	addr := common.HexToAddress(cfg.Chain.ContractAddress)
@@ -92,7 +90,7 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		contractAddr: addr,
 		chainID:      big.NewInt(cfg.Chain.ChainID),
 		teeKey:       teeKey,
-		providerKey:  providerKey,
+		providerAddr: providerAddr,
 	}, nil
 }
 
@@ -105,10 +103,10 @@ func (c *Client) ChainID() *big.Int { return c.chainID }
 // ContractAddress returns the settlement contract address.
 func (c *Client) ContractAddress() common.Address { return c.contractAddr }
 
-// transactOpts builds a *bind.TransactOpts signed by the provider key.
-// The provider key's address must equal v.provider in the settlement contract.
+// transactOpts builds a *bind.TransactOpts signed by the TEE key.
+// The settlement contract no longer requires msg.sender == provider.
 func (c *Client) transactOpts(ctx context.Context) (*bind.TransactOpts, error) {
-	auth, err := bind.NewKeyedTransactorWithChainID(c.providerKey, c.chainID)
+	auth, err := bind.NewKeyedTransactorWithChainID(c.teeKey, c.chainID)
 	if err != nil {
 		return nil, err
 	}
@@ -211,11 +209,9 @@ func (c *Client) SettleFeesWithTEE(ctx context.Context, vouchers []voucher.Sandb
 }
 
 // PreviewSettlementResults calls the view function to check expected statuses
-// without submitting a transaction.  From must be set to the provider address
-// so msg.sender passes the provider check inside _previewOne.
+// without submitting a transaction.
 func (c *Client) PreviewSettlementResults(ctx context.Context, vouchers []voucher.SandboxVoucher) ([]SettlementStatus, error) {
-	providerAddr := crypto.PubkeyToAddress(c.providerKey.PublicKey) // provider key's address
-	opts := &bind.CallOpts{Context: ctx, From: providerAddr}
+	opts := &bind.CallOpts{Context: ctx}
 	raw, err := c.contract.PreviewSettlementResults(opts, toContractVouchers(vouchers))
 	if err != nil {
 		return nil, fmt.Errorf("PreviewSettlementResults: %w", err)
@@ -333,9 +329,8 @@ func (c *Client) GetLastNonce(ctx context.Context, user, provider common.Address
 // this provider. Used by the proxy to reject start requests from users who
 // have revoked acknowledgement.
 func (c *Client) IsAcknowledged(ctx context.Context, user common.Address) (bool, error) {
-	providerAddr := crypto.PubkeyToAddress(c.providerKey.PublicKey)
 	opts := &bind.CallOpts{Context: ctx}
-	ok, err := c.contract.IsTEEAcknowledged(opts, user, providerAddr)
+	ok, err := c.contract.IsTEEAcknowledged(opts, user, c.providerAddr)
 	if err != nil {
 		return false, fmt.Errorf("IsTEEAcknowledged: %w", err)
 	}

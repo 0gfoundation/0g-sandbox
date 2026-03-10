@@ -181,6 +181,7 @@ func main() {
 	go billing.RunGenerator(ctx, cfg, rdb, signer, computePricePerSec, log)
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
+	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.GET("/healthz", func(c *gin.Context) {
