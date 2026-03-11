@@ -119,21 +119,18 @@ cast call <beacon> "owner()(address)"
 
 ---
 
-## Key Separation: TEE Key vs Provider Key
+## TEE Key
 
-The system uses two separate private keys with distinct roles:
+The TEE key is the single signing key for the entire system — it both signs EIP-712 vouchers
+off-chain and sends settlement transactions on-chain. It is fetched automatically from the
+tapp-daemon gRPC at startup (or from `MOCK_APP_PRIVATE_KEY` in dev mode).
 
-| Key | Env var | Role |
-|-----|---------|------|
-| **TEE key** | fetched from tapp-daemon gRPC (or `MOCK_APP_PRIVATE_KEY`) | Signs EIP-712 vouchers off-chain |
-| **Provider key** | `PROVIDER_PRIVATE_KEY` | Sends settlement transactions on-chain (`msg.sender == provider`) |
-
-The settlement contract requires `msg.sender == v.provider` in `SettleFeesWithTEE`. The TEE key handles off-chain signing; the provider key pays gas for on-chain settlement.
+The TEE address needs a small amount of 0G for gas to submit settlement transactions.
 
 To find the TEE signer address:
 ```bash
 tapp-cli -s http://<server>:50051 get-app-key --app-id 0g-sandbox
-# → Ethereum Address: 0x61beb835...
+# → Ethereum Address: 0x...  ← fund this address with 0G for gas
 ```
 
 ---
@@ -226,7 +223,7 @@ PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ init-service \
   --url        http://<billing-proxy>:8080
 ```
 
-Then set `PROVIDER_ADDRESS` and `PROVIDER_PRIVATE_KEY` in `.env`.
+Then set `PROVIDER_ADDRESS` in `.env` and fund the TEE address with 0G for gas.
 
 ---
 
@@ -250,11 +247,11 @@ go run ./cmd/billing/
 | `RPC_URL` | (required) | EVM RPC endpoint |
 | `CHAIN_ID` | (required) | Chain ID (e.g. 16602) |
 | `PROVIDER_ADDRESS` | (required) | Provider's Ethereum address |
-| `PROVIDER_PRIVATE_KEY` | (required) | Provider's private key — signs settlement transactions |
 | `REDIS_ADDR` | `redis:6379` | Redis address |
 | `COMPUTE_PRICE_PER_SEC` | `16667` | neuron/sec per sandbox (≈ 1M neuron/min) |
 | `CREATE_FEE` | `5000000` | neuron flat fee per sandbox creation |
-| `VOUCHER_INTERVAL_SEC` | `3600` | voucher flush interval (seconds) |
+| `VOUCHER_INTERVAL_SEC` | `60` | voucher flush interval (seconds) |
+| `SSH_GATEWAY_HOST` | — | SSH gateway host rewritten in SSH commands (e.g. `43.106.147.28`); falls back to browser hostname if unset |
 | `PORT` | `8080` | HTTP server port |
 | `MOCK_TEE` | — | Set to `true` for local dev (uses `MOCK_APP_PRIVATE_KEY` instead of TDX gRPC) |
 | `MOCK_APP_PRIVATE_KEY` | — | Hex private key used when `MOCK_TEE=true` |
