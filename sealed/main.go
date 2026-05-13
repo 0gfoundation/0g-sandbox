@@ -24,6 +24,8 @@ import (
 	"os"
 	"time"
 
+	ethcrypto "github.com/ethereum/go-ethereum/crypto"
+
 	"seal-verify/internal/chain"
 	"seal-verify/internal/config"
 	"seal-verify/internal/dataplane"
@@ -40,6 +42,12 @@ import (
 )
 
 const bootstrapTimeout = 10 * time.Minute
+
+// sealSignSockPath is the unix domain socket path where the agent-only
+// signing endpoint listens. Mounted at /run (tmpfs in containers, no risk
+// of stale state across restarts). Hardcoded — operators don't need to
+// configure this; the agent discovers it via SEAL_SIGN_SOCK env var.
+const sealSignSockPath = "/run/seal-sign.sock"
 
 // decryptedEntry mirrors the legacy bootstrap.go decryptedEntry, used to
 // pass around an iData entry's plaintext + role tag while we still operate
@@ -78,7 +86,14 @@ func main() {
 	// Start the HTTP server now (after we know our public URL but before the
 	// rest of bootstrap so /healthz and /log are reachable while the chain
 	// scan + agent spawn are still in flight).
-	proxy.New(agent, openclawAdapter, cfg.PublicURL).Listen()
+	//
+	// :8080  → public mux (proxy + serve-proof)
+	// unix:///run/seal-sign.sock → agent-only sign endpoint. Starts even
+	//   before provision completes; handlers return 503 until agent_seal_priv
+	//   is loaded into state.Agent.
+	sealedProxy := proxy.New(agent, openclawAdapter, cfg.PublicURL)
+	sealedProxy.Listen()
+	sealedProxy.ListenInternal(sealSignSockPath)
 	if cfg.APIKey != "" {
 		logger.Logf("API_KEY (from env): <set, %d chars>", len(cfg.APIKey))
 	} else {
@@ -379,13 +394,22 @@ func startAgent(
 		return err
 	}
 
+	// Derive agentSeal address from priv so the framework adapter can surface
+	// it to the agent (via AGENT_SEAL env var + TOOLS.md identity section).
+	agentSealAddr := ""
+	if pk, err := ethcrypto.ToECDSA(agentSealPriv); err == nil {
+		agentSealAddr = ethcrypto.PubkeyToAddress(pk.PublicKey).Hex()
+	}
+
 	mgr := manager.New(adapter, agent, manager.Config{
 		OnFailed: onFailed,
 	})
 	if err := mgr.Start(context.Background(), manager.StartParams{
 		Runtime: framework.RuntimeContext{
-			APIKey:    apiKey,
-			PublicURL: publicURL,
+			APIKey:       apiKey,
+			PublicURL:    publicURL,
+			SealSignSock: sealSignSockPath,
+			AgentSeal:    agentSealAddr,
 		},
 		AgentSealPriv: agentSealPriv,
 		SealID:        sealID,

@@ -86,8 +86,10 @@ var ErrUnsupportedDim = fmt.Errorf("framework: dim not supported by this adapter
 // RuntimeContext is the per-Start environment passed to adapters. Owners of
 // secrets (API keys etc.) populate it before calling Start.
 type RuntimeContext struct {
-	APIKey    string // inference provider API key from env (e.g. ANTHROPIC_API_KEY)
-	PublicURL string // externally-reachable URL prefix for this sandbox; empty in local dev
+	APIKey       string // inference provider API key from env (e.g. ANTHROPIC_API_KEY)
+	PublicURL    string // externally-reachable URL prefix for this sandbox; empty in local dev
+	SealSignSock string // unix socket path for agent-only sign endpoint (agentSeal identity)
+	AgentSeal    string // 0x-prefixed address derived from agent_seal_priv pubkey
 }
 
 // StartResult is what an adapter returns when its agent process is up and

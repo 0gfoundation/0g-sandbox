@@ -58,7 +58,7 @@ func TestStripPlatformInjection_MissingEndMarker(t *testing.T) {
 
 func TestUpsertPlatformSection_FreshFile(t *testing.T) {
 	tmp := t.TempDir() + "/TOOLS.md"
-	if err := upsertPlatformSection(tmp, "http://8080-x.example.com:4000"); err != nil {
+	if err := upsertPlatformSection(tmp, platformCaps{publicURL: "http://8080-x.example.com:4000"}); err != nil {
 		t.Fatalf("upsert err: %v", err)
 	}
 	body := mustRead(t, tmp)
@@ -79,7 +79,7 @@ func TestUpsertPlatformSection_PreservesOwnerContent(t *testing.T) {
 	if err := os.WriteFile(tmp, []byte(owner), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := upsertPlatformSection(tmp, "http://x.example.com"); err != nil {
+	if err := upsertPlatformSection(tmp, platformCaps{publicURL: "http://x.example.com"}); err != nil {
 		t.Fatalf("upsert err: %v", err)
 	}
 	body := mustRead(t, tmp)
@@ -99,7 +99,7 @@ func TestUpsertPlatformSection_Idempotent(t *testing.T) {
 	}
 	url := "http://8080-test.example.com"
 	for i := 0; i < 3; i++ {
-		if err := upsertPlatformSection(tmp, url); err != nil {
+		if err := upsertPlatformSection(tmp, platformCaps{publicURL: url}); err != nil {
 			t.Fatalf("upsert iter %d: %v", i, err)
 		}
 	}
@@ -114,11 +114,11 @@ func TestUpsertPlatformSection_Idempotent(t *testing.T) {
 
 func TestUpsertPlatformSection_EmptyURLStripsSection(t *testing.T) {
 	tmp := t.TempDir() + "/TOOLS.md"
-	if err := upsertPlatformSection(tmp, "http://x.example.com"); err != nil {
+	if err := upsertPlatformSection(tmp, platformCaps{publicURL: "http://x.example.com"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := upsertPlatformSection(tmp, ""); err != nil {
-		t.Fatalf("upsert with empty url: %v", err)
+	if err := upsertPlatformSection(tmp, platformCaps{}); err != nil {
+		t.Fatalf("upsert with empty caps: %v", err)
 	}
 	body := mustRead(t, tmp)
 	if strings.Contains(body, platformMarkerStart) || strings.Contains(body, "AGENT_PUBLIC_URL") {
@@ -296,7 +296,7 @@ func TestEvoKnowledge_StripsPlatformSectionFromToolsMD(t *testing.T) {
 	}
 
 	// Simulate spawn.go: append platform section to TOOLS.md.
-	if err := upsertPlatformSection(toolsMDPath(), "http://8080-x.example:4000"); err != nil {
+	if err := upsertPlatformSection(toolsMDPath(), platformCaps{publicURL: "http://8080-x.example:4000"}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 
@@ -345,7 +345,7 @@ func TestEvoKnowledge_StripsPlatformSectionFromToolsMD(t *testing.T) {
 	if err := a.Restore(ctx, "knowledge", roundTrip); err != nil {
 		t.Fatalf("Restore round-trip: %v", err)
 	}
-	if err := upsertPlatformSection(toolsMDPath(), "http://8080-x.example:4000"); err != nil {
+	if err := upsertPlatformSection(toolsMDPath(), platformCaps{publicURL: "http://8080-x.example:4000"}); err != nil {
 		t.Fatalf("upsert round-trip: %v", err)
 	}
 	out2, err := a.EvolutionFor(ctx, "knowledge")

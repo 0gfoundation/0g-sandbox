@@ -84,13 +84,19 @@ func (a *Adapter) Start(ctx context.Context, rt framework.RuntimeContext) (frame
 	}
 
 	// Always upsert the platform section in TOOLS.md (idempotent).
-	if err := upsertPlatformSection(toolsMDPath(), rt.PublicURL); err != nil {
+	caps := platformCaps{
+		publicURL: rt.PublicURL,
+		signSock:  rt.SealSignSock,
+		agentSeal: rt.AgentSeal,
+	}
+	if err := upsertPlatformSection(toolsMDPath(), caps); err != nil {
 		logger.Logf("warn: upsert TOOLS.md platform section: %v", err)
-	} else if rt.PublicURL != "" {
-		logger.Logf("OK   injected platform section into %s (public_url=%s)", toolsMDPath(), rt.PublicURL)
+	} else if rt.PublicURL != "" || rt.SealSignSock != "" {
+		logger.Logf("OK   injected platform section into %s (public_url=%q, sign_sock=%q, agent_seal=%q)",
+			toolsMDPath(), rt.PublicURL, rt.SealSignSock, rt.AgentSeal)
 	}
 
-	cmd, err := spawnGateway(provider, rt.APIKey, rt.PublicURL)
+	cmd, err := spawnGateway(provider, rt)
 	if err != nil {
 		return framework.StartResult{}, err
 	}
@@ -189,7 +195,7 @@ func installOpenclaw(packageVersion string) error {
 	return nil
 }
 
-func spawnGateway(provider, apiKey, publicURL string) (*exec.Cmd, error) {
+func spawnGateway(provider string, rt framework.RuntimeContext) (*exec.Cmd, error) {
 	logFile, err := os.OpenFile("/tmp/openclaw.log", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("open openclaw.log: %w", err)
@@ -207,18 +213,24 @@ func spawnGateway(provider, apiKey, publicURL string) (*exec.Cmd, error) {
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + os.Getenv("HOME"),
 	}
-	if apiKey != "" {
+	if rt.APIKey != "" {
 		switch provider {
 		case "anthropic":
-			envWhitelist = append(envWhitelist, "ANTHROPIC_API_KEY="+apiKey)
+			envWhitelist = append(envWhitelist, "ANTHROPIC_API_KEY="+rt.APIKey)
 		case "openai", "0g-compute":
 			// Same env name for both. Endpoint routing for 0g lives in
 			// openclaw config (models.providers.openai.baseUrl), not env.
-			envWhitelist = append(envWhitelist, "OPENAI_API_KEY="+apiKey)
+			envWhitelist = append(envWhitelist, "OPENAI_API_KEY="+rt.APIKey)
 		}
 	}
-	if publicURL != "" {
-		envWhitelist = append(envWhitelist, "AGENT_PUBLIC_URL="+publicURL)
+	if rt.PublicURL != "" {
+		envWhitelist = append(envWhitelist, "AGENT_PUBLIC_URL="+rt.PublicURL)
+	}
+	if rt.SealSignSock != "" {
+		envWhitelist = append(envWhitelist, "SEAL_SIGN_SOCK="+rt.SealSignSock)
+	}
+	if rt.AgentSeal != "" {
+		envWhitelist = append(envWhitelist, "AGENT_SEAL="+rt.AgentSeal)
 	}
 	cmd.Env = envWhitelist
 	if err := cmd.Start(); err != nil {
