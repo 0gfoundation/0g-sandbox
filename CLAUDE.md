@@ -134,6 +134,11 @@ Sealing requires the image to be present in the internal registry (needed to res
 content digest). A non-resolvable image reference is a hard failure; the create request is
 rejected.
 
+The container-side runtime that consumes `SANDBOX_SEAL_KEY` + `SANDBOX_SEAL_ATTESTATION`
+(provision via attestor, mount agent_seal_priv, run the agent-fronting proxy at :8080,
+emit serve-proof, expose `/sign/*` via unix socket) lives in the
+[0g-agentic-id](https://github.com/0gfoundation/0g-agentic-id) repo under `sealed/`.
+
 **sealdebug build tag** — for development/inspection of sealed containers:
 - Default (production) build: `sealed: true` → blocks SSH and toolbox
 - `go build -tags sealdebug`: `sealed: true` → TEE attestation injected but SSH/toolbox remain open
