@@ -75,7 +75,6 @@ services:
     image: daytonaio/daytona-api@sha256:c1203729b066b7b4724a03973a1c167625b8bef89cc2172557e06871c1e3a082
     environment:
       - OTEL_ENABLED=false
-      - RESOURCE_LIMITS_DISABLED=true
       - DEFAULT_SNAPSHOT=daytonaio/sandbox:0.5.0-slim
       - ENCRYPTION_KEY=${DAYTONA_ENCRYPTION_KEY}
       - ENCRYPTION_SALT=${DAYTONA_ENCRYPTION_SALT}
@@ -188,7 +187,9 @@ services:
       - API_PORT=3003
       - DAYTONA_RUNNER_TOKEN=${DAYTONA_RUNNER_API_KEY}
       - LOG_FILE_PATH=/home/daytona/runner/runner.log
-      - RESOURCE_LIMITS_DISABLED=true
+      # Image default is true (baked into Dockerfile); must explicitly set
+      # to false to enable Docker CFS/memory cgroup limits on sandbox containers.
+      - RESOURCE_LIMITS_DISABLED=false
       - AWS_ENDPOINT_URL=http://minio:9000
       - AWS_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
