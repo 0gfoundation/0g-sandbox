@@ -371,6 +371,70 @@ func mockDaytonaWithSSH(t *testing.T, sandboxes []daytona.Sandbox) *httptest.Ser
 }
 
 
+// TestSealedOnly_RejectsUnsealedCreate exercises the SEALED_ONLY config gate.
+// When the provider runs with sealed_only=true, every create that doesn't carry
+// `"sealed": true` must fail at 400 before the body ever reaches Daytona.
+func TestSealedOnly_RejectsUnsealedCreate(t *testing.T) {
+	srv, captured := mockDaytona(t, nil)
+	dtona := daytona.NewClient(srv.URL, "test-key")
+
+	r := gin.New()
+	api := r.Group("/api", func(c *gin.Context) {
+		c.Set("wallet_address", "0xWALLET")
+		c.Next()
+	})
+	h := NewHandler(dtona, &mockBilling{}, nil, nil, nil, nil, nil, nil, nil, "", nil, "", nil, zap.NewNop(), "", nil, 0)
+	h.SealedOnly = true
+	h.Register(api)
+
+	body := []byte(`{"image":"alpine:3.20"}`) // no sealed flag → must be rejected
+	req := httptest.NewRequest(http.MethodPost, "/api/sandbox", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("sealed sandboxes")) {
+		t.Errorf("expected error mentioning sealed sandboxes, got: %s", w.Body.String())
+	}
+	if n := len(*captured); n != 0 {
+		t.Errorf("expected request to be rejected before reaching Daytona, but Daytona received %d bodies", n)
+	}
+}
+
+// TestSealedOnly_AcceptsSealedCreate confirms the gate doesn't accidentally
+// block sealed creates when sealed_only=true. Sealed: true must pass the
+// gate (and then hit the existing "TEE key not configured" path because the
+// test handler has teeKey=nil).
+func TestSealedOnly_AcceptsSealedCreate(t *testing.T) {
+	srv, _ := mockDaytona(t, nil)
+	dtona := daytona.NewClient(srv.URL, "test-key")
+
+	r := gin.New()
+	api := r.Group("/api", func(c *gin.Context) {
+		c.Set("wallet_address", "0xWALLET")
+		c.Next()
+	})
+	h := NewHandler(dtona, &mockBilling{}, nil, nil, nil, nil, nil, nil, nil, "", nil, "", nil, zap.NewNop(), "", nil, 0)
+	h.SealedOnly = true
+	h.Register(api)
+
+	body := []byte(`{"image":"alpine:3.20","sealed":true}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/sandbox", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	// teeKey is nil in the test setup, so we expect 501 (not 400 from the
+	// SealedOnly gate). That confirms the gate let the request through.
+	if w.Code != http.StatusNotImplemented {
+		t.Fatalf("expected 501 (TEE key not configured) after passing sealed gate, got %d: %s",
+			w.Code, w.Body.String())
+	}
+}
+
 func TestSealedSandbox_StopAllowed(t *testing.T) {
 	sealedSB := daytona.Sandbox{
 		ID:     "sb-sealed",

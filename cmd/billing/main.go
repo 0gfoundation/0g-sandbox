@@ -253,6 +253,7 @@ func main() {
 			"create_fee":            createFee.String(),
 			"voucher_interval_sec":  cfg.Billing.VoucherIntervalSec,
 			"min_balance":           minBalance.String(),
+			"sealed_only":           cfg.Server.SealedOnly,
 		})
 	})
 
@@ -344,6 +345,7 @@ func main() {
 
 	api := r.Group("/api", auth.Middleware(rdb))
 	proxyHandler := proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec, cfg.Chain.ProviderAddress, cfg.Chain.AdminList(), cfg.Server.SSHGatewayHost, rdb, log, cfg.Server.BrokerURL, onchain.PrivateKey(), cfg.Billing.VoucherIntervalSec)
+	proxyHandler.SealedOnly = cfg.Server.SealedOnly
 	proxyHandler.Register(api)
 	go runStopHandler(ctx, stopCh, dtona, rdb, log, proxyHandler.BrokerDeregister)
 

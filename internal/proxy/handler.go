@@ -79,6 +79,12 @@ type Handler struct {
 	teeKey              *ecdsa.PrivateKey // TEE signing key; nil = sealed containers disabled
 	broker              *brokerClient     // nil = broker integration disabled
 	log                 *zap.Logger
+
+	// SealedOnly, when true, rejects every create-sandbox request that
+	// doesn't carry "sealed": true. Set by cmd/billing from Server.SealedOnly
+	// config (env SEALED_ONLY=true). Off by default — providers serve both
+	// sealed and unsealed workloads unless explicitly opted in.
+	SealedOnly bool
 }
 
 func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec *big.Int, providerAddress string, adminAddresses []string, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, teeKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
@@ -277,6 +283,12 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	// Sealed containers: resolve image hash and inject TEE attestation + keypair
 	// before forwarding to Daytona.
 	sealed := extractSealed(body)
+	if !sealed && h.SealedOnly {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "this provider only accepts sealed sandboxes; set \"sealed\": true in the create request",
+		})
+		return
+	}
 	if sealed && h.teeKey == nil {
 		c.JSON(http.StatusNotImplemented, gin.H{"error": "sealed containers not available: TEE key not configured"})
 		return

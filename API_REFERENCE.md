@@ -214,13 +214,17 @@ Server configuration and pricing.
   "create_fee":           "60000000000000000",
   "compute_price_per_sec":"0",
   "voucher_interval_sec": 60,
-  "min_balance":          "60000000000000000"
+  "min_balance":          "60000000000000000",
+  "sealed_only":          false
 }
 ```
 
 > `compute_price_per_sec` is the flat-rate fallback; it is `"0"` when per-resource pricing
 > (`price_per_cpu_per_min` / `price_per_mem_gb_per_min`) is configured on-chain.
 > `min_balance` = `create_fee + compute_price_per_sec × voucher_interval_sec`.
+>
+> `sealed_only` reflects the provider's `SEALED_ONLY` env. When `true`, every create
+> request that doesn't set `"sealed": true` is rejected with HTTP 400.
 
 #### `GET /api/providers`
 On-chain service data for all known providers.
@@ -269,6 +273,10 @@ All fields are optional.
 - Injects two env vars into the container: `SANDBOX_SEAL_KEY` (private key; stripped from response) and `SANDBOX_SEAL_ATTESTATION` (JSON with `seal_id`, `pubkey`, `image_hash`, TEE `signature`, `ts`)
 - Sets labels `0g-sealed: "true"` and `0g-seal-id: <32-char hex>`
 - **Blocks SSH and toolbox access** for the sandbox's lifetime
+
+**Provider-side `SEALED_ONLY=true`:** when the operator sets this env on the
+billing server, every create request **without** `"sealed": true` is rejected
+with HTTP 400 (`{"error": "this provider only accepts sealed sandboxes; set \"sealed\": true in the create request"}`). Check `GET /info`'s `sealed_only` field upfront to know.
 
 **Response `200`:** Sandbox object (see [Data Types](#data-types--objects))
 

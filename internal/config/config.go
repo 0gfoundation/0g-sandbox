@@ -100,6 +100,10 @@ type ServerConfig struct {
 	Port           int    `mapstructure:"port"`
 	SSHGatewayHost string `mapstructure:"ssh_gateway_host"`
 	BrokerURL      string `mapstructure:"broker_url"`
+	// SealedOnly, when true, rejects every create-sandbox request that
+	// doesn't carry `sealed: true`. Use this to run a provider that only
+	// serves attested workloads (e.g. an AgenticID-hosting setup).
+	SealedOnly bool `mapstructure:"sealed_only"`
 }
 
 func Load() (*Config, error) {
@@ -145,6 +149,7 @@ func Load() (*Config, error) {
 		"server.port":                  "PORT",
 		"server.ssh_gateway_host":       "SSH_GATEWAY_HOST",
 		"server.broker_url":             "BROKER_URL",
+		"server.sealed_only":            "SEALED_ONLY",
 	}
 	for key, env := range bindings {
 		if err := v.BindEnv(key, env); err != nil {

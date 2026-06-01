@@ -139,6 +139,13 @@ The container-side runtime that consumes `SANDBOX_SEAL_KEY` + `SANDBOX_SEAL_ATTE
 emit serve-proof, expose `/sign/*` via unix socket) lives in the
 [0g-agentic-id](https://github.com/0gfoundation/0g-agentic-id) repo under `sealed/`.
 
+**`SEALED_ONLY=true`** — provider-wide gate. When this env is set, every
+`POST /api/sandbox` request that does not carry `"sealed": true` is rejected with
+HTTP 400 before any work happens (no balance reservation, no Daytona call). Use this
+for providers that only host attested workloads (e.g. an AgenticID-only operator).
+The current setting is also surfaced through `GET /info` as `sealed_only`, so
+clients can pre-check.
+
 **sealdebug build tag** — for development/inspection of sealed containers:
 - Default (production) build: `sealed: true` → blocks SSH and toolbox
 - `go build -tags sealdebug`: `sealed: true` → TEE attestation injected but SSH/toolbox remain open
@@ -227,7 +234,7 @@ The server starts on port 8080 (`PORT` env var) and exposes:
 **Public / unauthenticated:**
 - `GET /healthz` — liveness probe
 - `GET /dashboard` — operator dashboard (embedded HTML)
-- `GET /info` — provider info (address, contract, pricing)
+- `GET /info` — provider info (address, contract, pricing, `sealed_only`)
 - `GET /api/providers` — list registered providers
 - `GET /api/snapshots` — list available snapshots
 - `GET /api/sandbox_list` — list all sandboxes (admin view, no auth)
