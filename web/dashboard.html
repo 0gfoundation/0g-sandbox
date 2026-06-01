@@ -149,6 +149,11 @@ tbody tr:hover td{background:var(--surf2)}
 
 /* ─ Misc ─ */
 .empty{color:var(--muted);font-size:13px;padding:32px 20px;text-align:center;line-height:1.6}
+.queue-tab{background:transparent;border:none;border-bottom:2px solid transparent;padding:8px 14px;font-size:12px;color:var(--muted);cursor:pointer;font-weight:600;letter-spacing:.02em;display:flex;align-items:center;gap:6px}
+.queue-tab:hover{color:var(--text)}
+.queue-tab.active{color:var(--text);border-bottom-color:var(--p)}
+.tab-count{background:var(--surf);padding:1px 6px;border-radius:8px;font-size:10px;color:var(--muted)}
+.queue-tab.active .tab-count{background:var(--p);color:#fff}
 .empty-icon{font-size:24px;margin-bottom:8px}
 .err{color:var(--red);font-size:12px;margin-top:4px}
 .loading{color:var(--muted);font-size:12px;margin-top:6px}
@@ -222,8 +227,26 @@ tbody tr:hover td{background:var(--surf2)}
           <div class="info-row"><span class="ik">Status</span><span id="svcRegistered">—</span></div>
           <div class="info-row"><span class="ik">Provider Addr</span><span class="iv mono" id="infoProvider" title="" style="font-size:11px">—</span></div>
           <div class="info-row"><span class="ik">Service URL</span><span class="iv" id="svcUrl">—</span></div>
-          <div class="info-row"><span class="ik">TEE Signer</span><span class="iv purple" id="svcTEE" title="">—</span></div>
-          <div class="info-row"><span class="ik">CPU Price / min</span><span class="iv" id="svcCPUPrice">—</span></div>
+          <div class="info-row"><span class="ik">TEE Signer (on-chain)</span><span class="iv purple" id="svcTEE" title="">—</span></div>
+
+          <!-- Health: signer-match check is cascading — if it mismatches,
+               balance is moot because no voucher can settle. -->
+          <div id="signerHealth" style="margin-top:10px;padding:8px 10px;border-radius:4px;background:var(--surf);display:none">
+            <div style="display:flex;align-items:center;gap:8px;font-size:12px">
+              <strong>Signer Match</strong> <span id="signerHealthBadge"></span>
+            </div>
+            <div id="signerHealthDetail" style="font-size:11px;color:var(--muted);margin-top:4px"></div>
+          </div>
+
+          <div id="balanceHealth" style="margin-top:8px;padding:8px 10px;border-radius:4px;background:var(--surf);display:none">
+            <div style="display:flex;align-items:center;gap:8px;font-size:12px">
+              <strong>Settler Balance</strong> <span id="balanceHealthBadge"></span>
+              <button id="balTopUpBtn" class="btn btn-sm btn-prim" style="font-size:11px;padding:2px 8px;margin-left:auto" onclick="openTopUpFromCard()">Top Up</button>
+            </div>
+            <div id="balanceHealthDetail" style="font-size:11px;color:var(--muted);margin-top:4px"></div>
+          </div>
+
+          <div class="info-row" style="margin-top:10px"><span class="ik">CPU Price / min</span><span class="iv" id="svcCPUPrice">—</span></div>
           <div class="info-row"><span class="ik">Mem Price / GB / min</span><span class="iv" id="svcMemPrice">—</span></div>
           <div class="info-row"><span class="ik">Create Fee</span><span class="iv" id="svcFee">—</span></div>
         </div>
@@ -284,6 +307,40 @@ tbody tr:hover td{background:var(--surf2)}
       </div>
     </div>
 
+    <!-- ── Voucher Queue ── -->
+    <div class="card" style="margin-top:4px">
+      <div class="card-head">
+        <span class="card-title">Voucher Queue</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="backlogMeta" style="font-size:11px;color:var(--muted)"></span>
+          <button class="btn btn-sm btn-ghost" onclick="loadQueueCard()">↻</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div id="queueSummary" style="margin-bottom:12px"></div>
+        <div id="queueTabs" style="display:flex;gap:4px;margin-bottom:12px;border-bottom:1px solid var(--border)">
+          <button class="queue-tab active" data-tab="main" onclick="switchQueueTab('main')">Main <span class="tab-count" id="mainCount">0</span></button>
+          <button class="queue-tab" data-tab="dlq" onclick="switchQueueTab('dlq')">DLQ <span class="tab-count" id="dlqCount">0</span></button>
+        </div>
+        <div id="mainPanel"><div class="empty">Click ↻ to load.</div></div>
+        <div id="dlqPanel" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- ── Recent Alerts ── -->
+    <div class="card" style="margin-top:4px">
+      <div class="card-head">
+        <span class="card-title">Recent Alerts</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="alertsMeta" style="font-size:11px;color:var(--muted)"></span>
+          <button class="btn btn-sm btn-ghost" onclick="loadObservability()">↻</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div id="alertsContent"><div class="empty">Click ↻ to load.</div></div>
+      </div>
+    </div>
+
     <!-- ── Voucher Settlement History ── -->
     <div class="card" style="margin-top:4px">
       <div class="card-head">
@@ -332,6 +389,26 @@ tbody tr:hover td{background:var(--surf2)}
     <div class="modal-btns">
       <button class="btn btn-ghost" onclick="closeModal('serviceModal')">Cancel</button>
       <button class="btn btn-prim" onclick="doRegisterService()">Submit</button>
+    </div>
+  </div>
+</div>
+
+<!-- Top Up Settler -->
+<div class="modal-bg" id="topUpModal">
+  <div class="modal">
+    <div class="modal-title">Top Up Settler Wallet</div>
+    <div class="field">
+      <label>Destination</label>
+      <input id="topUpDest" type="text" readonly style="font-family:monospace;font-size:12px;background:var(--surf)">
+    </div>
+    <div class="field">
+      <label>Amount (0G)</label>
+      <input id="topUpAmount" type="number" step="0.001" min="0" value="1" placeholder="1.0">
+    </div>
+    <div class="err" id="topUpErr"></div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost" onclick="closeModal('topUpModal')">Cancel</button>
+      <button class="btn btn-prim" onclick="doTopUp()">Send</button>
     </div>
   </div>
 </div>
@@ -497,6 +574,7 @@ async function initWallet(addr, prov) {
   await loadProviderData();
   loadProviderSnapshots();
   loadAllSandboxes();
+  loadQueueCard();   // refresh summary + main + dlq panels together
 
   if (_activeProvider && _activeProvider !== prov) try { _activeProvider.removeListener('accountsChanged', _onAccountsChanged); } catch (_) {}
   if (_activeProvider !== prov) { prov.on('accountsChanged', _onAccountsChanged); _activeProvider = prov; }
@@ -563,6 +641,14 @@ async function loadProviderData() {
     document.getElementById('providerEarnings').textContent = fmtNeuron(earn.toString());
     document.getElementById('providerStaked').textContent = fmtNeuron(staked.toString());
     if (owner) { const el = document.getElementById('contractOwner'); el.textContent = shortAddr(owner); el.title = owner; }
+
+    // Signer-match + settler-balance health both come from the public /info
+    // endpoint (no signing required — all data is derivable from on-chain).
+    try {
+      const infoFresh = await fetch('/info').then(r => r.json());
+      renderSignerHealth(infoFresh.signer || {});
+      renderBalanceHealth(infoFresh.settler || {}, (infoFresh.signer || {}).status);
+    } catch (_) {}
   } catch (e) { console.error(e); }
 }
 
@@ -723,14 +809,14 @@ async function loadEvents(page) {
   if (page === undefined) { evtCurrentPage = 0; page = 0; }
   const el = document.getElementById('eventsTable'), meta = document.getElementById('evtMeta');
   const pager = document.getElementById('evtPager');
-  if (!walletAddr) { el.innerHTML = '<div class="empty">Connect wallet first.</div>'; return; }
   el.innerHTML = '<div class="empty">Loading…</div>'; meta.textContent = '';
   pager.style.display = 'none';
   try {
     const duration = parseInt(document.getElementById('evtRange').value);
     const since = duration > 0 ? Math.floor(Date.now() / 1000) - duration : 0;
     const url = `/api/events?since=${since}&page=${page}&page_size=${EVT_PAGE_SIZE}`;
-    const resp = await signedFetch('GET', url);
+    // No wallet signature required — chain data is publicly queryable.
+    const resp = await fetch(url);
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) { el.innerHTML = `<div class="empty">${esc(data.error || 'Failed')}</div>`; return; }
     const evts = data.events || [];
@@ -830,6 +916,255 @@ function stateBadge(s) {
     default:          return '';
   }
 }
+// ── Voucher Queue card (Main / DLQ tabs) ────────────────────────────────
+let _activeQueueTab = 'main';
+function switchQueueTab(tab) {
+  _activeQueueTab = tab;
+  for (const el of document.querySelectorAll('.queue-tab')) {
+    el.classList.toggle('active', el.getAttribute('data-tab') === tab);
+  }
+  document.getElementById('mainPanel').style.display = tab === 'main' ? '' : 'none';
+  document.getElementById('dlqPanel').style.display = tab === 'dlq' ? '' : 'none';
+}
+// Single ↻ refreshes summary bar + both tab payloads at once so the visible
+// counts are always consistent. Each tab caches its rendered HTML.
+async function loadQueueCard() {
+  const meta = document.getElementById('backlogMeta');
+  meta.textContent = 'loading…';
+  await Promise.all([loadObservability(), loadMainPanel(), loadDLQPanel()]);
+  meta.textContent = 'updated ' + new Date().toLocaleTimeString();
+}
+async function loadMainPanel() {
+  const el = document.getElementById('mainPanel');
+  el.innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    const resp = await signedFetch('GET', '/api/queue/summary?min_count=1');
+    if (!resp || !resp.ok) {
+      el.innerHTML = '<div class="empty" style="color:var(--danger,#c33)">' + (resp ? esc(await resp.text()) : 'request failed') + '</div>';
+      return;
+    }
+    const data = await resp.json();
+    const rows = data.rows || [];
+    document.getElementById('mainCount').textContent = rows.reduce((sum, r) => sum + r.count, 0).toLocaleString();
+    if (rows.length === 0) {
+      el.innerHTML = '<div class="empty">Main queue is empty.</div>';
+      return;
+    }
+    rows.sort((a, b) => b.count - a.count);
+    let html = '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="border-bottom:1px solid var(--border);text-align:left">';
+    html += '<th style="padding:6px 8px">User</th><th style="padding:6px 8px">Provider</th><th style="padding:6px 8px;text-align:right">Count</th><th style="padding:6px 8px;text-align:right">Total Fee</th><th style="padding:6px 8px"></th></tr></thead><tbody>';
+    for (const r of rows) {
+      html += '<tr style="border-bottom:1px solid var(--border)">';
+      html += '<td style="padding:6px 8px;font-family:monospace">' + esc(shortAddr(r.user)) + '</td>';
+      html += '<td style="padding:6px 8px;font-family:monospace">' + esc(shortAddr(r.provider)) + '</td>';
+      html += '<td style="padding:6px 8px;text-align:right;font-weight:600">' + r.count.toLocaleString() + '</td>';
+      html += '<td style="padding:6px 8px;text-align:right">' + fmtNeuron(r.total_fee_wei) + '</td>';
+      html += '<td style="padding:6px 8px;text-align:right">';
+      if (r.count >= 2) {
+        const args = JSON.stringify({user: r.user, provider: r.provider}).replace(/"/g, '&quot;');
+        html += '<button class="btn btn-sm btn-prim" data-row="' + args + '" onclick="doAggregate(this)">Aggregate</button>';
+      } else {
+        html += '<span style="font-size:11px;color:var(--muted)">already 1</span>';
+      }
+      html += '</td></tr>';
+    }
+    html += '</tbody></table>';
+    if (data.truncated) {
+      html += '<div style="margin-top:8px;font-size:11px;color:var(--muted)">Main queue larger than scan limit (' + (data.limit || '—').toLocaleString() + '). Aggregate the biggest groups first, then reload.</div>';
+    }
+    el.innerHTML = html;
+  } catch (e) {
+    el.innerHTML = '<div class="empty" style="color:var(--danger,#c33)">' + esc(String(e)) + '</div>';
+  }
+}
+async function loadDLQPanel() {
+  const el = document.getElementById('dlqPanel');
+  el.innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    const resp = await signedFetch('GET', '/api/queue/dlq');
+    if (!resp || !resp.ok) {
+      el.innerHTML = '<div class="empty" style="color:var(--danger,#c33)">' + (resp ? esc(await resp.text()) : 'request failed') + '</div>';
+      return;
+    }
+    const data = await resp.json();
+    const entries = data.entries || [];
+    document.getElementById('dlqCount').textContent = entries.length.toLocaleString();
+    if (entries.length === 0) {
+      el.innerHTML = '<div class="empty">DLQ is empty.</div>';
+      return;
+    }
+    let html = '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Rejected vouchers (INVALID_SIGNATURE / PROVIDER_MISMATCH). Historical records only — re-queueing is intentionally disabled (would charge users under a world state they never acked). Discard when handled out-of-band.</div>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="border-bottom:1px solid var(--border);text-align:left">';
+    html += '<th style="padding:6px 8px">User</th><th style="padding:6px 8px">Sandbox</th><th style="padding:6px 8px;text-align:right">Fee</th><th style="padding:6px 8px;text-align:right">Nonce</th><th style="padding:6px 8px"></th></tr></thead><tbody>';
+    for (const e of entries) {
+      html += '<tr style="border-bottom:1px solid var(--border)">';
+      html += '<td style="padding:6px 8px;font-family:monospace">' + esc(shortAddr(e.user)) + '</td>';
+      html += '<td style="padding:6px 8px;font-family:monospace">' + (e.aggregated ? '<span style="font-size:11px;color:var(--muted);font-style:italic">aggregated</span>' : esc((e.sandbox_id || '').slice(0, 10) + '…')) + '</td>';
+      html += '<td style="padding:6px 8px;text-align:right">' + fmtNeuron(e.total_fee_wei) + '</td>';
+      html += '<td style="padding:6px 8px;text-align:right;font-family:monospace">' + esc(e.nonce || '—') + '</td>';
+      const args = JSON.stringify({user: e.user, provider: e.provider, nonce: e.nonce}).replace(/"/g, '&quot;');
+      html += '<td style="padding:6px 8px;text-align:right;white-space:nowrap">';
+      html += '<button class="btn btn-sm btn-ghost" data-row="' + args + '" onclick="doDiscard(this)" style="color:#c33">Discard</button>';
+      html += '</td></tr>';
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  } catch (e) {
+    el.innerHTML = '<div class="empty" style="color:var(--danger,#c33)">' + esc(String(e)) + '</div>';
+  }
+}
+async function doAggregate(btn) {
+  const row = JSON.parse(btn.getAttribute('data-row').replace(/&quot;/g, '"'));
+  if (!confirm('Aggregate vouchers for user ' + shortAddr(row.user) + '?\n\nAll queued vouchers matching this (user, provider) pair will be replaced by a single voucher with the summed total fee, across all sandboxes. This is destructive — the original individual vouchers are gone after aggregation.')) return;
+  btn.disabled = true; btn.textContent = 'Aggregating…';
+  try {
+    const resp = await signedFetch('POST', '/api/queue/aggregate', row);
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) { toast(data.error || ('HTTP ' + resp.status), 'error'); return; }
+    toast('Merged ' + data.matched + ' vouchers into 1 (' + fmtNeuron(data.total_fee_wei) + ')', 'success');
+    await loadQueueCard();
+  } catch (e) { toast(String(e), 'error'); }
+  finally { btn.disabled = false; btn.textContent = 'Aggregate'; }
+}
+async function doDiscard(btn) {
+  const row = JSON.parse(btn.getAttribute('data-row').replace(/&quot;/g, '"'));
+  if (!confirm('Discard this DLQ voucher permanently?\n\nThe fee will NOT be collected. Use only when the voucher is unrecoverable (user gone, sandbox long deleted, etc).')) return;
+  btn.disabled = true; btn.textContent = 'Discarding…';
+  try {
+    const resp = await signedFetch('POST', '/api/queue/dlq/discard', row);
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) { toast(data.error || ('HTTP ' + resp.status), 'error'); return; }
+    toast(data.removed > 0 ? 'Discarded.' : 'No matching entry.', data.removed > 0 ? 'success' : 'error');
+    await loadQueueCard();
+  } catch (e) { toast(String(e), 'error'); }
+  finally { btn.disabled = false; btn.textContent = 'Discard'; }
+}
+
+// ── Top Up Settler ───────────────────────────────────────────────────────
+function openTopUpModal(dest) {
+  document.getElementById('topUpDest').value = dest;
+  document.getElementById('topUpAmount').value = '1';
+  setErr('topUpErr', '');
+  openModal('topUpModal');
+}
+async function doTopUp() {
+  const dest = document.getElementById('topUpDest').value.trim();
+  const amt  = document.getElementById('topUpAmount').value;
+  if (!dest || !amt || parseFloat(amt) <= 0) { setErr('topUpErr', 'Amount must be > 0'); return; }
+  setErr('topUpErr', '');
+  await sendTx('Top up settler', () => signer.sendTransaction({ to: dest, value: ethers.parseEther(amt) }), {
+    onSuccess: () => { closeModal('topUpModal'); loadObservability(); },
+    errEl: 'topUpErr',
+  });
+}
+
+// ── Operator state dispatch ───────────────────────────────────────────────
+// /api/observability is admin-only and returns operator-internal state
+// (voucher queue + DLQ depth + alert history). Signer-match and balance
+// health are public — they're rendered from /info inside loadProviderData().
+let _lastSettlerAddr = null;
+async function loadObservability() {
+  const alertsEl = document.getElementById('alertsContent');
+  const meta = document.getElementById('alertsMeta');
+  try {
+    const resp = await signedFetch('GET', '/api/observability');
+    if (!resp || !resp.ok) {
+      const msg = resp ? esc(await resp.text()) : 'request failed';
+      alertsEl.innerHTML = '<div class="empty" style="color:var(--danger,#c33)">' + msg + '</div>';
+      return;
+    }
+    const data = await resp.json();
+    renderQueueSummary(data.queue || {});
+    renderRecentAlerts(data.alerts_recent || []);
+    meta.textContent = 'updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    alertsEl.innerHTML = '<div class="empty" style="color:var(--danger,#c33)">' + esc(String(e)) + '</div>';
+  }
+}
+function statusPill(status) {
+  const colors = { healthy: '#2a7', ok: '#2a7', aligned: '#2a7', warning: '#c80', critical: '#c33', mismatch: '#c33', backlogged: '#c80', unregistered: '#888', unknown: '#888' };
+  const c = colors[status] || '#888';
+  return '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:' + c + ';color:#fff">' + esc(status) + '</span>';
+}
+function renderSignerHealth(s) {
+  const box = document.getElementById('signerHealth');
+  const badge = document.getElementById('signerHealthBadge');
+  const detail = document.getElementById('signerHealthDetail');
+  if (!s.local) { box.style.display = 'none'; return; }
+  box.style.display = '';
+  badge.innerHTML = statusPill(s.status || 'unknown');
+  let html = 'Local TEE: <span class="mono">' + esc(s.local) + '</span>';
+  if (s.onchain) html += '<br>On-chain: <span class="mono">' + esc(s.onchain) + '</span>';
+  if (s.status === 'mismatch') {
+    html += '<br><strong style="color:#c33">Every voucher fails INVALID_SIGNATURE.</strong> Fix: click Register/Update and set TEE Signer to <span class="mono">' + esc(s.local) + '</span>.';
+  } else if (s.status === 'unregistered') {
+    html += '<br>Service not registered yet. Click Register/Update.';
+  } else if (s.error) {
+    html += '<br><span style="color:#c33">RPC error: ' + esc(s.error) + '</span>';
+  }
+  detail.innerHTML = html;
+}
+function renderBalanceHealth(b, signerStatus) {
+  const box = document.getElementById('balanceHealth');
+  const badge = document.getElementById('balanceHealthBadge');
+  const detail = document.getElementById('balanceHealthDetail');
+  if (!b.address) { box.style.display = 'none'; return; }
+  box.style.display = '';
+  _lastSettlerAddr = b.address;
+  // Cascading: if signer mismatches, balance is moot.
+  if (signerStatus === 'mismatch' || signerStatus === 'unregistered') {
+    badge.innerHTML = statusPill('blocked');
+    detail.innerHTML = '<span style="color:var(--muted)">Blocked by signer status — fix signer first.</span>';
+    return;
+  }
+  badge.innerHTML = statusPill(b.status || 'unknown');
+  let html = '';
+  if (b.balance_wei) {
+    html += '<span style="font-size:14px;font-weight:600;color:var(--text)">' + fmtNeuron(b.balance_wei) + '</span>';
+    if (b.one_tx_cost_wei) html += ' &middot; ~' + fmtNeuron(b.one_tx_cost_wei) + ' per settle tx';
+    html += '<br>Address: <span class="mono">' + esc(b.address) + '</span>';
+  } else if (b.error) {
+    html += '<span style="color:#c33">' + esc(b.error) + '</span>';
+  }
+  detail.innerHTML = html;
+}
+function renderQueueSummary(q) {
+  const el = document.getElementById('queueSummary');
+  if (q.depth === undefined) { el.innerHTML = ''; return; }
+  let html = '<div style="display:flex;gap:24px;font-size:12px;padding:8px 12px;background:var(--surf);border-radius:4px">';
+  html += '<div><span style="color:var(--muted)">Main: </span><strong>' + q.depth.toLocaleString() + '</strong></div>';
+  html += '<div><span style="color:var(--muted)">DLQ: </span><strong style="' + (q.dlq_depth > 0 ? 'color:#c33' : '') + '">' + (q.dlq_depth ?? 0).toLocaleString() + '</strong></div>';
+  html += '<div><span style="color:var(--muted)">Threshold: </span>' + (q.threshold ?? '—').toLocaleString() + '</div>';
+  html += '<div style="margin-left:auto">' + statusPill(q.status || 'unknown') + '</div>';
+  html += '</div>';
+  el.innerHTML = html;
+}
+function renderRecentAlerts(alerts) {
+  const el = document.getElementById('alertsContent');
+  if (alerts.length === 0) {
+    el.innerHTML = '<div class="empty">No alerts in recent history.</div>';
+    return;
+  }
+  let html = '<div style="display:flex;flex-direction:column;gap:6px;max-height:340px;overflow:auto">';
+  for (const a of alerts) {
+    const sev = a.severity === 'critical' ? '#c33' : '#c80';
+    html += '<div style="display:flex;gap:10px;padding:8px 10px;border-left:3px solid ' + sev + ';background:var(--surf);font-size:12px">';
+    html += '<div style="color:var(--muted);font-family:monospace;white-space:nowrap">' + esc(a.timestamp || '') + '</div>';
+    html += '<div style="flex:1;min-width:0"><div style="font-weight:600">' + esc(a.kind) + '</div><div style="color:var(--muted)">' + esc(a.message) + '</div>';
+    if (a.details && Object.keys(a.details).length) {
+      const lines = Object.entries(a.details).map(([k, v]) => esc(k) + ': ' + esc(typeof v === 'object' ? JSON.stringify(v) : String(v))).join(' &middot; ');
+      html += '<div style="color:var(--muted);font-size:11px;margin-top:2px">' + lines + '</div>';
+    }
+    html += '</div></div>';
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+function openTopUpFromCard() {
+  if (!_lastSettlerAddr) { toast('Settler address not loaded — refresh first', 'error'); return; }
+  openTopUpModal(_lastSettlerAddr);
+}
+
 function fmtNeuron(s) {
   if (!s || s === '0') return '0 0G';
   const n = BigInt(s); if (n === 0n) return '0 0G';

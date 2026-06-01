@@ -62,6 +62,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
+	"github.com/0gfoundation/0g-sandbox/internal/alert"
 	"github.com/0gfoundation/0g-sandbox/internal/auth"
 	"github.com/0gfoundation/0g-sandbox/internal/billing"
 	"github.com/0gfoundation/0g-sandbox/internal/chain"
@@ -478,7 +479,7 @@ func TestComponent_HappyPath(t *testing.T) {
 	}
 	settlerCtx, settlerCancel := context.WithCancel(ctx)
 	defer settlerCancel()
-	go settler.Run(settlerCtx, cfg, rdb, onchain, signer, stopCh, zap.NewNop())
+	go settler.Run(settlerCtx, cfg, rdb, onchain, signer, stopCh, alert.Nop{}, zap.NewNop())
 
 	// ── 4. Assert: on-chain lastNonce == 1 ────────────────────────────────────
 	waitFor(t, "on-chain lastNonce == 1", 10*time.Second, func() bool {
@@ -561,7 +562,7 @@ func TestComponent_InsufficientBalance(t *testing.T) {
 	}
 	settlerCtx, settlerCancel := context.WithCancel(ctx)
 	defer settlerCancel()
-	go settler.Run(settlerCtx, cfg, rdb, onchain, signer, stopCh, zap.NewNop())
+	go settler.Run(settlerCtx, cfg, rdb, onchain, signer, stopCh, alert.Nop{}, zap.NewNop())
 	go runStopHandler(ctx, stopCh, dtona, rdb, zap.NewNop(), nil)
 
 	// ── 3. Assert: Daytona received stop for the correct sandbox ──────────────

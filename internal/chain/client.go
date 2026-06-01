@@ -112,6 +112,38 @@ func (c *Client) ChainID() *big.Int { return c.chainID }
 // ContractAddress returns the settlement contract address.
 func (c *Client) ContractAddress() common.Address { return c.contractAddr }
 
+// SettlerAddress is the EOA the settler uses to submit SettleFeesWithTEE txs.
+// In the current deployment this is the TEE key's address — the same key that
+// signs vouchers also pays for on-chain settlement.
+func (c *Client) SettlerAddress() common.Address {
+	return crypto.PubkeyToAddress(c.teeKey.PublicKey)
+}
+
+// BalanceAt returns the latest balance for addr. Wraps eth.BalanceAt(nil)
+// so monitor code doesn't need direct access to the embedded ethclient.
+func (c *Client) BalanceAt(ctx context.Context, addr common.Address) (*big.Int, error) {
+	return c.eth.BalanceAt(ctx, addr, nil)
+}
+
+// SuggestGasPrice returns the RPC's gas price suggestion. Used by the balance
+// monitor to derive a "1 settle tx worth of gas" threshold.
+func (c *Client) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
+	return c.eth.SuggestGasPrice(ctx)
+}
+
+// GetServiceTEESignerAddress returns the on-chain `services[provider].teeSignerAddress`
+// — the EVM address the contract expects voucher signatures to recover to.
+// Used by the signer-mismatch monitor to detect TEE key drift (e.g. KMS rotated
+// the key but provider didn't update on-chain).
+func (c *Client) GetServiceTEESignerAddress(ctx context.Context, provider common.Address) (common.Address, error) {
+	opts := &bind.CallOpts{Context: ctx}
+	svc, err := c.contract.Services(opts, provider)
+	if err != nil {
+		return common.Address{}, fmt.Errorf("Services: %w", err)
+	}
+	return svc.TeeSignerAddress, nil
+}
+
 // transactOpts builds a *bind.TransactOpts signed by the TEE key.
 // The settlement contract no longer requires msg.sender == provider.
 func (c *Client) transactOpts(ctx context.Context) (*bind.TransactOpts, error) {

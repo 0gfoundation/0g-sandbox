@@ -14,6 +14,7 @@ type Config struct {
 	Chain   ChainConfig
 	Server  ServerConfig
 	Broker  BrokerConfig
+	Alert   AlertConfig
 }
 
 type BrokerConfig struct {
@@ -106,6 +107,16 @@ type ServerConfig struct {
 	SealedOnly bool `mapstructure:"sealed_only"`
 }
 
+// AlertConfig drives the operator-facing alert pipeline (settler tx failures,
+// low wallet balance, voucher rejection, queue backlog). When WebhookURL is
+// empty, alerts go to logs only — no external delivery.
+type AlertConfig struct {
+	WebhookURL              string `mapstructure:"webhook_url"`
+	DedupWindowSec          int64  `mapstructure:"dedup_window_sec"`
+	SettlerLowBalanceFactor int64  `mapstructure:"settler_low_balance_factor"`
+	QueueBacklogThreshold   int64  `mapstructure:"queue_backlog_threshold"`
+}
+
 func Load() (*Config, error) {
 	v := viper.New()
 
@@ -118,6 +129,9 @@ func Load() (*Config, error) {
 	v.SetDefault("billing.create_fee", "5000000")
 	v.SetDefault("redis.addr", "redis:6379")
 	v.SetDefault("daytona.registry_url", "http://registry:6000")
+	v.SetDefault("alert.dedup_window_sec", 3600)            // 1h between same-kind alerts
+	v.SetDefault("alert.settler_low_balance_factor", 100)   // warn when balance < 100 settle-tx worth
+	v.SetDefault("alert.queue_backlog_threshold", 1000)     // alert if queue depth exceeds this
 
 	// Config file (optional)
 	v.SetConfigName("config")
@@ -150,6 +164,10 @@ func Load() (*Config, error) {
 		"server.ssh_gateway_host":       "SSH_GATEWAY_HOST",
 		"server.broker_url":             "BROKER_URL",
 		"server.sealed_only":            "SEALED_ONLY",
+		"alert.webhook_url":                  "ALERT_WEBHOOK_URL",
+		"alert.dedup_window_sec":             "ALERT_DEDUP_WINDOW_SEC",
+		"alert.settler_low_balance_factor":   "SETTLER_LOW_BALANCE_FACTOR",
+		"alert.queue_backlog_threshold":      "QUEUE_BACKLOG_THRESHOLD",
 	}
 	for key, env := range bindings {
 		if err := v.BindEnv(key, env); err != nil {

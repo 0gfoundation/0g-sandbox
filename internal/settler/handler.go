@@ -8,6 +8,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
+	"github.com/0gfoundation/0g-sandbox/internal/alert"
 	"github.com/0gfoundation/0g-sandbox/internal/chain"
 	"github.com/0gfoundation/0g-sandbox/internal/events"
 	"github.com/0gfoundation/0g-sandbox/internal/voucher"
@@ -23,6 +24,7 @@ func HandleStatuses(
 	firstItem string,
 	vouchers []voucher.SandboxVoucher,
 	statuses []chain.SettlementStatus,
+	alerter alert.Alerter,
 	log *zap.Logger,
 ) {
 	for i, status := range statuses {
@@ -37,23 +39,55 @@ func HandleStatuses(
 
 		switch status {
 		case chain.StatusSuccess:
+			isAgg := v.IsAggregated()
 			log.Info("voucher settled",
 				zap.String("user", v.User.Hex()),
 				zap.String("nonce", v.Nonce.String()),
+				zap.Bool("aggregated", isAgg),
 			)
+			msg := fmt.Sprintf("Voucher settled nonce #%s for %s", v.Nonce.String(), v.User.Hex())
+			if isAgg {
+				msg = fmt.Sprintf("Aggregated voucher settled nonce #%s for %s (%s wei)", v.Nonce.String(), v.User.Hex(), v.TotalFee.String())
+			}
 			_ = events.Push(ctx, rdb, events.Event{
 				Type:      events.TypeSettled,
-				Message:   fmt.Sprintf("Voucher settled nonce #%s for %s", v.Nonce.String(), v.User.Hex()),
+				Message:   msg,
 				SandboxID: sandboxID,
 				User:      v.User.Hex(),
 				Amount:    v.TotalFee.String(),
 			})
 
 		case chain.StatusInsufficientBalance:
-			persistStop(ctx, rdb, stopCh, sandboxID, "insufficient_balance", log)
+			if v.IsAggregated() {
+				// Aggregated voucher: no specific sandbox to stop. Alert so the
+				// operator can intervene; per-(user, provider) stop sweep is
+				// future work if this becomes common.
+				log.Warn("aggregated voucher exhausted user balance",
+					zap.String("user", v.User.Hex()),
+					zap.String("provider", v.Provider.Hex()),
+					zap.String("amount", v.TotalFee.String()),
+				)
+				alerter.Notify(ctx, alert.KindVoucherRejected, alert.SeverityCritical,
+					"Aggregated voucher exhausted user balance — multiple sandboxes affected",
+					map[string]any{
+						"user":     v.User.Hex(),
+						"provider": v.Provider.Hex(),
+						"amount":   v.TotalFee.String(),
+					},
+				)
+			} else {
+				persistStop(ctx, rdb, stopCh, sandboxID, "insufficient_balance", log)
+			}
 
 		case chain.StatusNotAcknowledged:
-			persistStop(ctx, rdb, stopCh, sandboxID, "not_acknowledged", log)
+			if v.IsAggregated() {
+				log.Warn("aggregated voucher rejected: user not acknowledged",
+					zap.String("user", v.User.Hex()),
+					zap.String("provider", v.Provider.Hex()),
+				)
+			} else {
+				persistStop(ctx, rdb, stopCh, sandboxID, "not_acknowledged", log)
+			}
 
 		case chain.StatusProviderMismatch, chain.StatusInvalidSignature:
 			raw, _ := json.Marshal(v)
@@ -65,11 +99,30 @@ func HandleStatuses(
 				zap.String("provider", v.Provider.Hex()),
 				zap.String("nonce", v.Nonce.String()),
 			)
+			alerter.Notify(ctx, alert.KindVoucherRejected, alert.SeverityCritical,
+				"Voucher rejected — system config issue",
+				map[string]any{
+					"status":    status.String(),
+					"user":      v.User.Hex(),
+					"provider":  v.Provider.Hex(),
+					"sandbox":   sandboxID,
+					"nonce":     v.Nonce.String(),
+				},
+			)
 
 		case chain.StatusInvalidNonce:
 			log.Warn("voucher discarded: invalid nonce",
 				zap.String("user", v.User.Hex()),
 				zap.String("nonce", v.Nonce.String()),
+			)
+			alerter.Notify(ctx, alert.KindVoucherInvalidNonce, alert.SeverityCritical,
+				"Voucher with invalid nonce — possible replay or settler bug",
+				map[string]any{
+					"user":     v.User.Hex(),
+					"provider": v.Provider.Hex(),
+					"sandbox":  sandboxID,
+					"nonce":    v.Nonce.String(),
+				},
 			)
 		}
 	}

@@ -189,8 +189,15 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 
 	// ── Admin-only: local Redis billing audit log (created/stopped/auto_stopped/settled) ──
 	rg.GET("/audit-log", h.handleAuditLog)
+}
 
-	// ── On-chain voucher events (public chain data, wallet auth only) ───────
+// RegisterPublic mounts endpoints that don't need wallet auth — typically
+// reads of on-chain data that anyone could query via RPC. Keeps them out of
+// the auth.Middleware-protected group so dashboards/explorers can hit them
+// without a signed request.
+func (h *Handler) RegisterPublic(rg *gin.RouterGroup) {
+	// On-chain VoucherSettled events. Anyone can derive the same data from
+	// the public RPC + contract address; no value in gating it.
 	rg.GET("/events", h.handleEvents)
 }
 

@@ -19,16 +19,19 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
+	"github.com/0gfoundation/0g-sandbox/internal/alert"
 	"github.com/0gfoundation/0g-sandbox/internal/auth"
 	"github.com/0gfoundation/0g-sandbox/internal/billing"
 	"github.com/0gfoundation/0g-sandbox/internal/chain"
 	"github.com/0gfoundation/0g-sandbox/internal/config"
 	"github.com/0gfoundation/0g-sandbox/internal/daytona"
 	"github.com/0gfoundation/0g-sandbox/internal/events"
+	"github.com/0gfoundation/0g-sandbox/internal/observability"
 	"github.com/0gfoundation/0g-sandbox/internal/proxy"
 	"github.com/0gfoundation/0g-sandbox/internal/registry"
 	"github.com/0gfoundation/0g-sandbox/internal/settler"
 	"github.com/0gfoundation/0g-sandbox/internal/tee"
+	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 	"github.com/0gfoundation/0g-sandbox/web"
 )
 
@@ -161,11 +164,32 @@ func main() {
 	// ── Stop channel (settler → stop handler, buffered) ───────────────────────
 	stopCh := make(chan settler.StopSignal, 100)
 
+	// ── Alerter ───────────────────────────────────────────────────────────────
+	// Always construct: persists to Redis (for the dashboard) + logs even
+	// without a webhook URL. With ALERT_WEBHOOK_URL set, also dispatches
+	// to the configured destination (Slack/PagerDuty/etc).
+	dedup := time.Duration(cfg.Alert.DedupWindowSec) * time.Second
+	alerter := alert.NewWebhook(cfg.Alert.WebhookURL, cfg.Chain.ProviderAddress, rdb, dedup, log)
+	if cfg.Alert.WebhookURL != "" {
+		log.Info("alert webhook configured", zap.Duration("dedup", dedup))
+	} else {
+		log.Info("alert webhook not configured — alerts persist to Redis + logs only")
+	}
+
 	// ── Goroutines ────────────────────────────────────────────────────────────
 	// Recovery must start after stopCh is ready but before settler writes to it.
 	go recoverPendingStops(ctx, rdb, stopCh, log)
-	go settler.Run(ctx, cfg, rdb, onchain, signer, stopCh, log)
+	go settler.Run(ctx, cfg, rdb, onchain, signer, stopCh, alerter, log)
 	go billing.RunGenerator(ctx, rdb, billingHandler, log)
+
+	// Balance + queue depth + signer-mismatch monitors. All best-effort —
+	// they surface problems but don't gate the hot path. Signer-mismatch in
+	// particular is the only safety net against KMS rotation drift, since
+	// INVALID_SIGNATURE on-chain emits no event and accumulates silently.
+	go observability.RunBalanceMonitor(ctx, onchain, alerter, cfg.Alert.SettlerLowBalanceFactor, log)
+	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, cfg.Chain.ProviderAddress)
+	go observability.RunQueueDepthMonitor(ctx, rdb, queueKey, alerter, cfg.Alert.QueueBacklogThreshold, log)
+	go observability.RunSignerMismatchMonitor(ctx, onchain, common.HexToAddress(cfg.Chain.ProviderAddress), alerter, log)
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	gin.SetMode(gin.ReleaseMode)
@@ -184,6 +208,10 @@ func main() {
 	})
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+	r.GET("/", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		c.Data(http.StatusOK, "text/html; charset=utf-8", web.UserHTML)
 	})
 	r.GET("/dashboard", func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
@@ -244,6 +272,49 @@ func main() {
 		rpcOrigin = u.Scheme + "://" + u.Host
 	}
 	r.GET("/info", func(c *gin.Context) {
+		ctx := c.Request.Context()
+		settlerAddr := onchain.SettlerAddress()
+		providerAddr := common.HexToAddress(cfg.Chain.ProviderAddress)
+
+		// Signer match — both addresses are publicly derivable so this stays
+		// on the public /info surface. Provider operators want this visible
+		// even before connecting an admin wallet.
+		signer := gin.H{"local": settlerAddr.Hex(), "status": "unknown"}
+		if onchainSigner, err := onchain.GetServiceTEESignerAddress(ctx, providerAddr); err == nil {
+			signer["onchain"] = onchainSigner.Hex()
+			switch {
+			case onchainSigner == (common.Address{}):
+				signer["status"] = "unregistered"
+			case onchainSigner == settlerAddr:
+				signer["status"] = "aligned"
+			default:
+				signer["status"] = "mismatch"
+			}
+		} else {
+			signer["error"] = err.Error()
+		}
+
+		// Settler balance — also public (any chain RPC reveals wallet balance).
+		settler := gin.H{"address": settlerAddr.Hex(), "status": "unknown"}
+		if bal, err := onchain.BalanceAt(ctx, settlerAddr); err == nil {
+			if gasPrice, gErr := onchain.SuggestGasPrice(ctx); gErr == nil {
+				oneTx := new(big.Int).Mul(gasPrice, big.NewInt(300_000))
+				warningThreshold := new(big.Int).Mul(oneTx, big.NewInt(cfg.Alert.SettlerLowBalanceFactor))
+				status := "healthy"
+				switch {
+				case bal.Cmp(oneTx) < 0:
+					status = "critical"
+				case bal.Cmp(warningThreshold) < 0:
+					status = "warning"
+				}
+				settler["balance_wei"] = bal.String()
+				settler["gas_price_wei"] = gasPrice.String()
+				settler["one_tx_cost_wei"] = oneTx.String()
+				settler["warning_threshold_wei"] = warningThreshold.String()
+				settler["status"] = status
+			}
+		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"contract_address":      cfg.Chain.ContractAddress,
 			"provider_address":      cfg.Chain.ProviderAddress,
@@ -254,6 +325,8 @@ func main() {
 			"voucher_interval_sec":  cfg.Billing.VoucherIntervalSec,
 			"min_balance":           minBalance.String(),
 			"sealed_only":           cfg.Server.SealedOnly,
+			"signer":                signer,
+			"settler":               settler,
 		})
 	})
 
@@ -343,9 +416,13 @@ func main() {
 		c.JSON(http.StatusOK, filtered)
 	})
 
+	// Public read-only API surface — no wallet signature required.
+	// Anything mounted here should be derivable from public chain RPC.
+	apiPublic := r.Group("/api")
 	api := r.Group("/api", auth.Middleware(rdb))
 	proxyHandler := proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec, cfg.Chain.ProviderAddress, cfg.Chain.AdminList(), cfg.Server.SSHGatewayHost, rdb, log, cfg.Server.BrokerURL, onchain.PrivateKey(), cfg.Billing.VoucherIntervalSec)
 	proxyHandler.SealedOnly = cfg.Server.SealedOnly
+	proxyHandler.RegisterPublic(apiPublic)
 	proxyHandler.Register(api)
 	go runStopHandler(ctx, stopCh, dtona, rdb, log, proxyHandler.BrokerDeregister)
 
@@ -442,6 +519,171 @@ func main() {
 			"kept":       kept,
 			"skipped":    skipped,
 			"failed":     failed,
+		})
+	})
+
+	// Admin-only: voucher backlog summary, grouped by (user, provider).
+	// Scans up to voucher.MaxScanItems items; sets `truncated` when the queue
+	// is bigger. `min_count` query param (default 1) — pass 2+ to hide
+	// already-aggregated singleton rows.
+	api.GET("/queue/summary", func(c *gin.Context) {
+		wallet := c.GetString("wallet_address")
+		if !cfg.Chain.IsAdmin(wallet) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
+			return
+		}
+		minCount := 1
+		if v := c.Query("min_count"); v != "" {
+			if n, err := fmt.Sscanf(v, "%d", &minCount); err != nil || n != 1 {
+				minCount = 1
+			}
+		}
+		queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, cfg.Chain.ProviderAddress)
+		rows, scanned, truncated, err := voucher.SummarizeQueue(c.Request.Context(), rdb, queueKey, minCount)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"rows":      rows,
+			"scanned":   scanned,
+			"truncated": truncated,
+			"limit":     voucher.MaxScanItems,
+		})
+	})
+
+	// Admin-only: list contents of the dead-letter queue. Each entry is a
+	// voucher the on-chain settle path rejected as a system config issue
+	// (INVALID_SIGNATURE / PROVIDER_MISMATCH). They sit here until a human
+	// requeues or discards them.
+	api.GET("/queue/dlq", func(c *gin.Context) {
+		wallet := c.GetString("wallet_address")
+		if !cfg.Chain.IsAdmin(wallet) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
+			return
+		}
+		entries, err := voucher.ListDLQ(c.Request.Context(), rdb, common.HexToAddress(cfg.Chain.ProviderAddress))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"entries": entries})
+	})
+
+	// Admin-only: permanently drop a single DLQ voucher. This is the ONLY
+	// outbound operation on the DLQ — there's no requeue. Re-injecting a
+	// frozen voucher into the live billing pipeline breaks the implicit
+	// user-trust contract (totalFee was computed under a possibly different
+	// world state than the user's current ack), so DLQ entries are
+	// historical records, not zombie invoices. See dlq.go for the full
+	// rationale.
+	api.POST("/queue/dlq/discard", func(c *gin.Context) {
+		wallet := c.GetString("wallet_address")
+		if !cfg.Chain.IsAdmin(wallet) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
+			return
+		}
+		var req struct {
+			User     string `json:"user"`
+			Provider string `json:"provider"`
+			Nonce    string `json:"nonce"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || req.User == "" || req.Provider == "" || req.Nonce == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "user, provider, and nonce are required"})
+			return
+		}
+		removed, err := voucher.DiscardFromDLQ(c.Request.Context(), rdb,
+			common.HexToAddress(req.User),
+			common.HexToAddress(req.Provider),
+			req.Nonce,
+		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"removed": removed})
+	})
+
+	// Admin-only: collapse every queued voucher matching (user, provider) —
+	// regardless of sandbox — into a single voucher with summed total_fee.
+	// Uses WATCH-based atomic queue rewrite; safe against concurrent settler BLPOP.
+	api.POST("/queue/aggregate", func(c *gin.Context) {
+		wallet := c.GetString("wallet_address")
+		if !cfg.Chain.IsAdmin(wallet) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
+			return
+		}
+		var req struct {
+			User     string `json:"user"`
+			Provider string `json:"provider"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
+		if req.User == "" || req.Provider == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "user and provider are required"})
+			return
+		}
+		queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, cfg.Chain.ProviderAddress)
+		result, err := voucher.Aggregate(c.Request.Context(), rdb, queueKey,
+			common.HexToAddress(req.User),
+			common.HexToAddress(req.Provider),
+		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		// Audit trail: aggregations are otherwise invisible after the merged
+		// voucher settles, since downstream events look the same as a normal
+		// settle.
+		if result != nil && result.Matched > 0 {
+			_ = events.Push(c.Request.Context(), rdb, events.Event{
+				Type:    events.TypeAggregated,
+				Message: fmt.Sprintf("Aggregated %d vouchers for %s → 1 voucher (%s wei)", result.Matched, req.User, result.TotalFeeWei),
+				User:    req.User,
+				Amount:  result.TotalFeeWei,
+			})
+			log.Info("voucher aggregate",
+				zap.String("by", wallet),
+				zap.String("user", req.User),
+				zap.String("provider", req.Provider),
+				zap.Int("matched", result.Matched),
+				zap.String("total_wei", result.TotalFeeWei),
+			)
+		}
+		c.JSON(http.StatusOK, result)
+	})
+
+	// Admin-only: operator-internal state for the dashboard.
+	// Returns voucher queue + DLQ depth and the recent alert history
+	// (LPUSH'd by alert.Webhook). Signer-match and settler-balance health
+	// live on the public `/info` instead, since both are derivable from
+	// on-chain data.
+	api.GET("/observability", func(c *gin.Context) {
+		wallet := c.GetString("wallet_address")
+		if !cfg.Chain.IsAdmin(wallet) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
+			return
+		}
+		ctx := c.Request.Context()
+		queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, cfg.Chain.ProviderAddress)
+		dlqKey := fmt.Sprintf(voucher.VoucherDLQKeyFmt, cfg.Chain.ProviderAddress)
+		depth, _ := rdb.LLen(ctx, queueKey).Result()
+		dlqDepth, _ := rdb.LLen(ctx, dlqKey).Result()
+		queueStatus := "ok"
+		if depth > cfg.Alert.QueueBacklogThreshold {
+			queueStatus = "backlogged"
+		}
+		recent, _ := alert.History(ctx, rdb, 50)
+		c.JSON(http.StatusOK, gin.H{
+			"queue": gin.H{
+				"depth":     depth,
+				"dlq_depth": dlqDepth,
+				"threshold": cfg.Alert.QueueBacklogThreshold,
+				"status":    queueStatus,
+			},
+			"alerts_recent": recent,
 		})
 	})
 

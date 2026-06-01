@@ -9,6 +9,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
+	"github.com/0gfoundation/0g-sandbox/internal/alert"
 	"github.com/0gfoundation/0g-sandbox/internal/config"
 	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
@@ -18,7 +19,9 @@ const maxBatchSize = 50
 // Run is the main settler loop: BLPOP → sign → settle → handle statuses.
 // nonceSigner assigns nonces and signs vouchers sequentially, guaranteeing
 // strict nonce ordering regardless of how many goroutines enqueued the vouchers.
-func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain ChainClient, nonceSigner NonceSigner, stopCh chan<- StopSignal, log *zap.Logger) {
+// alerter receives operator alerts on tx failures and bug-class settle outcomes;
+// pass alert.Nop{} to disable.
+func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain ChainClient, nonceSigner NonceSigner, stopCh chan<- StopSignal, alerter alert.Alerter, log *zap.Logger) {
 	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, cfg.Chain.ProviderAddress)
 	// lockTime/2 as BLPOP timeout (half the lock window for responsiveness)
 	blpopTimeout := time.Duration(cfg.Billing.VoucherIntervalSec) * time.Second / 2
@@ -95,6 +98,19 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 		statuses, err := onchain.SettleFeesWithTEE(ctx, vouchers)
 		if err != nil {
 			log.Error("settler: SettleFeesWithTEE", zap.Error(err))
+			errType := alert.ClassifyChainErr(err)
+			sev := alert.SeverityCritical
+			if errType == "timeout" || errType == "rpc_unreachable" {
+				sev = alert.SeverityWarning // transient
+			}
+			alerter.Notify(ctx, alert.KindSettlerTxFailure, sev,
+				"SettleFeesWithTEE submission failed",
+				map[string]any{
+					"err":       err.Error(),
+					"err_type":  errType,
+					"batch":     len(vouchers),
+				},
+			)
 			// Re-push first item back (it was already BLPOP'd)
 			_ = rdb.LPush(ctx, queueKey, firstItem)
 			time.Sleep(5 * time.Second)
@@ -102,6 +118,6 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 		}
 
 		// Handle results (first item already popped; handler pops the rest)
-		HandleStatuses(ctx, rdb, stopCh, queueKey, firstItem, vouchers, statuses, log)
+		HandleStatuses(ctx, rdb, stopCh, queueKey, firstItem, vouchers, statuses, alerter, log)
 	}
 }

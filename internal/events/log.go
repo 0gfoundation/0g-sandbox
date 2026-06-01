@@ -16,10 +16,11 @@ const (
 
 // Type constants for event classification.
 const (
-	TypeCreated    = "created"
-	TypeStopped    = "stopped"
+	TypeCreated     = "created"
+	TypeStopped     = "stopped"
 	TypeAutoStopped = "auto_stopped"
-	TypeSettled    = "settled"
+	TypeSettled     = "settled"
+	TypeAggregated  = "aggregated"
 )
 
 // Event is a single operator-visible billing event stored in Redis.
