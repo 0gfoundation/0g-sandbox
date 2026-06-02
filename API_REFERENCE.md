@@ -203,7 +203,7 @@ Liveness probe.
 { "ok": true }
 ```
 
-#### `GET /info`
+#### `GET /api/info`
 Server configuration and pricing.
 ```json
 {
@@ -275,7 +275,7 @@ All fields are optional.
 
 **Provider-side `SEALED_ONLY=true`:** when the operator sets this env on the
 billing server, every create request **without** `"sealed": true` is rejected
-with HTTP 400 (`{"error": "this provider only accepts sealed sandboxes; set \"sealed\": true in the create request"}`). Check `GET /info`'s `sealed_only` field upfront to know.
+with HTTP 400 (`{"error": "this provider only accepts sealed sandboxes; set \"sealed\": true in the create request"}`). Check `GET /api/info`'s `sealed_only` field upfront to know.
 
 **Response `200`:** Sandbox object (see [Data Types](#data-types--objects))
 

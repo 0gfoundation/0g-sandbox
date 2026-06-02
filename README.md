@@ -235,7 +235,7 @@ See [`CLI.md`](CLI.md) for the full `cmd/user` reference and onboarding flow.
 ```
 minBalance = CREATE_FEE + COMPUTE_PRICE_PER_SEC × VOUCHER_INTERVAL_SEC
 ```
-Exact values depend on the provider's on-chain registration. Check `GET /info` for the live
+Exact values depend on the provider's on-chain registration. Check `GET /api/info` for the live
 `create_fee`, `compute_price_per_sec`, and `min_balance` for the provider you're using.
 
 Sandboxes are automatically stopped when the user's balance is exhausted.

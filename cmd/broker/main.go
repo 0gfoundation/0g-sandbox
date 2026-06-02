@@ -93,6 +93,8 @@ func main() {
 	r.GET("/api/info", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"contract_address": cfg.Chain.ContractAddress,
+			"tapp_registry":    cfg.Chain.TappRegistry,
+			"app_id":           os.Getenv("BACKEND_APP_NAME"),
 			"chain_id":         cfg.Chain.ChainID,
 			"rpc_url":          cfg.Chain.RPCURL,
 		})

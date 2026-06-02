@@ -454,13 +454,13 @@ window.dispatchEvent(new Event('eip6963:requestProvider'));
 
 window.onload = async () => {
   // Load server info from the billing server itself (same origin)
-  info = await fetch('/info').then(r => r.json()).catch(() => null);
+  info = await fetch('/api/info').then(r => r.json()).catch(() => null);
   if (info) {
     document.getElementById('chainTag').innerHTML = `<div class="dot"></div>Chain ${info.chain_id}`;
     const cEl = document.getElementById('infoContract'); cEl.textContent = shortAddr(info.contract_address||'') || '—'; cEl.title = info.contract_address || '';
     document.getElementById('infoChain').textContent = info.chain_id || '—';
     const pEl = document.getElementById('infoProvider'); pEl.textContent = shortAddr(info.provider_address||'') || '—'; pEl.title = info.provider_address || '';
-    // Pre-fill AppId from /info.signer.app_id (set after first registration).
+    // Pre-fill AppId from /api/info.signer.app_id (set after first registration).
     if (info.signer && info.signer.app_id) {
       document.getElementById('svcAppIdInput').value = info.signer.app_id;
     }
@@ -605,10 +605,10 @@ async function loadProviderData() {
     document.getElementById('providerEarnings').textContent = fmtNeuron(earn.toString());
     if (owner) { const el = document.getElementById('contractOwner'); el.textContent = shortAddr(owner); el.title = owner; }
 
-    // Signer-match + settler-balance health both come from the public /info
+    // Signer-match + settler-balance health both come from the public /api/info
     // endpoint (no signing required — all data is derivable from on-chain).
     try {
-      const infoFresh = await fetch('/info').then(r => r.json());
+      const infoFresh = await fetch('/api/info').then(r => r.json());
       renderSignerHealth(infoFresh.signer || {});
       renderBalanceHealth(infoFresh.settler || {}, (infoFresh.signer || {}).status);
     } catch (_) {}
@@ -924,7 +924,7 @@ async function doTopUp() {
   });
 }
 
-// Last settler address learned from /info, for the Top Up modal default.
+// Last settler address learned from /api/info, for the Top Up modal default.
 let _lastSettlerAddr = null;
 
 function statusPill(status) {

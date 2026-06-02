@@ -269,7 +269,7 @@ func main() {
 	if u, err := url.Parse(cfg.Chain.RPCURL); err == nil {
 		rpcOrigin = u.Scheme + "://" + u.Host
 	}
-	r.GET("/info", func(c *gin.Context) {
+	r.GET("/api/info", func(c *gin.Context) {
 		ctx := c.Request.Context()
 		settlerAddr := onchain.SettlerAddress()
 		providerAddr := common.HexToAddress(cfg.Chain.ProviderAddress)
@@ -659,7 +659,7 @@ func main() {
 	// Admin-only: operator-internal state for the dashboard.
 	// Returns voucher queue + DLQ depth and the recent alert history
 	// (LPUSH'd by alert.Webhook). Signer-match and settler-balance health
-	// live on the public `/info` instead, since both are derivable from
+	// live on the public `/api/info` instead, since both are derivable from
 	// on-chain data.
 	api.GET("/observability", func(c *gin.Context) {
 		wallet := c.GetString("wallet_address")
