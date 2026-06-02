@@ -112,7 +112,7 @@ func (h *SessionHandler) HandlePost(c *gin.Context) {
 		return
 	}
 
-	// 1. Look up provider's teeSignerAddress from indexer.
+	// 1. Look up provider's bound appId from indexer.
 	rec, ok := h.providers.Get(req.ProviderAddr)
 	if !ok {
 		c.JSON(http.StatusForbidden, gin.H{"error": "provider not registered"})
@@ -253,7 +253,7 @@ func (h *SessionHandler) HandleDelete(c *gin.Context) {
 		return
 	}
 
-	// 2. Look up teeSignerAddress for this provider.
+	// 2. Look up bound appId for this provider.
 	rec, ok := h.providers.Get(entry.Provider)
 	if !ok {
 		c.JSON(http.StatusForbidden, gin.H{"error": "provider not registered"})
