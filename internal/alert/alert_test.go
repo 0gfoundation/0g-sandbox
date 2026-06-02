@@ -65,14 +65,34 @@ func TestHistory_NewestFirst(t *testing.T) {
 }
 
 func TestHistory_BoundedToMaxLen(t *testing.T) {
-	w, rdb, mr := newWebhook(t)
+	// Use dedupWindow=0 so each Notify call lands in history (test bound, not dedup).
+	mr, _ := miniredis.Run()
 	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	w := NewWebhook("", "0xPROV", rdb, 0, zap.NewNop())
+
 	for i := 0; i < HistoryMaxLen+50; i++ {
 		w.Notify(context.Background(), KindQueueBacklog, SeverityWarning, "x", nil)
 	}
 	llen, _ := rdb.LLen(context.Background(), HistoryKey).Result()
 	if llen != int64(HistoryMaxLen) {
 		t.Errorf("history not bounded: got %d want %d", llen, HistoryMaxLen)
+	}
+}
+
+func TestNotify_DedupSuppressesPersist(t *testing.T) {
+	// Same-kind repeat within dedup window must yield exactly one history entry.
+	mr, _ := miniredis.Run()
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	w := NewWebhook("", "0xPROV", rdb, time.Hour, zap.NewNop())
+
+	for i := 0; i < 5; i++ {
+		w.Notify(context.Background(), KindSettlerNoBalance, SeverityCritical, "out of gas", nil)
+	}
+	hist, _ := History(context.Background(), rdb, 20)
+	if len(hist) != 1 {
+		t.Errorf("persist not deduped: got %d entries want 1", len(hist))
 	}
 }
 

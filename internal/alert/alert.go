@@ -103,19 +103,26 @@ type payload struct {
 }
 
 // Notify logs the event, persists it to Redis (for the dashboard), and
-// asynchronously dispatches to the webhook if one is configured and the
-// dedup window has elapsed.
+// asynchronously dispatches to the webhook if one is configured.
 //
-// Persistence happens on every call regardless of dedup or webhook config —
-// the dashboard reads history independently. Dedup only gates outbound HTTP.
+// Dedup applies to BOTH persist and dispatch: within the dedup window only
+// the first call per kind logs an entry and fires the webhook. Subsequent
+// calls in the window are still logged at WARN (for ops grep) but suppressed
+// from the dashboard history and webhook — otherwise a persistent failure
+// (e.g. settler with 0 balance checked every 60s) spams the history with
+// dozens of identical entries.
 func (w *Webhook) Notify(ctx context.Context, kind Kind, sev Severity, message string, details map[string]any) {
-	// Always log — even when dedup suppresses the webhook, ops can grep.
+	// Always log — even when dedup suppresses everything else, ops can grep.
 	w.log.Warn("alert",
 		zap.String("kind", string(kind)),
 		zap.String("severity", string(sev)),
 		zap.String("message", message),
 		zap.Any("details", details),
 	)
+
+	if w.dedupWindow > 0 && !w.claimDedup(ctx, kind) {
+		return
+	}
 
 	entry := Entry{
 		Kind:      kind,
@@ -127,10 +134,6 @@ func (w *Webhook) Notify(ctx context.Context, kind Kind, sev Severity, message s
 	w.persist(ctx, entry)
 
 	if w.webhookURL == "" {
-		return
-	}
-
-	if w.dedupWindow > 0 && !w.claimDedup(ctx, kind) {
 		return
 	}
 
