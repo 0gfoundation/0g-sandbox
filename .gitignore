@@ -20,6 +20,7 @@ contracts/lib/
 # Environment secrets — all .env* files may contain real credentials
 .env
 .env.*
+!.env.example
 
 # Private keys and certificates
 *.key
