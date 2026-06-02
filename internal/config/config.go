@@ -48,6 +48,7 @@ type BillingConfig struct {
 type ChainConfig struct {
 	RPCURL          string `mapstructure:"rpc_url"`
 	ContractAddress string `mapstructure:"contract_address"`
+	TappRegistry    string `mapstructure:"tapp_registry"`
 	TEEPrivateKey   string `mapstructure:"tee_private_key"`
 	ProviderAddress string `mapstructure:"provider_address"`
 	// AdminAddresses is the comma-separated list of wallet addresses that may
@@ -157,6 +158,7 @@ func Load() (*Config, error) {
 		"billing.create_fee":               "CREATE_FEE",
 		"chain.rpc_url":                "RPC_URL",
 		"chain.contract_address":       "SETTLEMENT_CONTRACT",
+		"chain.tapp_registry":          "TAPP_REGISTRY",
 		"chain.provider_address":       "PROVIDER_ADDRESS",
 		"chain.admin_addresses":        "ADMIN_ADDRESSES",
 		"chain.chain_id":               "CHAIN_ID",

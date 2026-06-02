@@ -23,16 +23,17 @@ const (
 )
 
 // ProviderRecord holds a provider's on-chain service data for the market API.
+// TEE signer identity now lives in TappRegistry under AppId; consumers that
+// need the active signer set call tapp.getNodeList(appId) directly.
 type ProviderRecord struct {
 	Address             string    `json:"address"`
 	URL                 string    `json:"url"`
-	TEESigner           string    `json:"tee_signer"`
+	AppId               string    `json:"app_id"`
 	PricePerCPUPerMin   string    `json:"price_per_cpu_per_min"`
 	PricePerCPUPerSec   string    `json:"price_per_cpu_per_sec"`
 	PricePerMemGBPerMin string    `json:"price_per_mem_gb_per_min"`
 	PricePerMemGBPerSec string    `json:"price_per_mem_gb_per_sec"`
 	CreateFee           string    `json:"create_fee"`
-	SignerVersion       string    `json:"signer_version"`
 	LastBlock           uint64    `json:"last_indexed_block"`
 	UpdatedAt           time.Time `json:"updated_at"`
 }
@@ -167,13 +168,12 @@ func (idx *Indexer) sync(ctx context.Context) {
 		rec := ProviderRecord{
 			Address:             ev.Provider.Hex(),
 			URL:                 svcInfo.URL,
-			TEESigner:           svcInfo.TEESignerAddress.Hex(),
+			AppId:               svcInfo.AppId,
 			PricePerCPUPerMin:   svcInfo.PricePerCPUPerMin.String(),
 			PricePerCPUPerSec:   cpuPerSec.String(),
 			PricePerMemGBPerMin: svcInfo.PricePerMemGBPerMin.String(),
 			PricePerMemGBPerSec: memPerSec.String(),
 			CreateFee:           svcInfo.CreateFee.String(),
-			SignerVersion:       svcInfo.SignerVersion.String(),
 			LastBlock:           ev.Block,
 			UpdatedAt:           time.Now().UTC(),
 		}

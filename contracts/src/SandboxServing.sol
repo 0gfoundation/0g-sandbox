@@ -1,17 +1,58 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+/// @notice Minimal interface to TappRegistry. SandboxServing delegates TEE
+///         signer identity, per-node stake, and user acknowledgement state
+///         to TappRegistry. See https://github.com/0gfoundation/0g-tapp.
+interface ITappRegistry {
+    struct AppInfo {
+        bytes   composeHash;
+        bytes   volumesHash;
+        bytes[] imageHashes;
+        address owner;
+        uint256 registeredAt;
+    }
+    struct NodeInfo {
+        string  teeUrl;
+        uint256 addedAt;
+        uint256 stakeAmount;
+    }
+    function getAppInfo(string calldata appId) external view returns (AppInfo memory);
+    function getNode(string calldata appId, address signer) external view returns (NodeInfo memory);
+    function isAcknowledged(address user, string calldata appId) external view returns (bool);
+    function isAuthorizedInvalidator(string calldata appId, address invalidator) external view returns (bool);
+    function invalidateAcks(string calldata appId) external;
+}
+
 /// @title SandboxServing
-/// @notice On-chain billing settlement for 0G Sandbox (TEE-based voucher model)
+/// @notice On-chain billing settlement for 0G Sandbox (TEE-based voucher model).
 /// @dev Upgradeable via BeaconProxy + UpgradeableBeacon pattern (ERC-1967).
 ///      Storage layout is fixed; use __gap for future fields.
+///
+///      Trust delegation
+///      ----------------
+///      TEE signer identity, per-node stake, and user acknowledgement live
+///      in TappRegistry. SandboxServing owns only commercial state:
+///      service URL, prices, balances, settlement.
+///
+///      A provider registers in three steps (each is a separate tx by the
+///      provider's wallet):
+///        1. tappRegistry.registerApp(appId, ...)         — stakes per node
+///        2. tappRegistry.authorizeInvalidator(appId, this) — lets us bump
+///                                                            ackVersion on
+///                                                            price changes
+///        3. sandboxServing.addOrUpdateService(url, appId, prices)
+///
+///      Voucher verification reads from TappRegistry at settle time (no local
+///      mirror of signer state — prevents the silent-drift incidents that
+///      caused 348k unsigned vouchers to accumulate in May 2026).
 contract SandboxServing {
 
     // ─── Constants ────────────────────────────────────────────────────────────
 
     uint256 public constant LOCK_TIME = 2 hours;
 
-    /// @dev EIP-712 type hash — field order must match the Go voucher.Sign() implementation
+    /// @dev EIP-712 type hash — field order must match the Go voucher.Sign() implementation.
     bytes32 private constant VOUCHER_TYPEHASH = keccak256(
         "SandboxVoucher(address user,address provider,bytes32 usageHash,uint256 nonce,uint256 totalFee)"
     );
@@ -23,17 +64,14 @@ contract SandboxServing {
         mapping(address => uint256) pendingRefunds;  // provider → pending refund
         mapping(address => uint256) refundUnlockAts; // provider → refund unlock time
         mapping(address => uint256) lastNonce;       // provider → last settled nonce
-        mapping(address => bool)    teeAcknowledged; // provider → legacy bool ack (signerVersion==0)
-        mapping(address => uint256) teeAckVersion;   // provider → version user last acked
     }
 
     struct Service {
         string  url;
-        address teeSignerAddress;
-        uint256 pricePerCPUPerMin;    // was computePricePerMin (renamed, same storage slot)
+        string  appId;                  // bound to tappRegistry's appId; set-once
+        uint256 pricePerCPUPerMin;
+        uint256 pricePerMemGBPerMin;
         uint256 createFee;
-        uint256 signerVersion;        // incremented on every signer/price/fee change
-        uint256 pricePerMemGBPerMin;  // appended (safe: extends into __gap territory)
     }
 
     struct SandboxVoucher {
@@ -54,30 +92,26 @@ contract SandboxServing {
         INVALID_SIGNATURE      // 5
     }
 
-    // ─── State (storage layout — must not change between upgrades) ────────────
-    //
-    // slot 0 (packed): _locked | _initialized
+    // ─── State ────────────────────────────────────────────────────────────────
+
     bool private _locked;
     bool private _initialized;
 
-    // slots 1–5: mappings
     mapping(address => Account) private _accounts;
     mapping(address => Service) public  services;
     mapping(address => bool)    public  serviceExists;
     mapping(address => uint256) public  providerEarnings;
-    mapping(address => uint256) public  providerStakes;
 
-    // slot 6: was immutable, now regular storage (set in initialize)
-    uint256 public providerStake;
-
-    // slot 7: was immutable, now regular storage (set in initialize)
     bytes32 private _domainSeparator;
+    address public  owner;
 
-    // slot 8: contract owner (set in initialize, can transfer ownership)
-    address public owner;
+    /// @notice TappRegistry that holds signer identity, ack state, and stake.
+    ///         Set in initialize(); for testnet rebuilds the proxy is fresh
+    ///         each cycle so a setter isn't needed.
+    ITappRegistry public tappRegistry;
 
-    // slots 9–57: reserved for future upgrades
-    uint256[49] private __gap;
+    // Reserved for future upgrades.
+    uint256[50] private __gap;
 
     // ─── Events ───────────────────────────────────────────────────────────────
 
@@ -93,14 +127,7 @@ contract SandboxServing {
         SettlementStatus status
     );
     event EarningsWithdrawn(address indexed provider, uint256 amount);
-    event ServiceUpdated(
-        address indexed provider,
-        string  url,
-        address teeSignerAddress,
-        uint256 signerVersion
-    );
-    event TEESignerAcknowledged(address indexed user, address indexed provider, bool acknowledged);
-    event ProviderStakeUpdated(uint256 oldStake, uint256 newStake);
+    event ServiceUpdated(address indexed provider, string appId, string url);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
     // ─── Modifiers ────────────────────────────────────────────────────────────
@@ -125,7 +152,7 @@ contract SandboxServing {
         _;
     }
 
-    // ─── Constructor / Initializer ─────────────────────────────────────────────
+    // ─── Constructor / Initializer ────────────────────────────────────────────
 
     /// @dev Locks the implementation contract so initialize() cannot be called on it.
     ///      When the BeaconProxy calls initialize() via delegatecall, _initialized lives
@@ -135,11 +162,12 @@ contract SandboxServing {
         _initialized = true;
     }
 
-    /// @notice Initialize the proxy.  Called once via BeaconProxy constructor through delegatecall.
+    /// @notice Initialize the proxy. Called once via BeaconProxy constructor through delegatecall.
     /// @dev address(this) = BeaconProxy address when invoked via delegatecall — correct for EIP-712.
-    function initialize(uint256 providerStake_) external initializer {
-        providerStake = providerStake_;
+    function initialize(address tappRegistry_) external initializer {
+        require(tappRegistry_ != address(0), "zero tappRegistry");
         owner = msg.sender;
+        tappRegistry = ITappRegistry(tappRegistry_);
         _domainSeparator = keccak256(abi.encode(
             keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
             keccak256(bytes("0G Sandbox Serving")),
@@ -149,7 +177,7 @@ contract SandboxServing {
         ));
     }
 
-    // ─── Account: deposit / refund ─────────────────────────────────────────────
+    // ─── Account: deposit / refund ────────────────────────────────────────────
 
     /// @notice Deposit ETH into recipient's billing account for a specific provider.
     function deposit(address recipient, address provider) external payable {
@@ -203,17 +231,17 @@ contract SandboxServing {
             return SettlementStatus.PROVIDER_MISMATCH;
         }
 
-        Account storage acct = _accounts[v.user];
-
-        if (!_isAcknowledged(acct, v.provider)) {
+        string memory appId = services[v.provider].appId;
+        if (!tappRegistry.isAcknowledged(v.user, appId)) {
             return SettlementStatus.NOT_ACKNOWLEDGED;
         }
 
+        Account storage acct = _accounts[v.user];
         if (v.nonce <= acct.lastNonce[v.provider]) {
             return SettlementStatus.INVALID_NONCE;
         }
 
-        if (!_verifySignature(v)) {
+        if (!_verifySignature(v, appId)) {
             return SettlementStatus.INVALID_SIGNATURE;
         }
 
@@ -221,18 +249,15 @@ contract SandboxServing {
         acct.lastNonce[v.provider] = v.nonce;
 
         if (acct.balances[v.provider] >= v.totalFee) {
-            // Full payment
             acct.balances[v.provider] -= v.totalFee;
             providerEarnings[v.provider] += v.totalFee;
             // Restore LIFO invariant: pendingRefunds[provider] ≤ balances[provider].
-            // The excess is simply cancelled — it is NOT transferred to the provider.
             if (acct.pendingRefunds[v.provider] > acct.balances[v.provider]) {
                 acct.pendingRefunds[v.provider] = acct.balances[v.provider];
             }
             emit VoucherSettled(v.user, v.provider, v.totalFee, v.usageHash, v.nonce, SettlementStatus.SUCCESS);
             return SettlementStatus.SUCCESS;
         } else {
-            // Drain everything (balance + pendingRefund for this provider)
             uint256 paid = acct.balances[v.provider] + acct.pendingRefunds[v.provider];
             acct.balances[v.provider] = 0;
             acct.pendingRefunds[v.provider] = 0;
@@ -258,14 +283,15 @@ contract SandboxServing {
         if (!serviceExists[v.provider]) {
             return SettlementStatus.PROVIDER_MISMATCH;
         }
-        Account storage acct = _accounts[v.user];
-        if (!_isAcknowledged(acct, v.provider)) {
+        string memory appId = services[v.provider].appId;
+        if (!tappRegistry.isAcknowledged(v.user, appId)) {
             return SettlementStatus.NOT_ACKNOWLEDGED;
         }
+        Account storage acct = _accounts[v.user];
         if (v.nonce <= acct.lastNonce[v.provider]) {
             return SettlementStatus.INVALID_NONCE;
         }
-        if (!_verifySignature(v)) {
+        if (!_verifySignature(v, appId)) {
             return SettlementStatus.INVALID_SIGNATURE;
         }
         if (acct.balances[v.provider] >= v.totalFee) {
@@ -274,18 +300,9 @@ contract SandboxServing {
         return SettlementStatus.INSUFFICIENT_BALANCE;
     }
 
-    /// @dev Returns true if the user has acknowledged the current service version for provider.
-    ///      Backward-compatible: if signerVersion==0 (never changed), uses the legacy bool.
-    ///      Once signerVersion>0, only the versioned ack is accepted.
-    function _isAcknowledged(Account storage acct, address provider) internal view returns (bool) {
-        uint256 version = services[provider].signerVersion;
-        if (version == 0) {
-            return acct.teeAcknowledged[provider];
-        }
-        return acct.teeAckVersion[provider] == version;
-    }
-
-    function _verifySignature(SandboxVoucher calldata v) internal view returns (bool) {
+    /// @dev ECDSA-recovers the voucher signer locally, then asks TappRegistry
+    ///      whether that address is an active node of the provider's app.
+    function _verifySignature(SandboxVoucher calldata v, string memory appId) internal view returns (bool) {
         bytes32 structHash = keccak256(abi.encode(
             VOUCHER_TYPEHASH,
             v.user,
@@ -296,7 +313,8 @@ contract SandboxServing {
         ));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _domainSeparator, structHash));
         address recovered = _ecrecover(digest, v.signature);
-        return recovered != address(0) && recovered == services[v.provider].teeSignerAddress;
+        if (recovered == address(0)) return false;
+        return tappRegistry.getNode(appId, recovered).addedAt != 0;
     }
 
     function _ecrecover(bytes32 digest, bytes memory sig) internal pure returns (address) {
@@ -327,12 +345,6 @@ contract SandboxServing {
 
     // ─── Admin ────────────────────────────────────────────────────────────────
 
-    /// @notice Update the minimum stake required for new provider registration.
-    function setProviderStake(uint256 newStake) external onlyOwner {
-        emit ProviderStakeUpdated(providerStake, newStake);
-        providerStake = newStake;
-    }
-
     /// @notice Transfer contract ownership to a new address.
     function transferOwnership(address newOwner) external onlyOwner {
         require(newOwner != address(0), "zero address");
@@ -342,62 +354,58 @@ contract SandboxServing {
 
     // ─── Provider Management ──────────────────────────────────────────────────
 
-    /// @notice Register or update provider service.
-    /// @dev First registration requires staking providerStake ETH.
-    ///      Any change to teeSignerAddress, pricePerCPUPerMin, pricePerMemGBPerMin,
-    ///      or createFee increments signerVersion, requiring all users to
-    ///      re-acknowledge before vouchers settle.
+    /// @notice Register or update a provider service. Caller must already own
+    ///         the appId in TappRegistry, and must have authorized this contract
+    ///         as an invalidator (see ITappRegistry.authorizeInvalidator).
+    /// @dev appId is set-once on first call; later updates must pass the same
+    ///      appId or revert. Stake is collected by TappRegistry (per node);
+    ///      not collected here.
+    ///
+    ///      Price/createFee changes call tappRegistry.invalidateAcks(appId),
+    ///      bumping the app's ackVersion so existing user acks become stale.
+    ///      URL-only changes do NOT invalidate (URL drift can't redirect
+    ///      vouchers — signature/ack still root at the on-chain trust state).
     function addOrUpdateService(
         string  calldata url,
-        address teeSignerAddress,
+        string  calldata appId,
         uint256 pricePerCPUPerMin,
         uint256 createFee,
         uint256 pricePerMemGBPerMin
-    ) external payable {
-        bool isNew = !serviceExists[msg.sender];
-        if (isNew) {
-            require(msg.value >= providerStake, "insufficient stake");
-            providerStakes[msg.sender] = msg.value;
-            serviceExists[msg.sender] = true;
-        }
+    ) external {
+        require(tappRegistry.getAppInfo(appId).owner == msg.sender, "not app owner");
+        require(
+            tappRegistry.isAuthorizedInvalidator(appId, address(this)),
+            "sandbox not authorized as invalidator"
+        );
 
         Service storage svc = services[msg.sender];
-        bool serviceChanged = !isNew && (
-            svc.teeSignerAddress    != teeSignerAddress    ||
+        bool isNew = bytes(svc.appId).length == 0;
+        if (isNew) {
+            svc.appId = appId;
+        } else {
+            require(
+                keccak256(bytes(svc.appId)) == keccak256(bytes(appId)),
+                "appId immutable; deregister to change"
+            );
+        }
+
+        bool pricesChanged = !isNew && (
             svc.pricePerCPUPerMin   != pricePerCPUPerMin   ||
             svc.pricePerMemGBPerMin != pricePerMemGBPerMin ||
             svc.createFee           != createFee
         );
 
-        svc.url                = url;
-        svc.teeSignerAddress   = teeSignerAddress;
-        svc.pricePerCPUPerMin  = pricePerCPUPerMin;
-        svc.createFee          = createFee;
+        svc.url                 = url;
+        svc.pricePerCPUPerMin   = pricePerCPUPerMin;
+        svc.createFee           = createFee;
         svc.pricePerMemGBPerMin = pricePerMemGBPerMin;
-        if (serviceChanged) {
-            svc.signerVersion += 1;
+        serviceExists[msg.sender] = true;
+
+        if (pricesChanged) {
+            tappRegistry.invalidateAcks(appId);
         }
 
-        emit ServiceUpdated(msg.sender, url, teeSignerAddress, svc.signerVersion);
-    }
-
-    /// @notice Acknowledge (or revoke) the current service version for a provider.
-    /// @dev When signerVersion==0 (legacy), writes the bool for backward compatibility.
-    ///      When signerVersion>0, writes the versioned ack so future price changes invalidate it.
-    function acknowledgeTEESigner(address provider, bool acknowledged) external {
-        require(serviceExists[provider], "provider not found");
-        uint256 version = services[provider].signerVersion;
-        if (acknowledged) {
-            if (version == 0) {
-                _accounts[msg.sender].teeAcknowledged[provider] = true;
-            } else {
-                _accounts[msg.sender].teeAckVersion[provider] = version;
-            }
-        } else {
-            _accounts[msg.sender].teeAcknowledged[provider] = false;
-            _accounts[msg.sender].teeAckVersion[provider] = 0;
-        }
-        emit TEESignerAcknowledged(msg.sender, provider, acknowledged);
+        emit ServiceUpdated(msg.sender, appId, url);
     }
 
     // ─── View Functions ───────────────────────────────────────────────────────
@@ -430,11 +438,12 @@ contract SandboxServing {
         return providerEarnings[provider];
     }
 
-    /// @notice Returns true if user has acknowledged the CURRENT service version for provider.
-    ///         Backward-compatible: uses legacy bool when signerVersion==0.
+    /// @notice Backward-compat shim. New callers should query tappRegistry
+    ///         directly: `tappRegistry.isAcknowledged(user, services(provider).appId)`.
     function isTEEAcknowledged(address user, address provider) external view returns (bool) {
-        if (!serviceExists[provider]) return false;
-        return _isAcknowledged(_accounts[user], provider);
+        string memory appId = services[provider].appId;
+        if (bytes(appId).length == 0) return false;
+        return tappRegistry.isAcknowledged(user, appId);
     }
 
     function domainSeparator() external view returns (bytes32) {

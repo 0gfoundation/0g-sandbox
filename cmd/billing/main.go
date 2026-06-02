@@ -228,13 +228,12 @@ func main() {
 		type ProviderInfo struct {
 			Address               string `json:"address"`
 			URL                   string `json:"url"`
-			TEESigner             string `json:"tee_signer"`
+			AppId                 string `json:"app_id"`
 			PricePerCPUPerMin     string `json:"price_per_cpu_per_min"`
 			PricePerCPUPerSec     string `json:"price_per_cpu_per_sec"`
 			PricePerMemGBPerMin   string `json:"price_per_mem_gb_per_min"`
 			PricePerMemGBPerSec   string `json:"price_per_mem_gb_per_sec"`
 			CreateFee             string `json:"create_fee"`
-			SignerVersion         string `json:"signer_version"`
 		}
 		// For now: just the configured provider.  Extend via KNOWN_PROVIDERS in the future.
 		addrs := []string{cfg.Chain.ProviderAddress}
@@ -252,13 +251,12 @@ func main() {
 			providers = append(providers, ProviderInfo{
 				Address:             addr,
 				URL:                 svcInfo.URL,
-				TEESigner:           svcInfo.TEESignerAddress.Hex(),
+				AppId:               svcInfo.AppId,
 				PricePerCPUPerMin:   svcInfo.PricePerCPUPerMin.String(),
 				PricePerCPUPerSec:   cpuPerSec.String(),
 				PricePerMemGBPerMin: svcInfo.PricePerMemGBPerMin.String(),
 				PricePerMemGBPerSec: memPerSec.String(),
 				CreateFee:           svcInfo.CreateFee.String(),
-				SignerVersion:       svcInfo.SignerVersion.String(),
 			})
 		}
 		if providers == nil {
@@ -276,22 +274,25 @@ func main() {
 		settlerAddr := onchain.SettlerAddress()
 		providerAddr := common.HexToAddress(cfg.Chain.ProviderAddress)
 
-		// Signer match — both addresses are publicly derivable so this stays
-		// on the public /info surface. Provider operators want this visible
-		// even before connecting an admin wallet.
+		// Signer health — derived from sandbox.services[provider].appId and
+		// tap.getNode(appId, settler).addedAt. All on-chain readable; no admin
+		// wallet required.
 		signer := gin.H{"local": settlerAddr.Hex(), "status": "unknown"}
-		if onchainSigner, err := onchain.GetServiceTEESignerAddress(ctx, providerAddr); err == nil {
-			signer["onchain"] = onchainSigner.Hex()
-			switch {
-			case onchainSigner == (common.Address{}):
-				signer["status"] = "unregistered"
-			case onchainSigner == settlerAddr:
+		appId, appErr := onchain.GetServiceAppId(ctx, providerAddr)
+		if appErr != nil {
+			signer["error"] = appErr.Error()
+		} else if appId == "" {
+			signer["status"] = "unregistered"
+		} else {
+			signer["app_id"] = appId
+			isNode, nodeErr := onchain.IsActiveNode(ctx, appId, settlerAddr)
+			if nodeErr != nil {
+				signer["error"] = nodeErr.Error()
+			} else if isNode {
 				signer["status"] = "aligned"
-			default:
+			} else {
 				signer["status"] = "mismatch"
 			}
-		} else {
-			signer["error"] = err.Error()
 		}
 
 		// Settler balance — also public (any chain RPC reveals wallet balance).

@@ -56,6 +56,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
@@ -114,6 +115,7 @@ type chainFlags struct {
 	rpc      string
 	chainID  int64
 	contract string
+	tapp     string
 }
 
 func envOrDefault(key, def string) string {
@@ -128,6 +130,7 @@ func addChainFlags(fs *flag.FlagSet) *chainFlags {
 	fs.StringVar(&cf.rpc,      "rpc",      envOrDefault("RPC_URL", "https://evmrpc-testnet.0g.ai"),                       "RPC endpoint")
 	fs.Int64Var(&cf.chainID,   "chain-id", 16602,                                                                          "Chain ID")
 	fs.StringVar(&cf.contract, "contract", envOrDefault("SETTLEMENT_CONTRACT", "0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3"), "Settlement contract address")
+	fs.StringVar(&cf.tapp,     "tapp",     envOrDefault("TAPP_REGISTRY", ""),                                              "TappRegistry contract address (required for ack)")
 	return cf
 }
 
@@ -248,6 +251,9 @@ func runDeposit(args []string) {
 
 // ── acknowledge ──────────────────────────────────────────────────────────────
 
+// runAcknowledge resolves provider → appId via sandbox.services(), then calls
+// tappRegistry.acknowledgeApp(appId) (or revokeAcknowledgement). User ack lives
+// in tapp now, not in SandboxServing.
 func runAcknowledge(args []string) {
 	fs := flag.NewFlagSet("acknowledge", flag.ExitOnError)
 	cf := addChainFlags(fs)
@@ -259,6 +265,9 @@ func runAcknowledge(args []string) {
 	if *providerHex == "" {
 		fatalf("--provider is required")
 	}
+	if cf.tapp == "" {
+		fatalf("--tapp is required (or set TAPP_REGISTRY)")
+	}
 	privKey := mustLoadKey(*keyHex)
 	userAddr := crypto.PubkeyToAddress(privKey.PublicKey)
 	providerAddr := common.HexToAddress(*providerHex)
@@ -269,6 +278,20 @@ func runAcknowledge(args []string) {
 	eth, contract := mustDialContract(ctx, cf.rpc, cf.contract)
 	defer eth.Close()
 
+	// Step 1: look up the appId the provider is bound to.
+	svc, err := contract.Services(&bind.CallOpts{Context: ctx}, providerAddr)
+	if err != nil {
+		fatalf("Services lookup: %v", err)
+	}
+	if svc.AppId == "" {
+		fatalf("provider %s has not registered a service yet (no appId)", providerAddr.Hex())
+	}
+
+	// Step 2: bind tappRegistry and call ack / revoke there.
+	tapp, err := chain.NewTappRegistry(common.HexToAddress(cf.tapp), eth)
+	if err != nil {
+		fatalf("bind tappRegistry: %v", err)
+	}
 	auth, err := bind.NewKeyedTransactorWithChainID(privKey, big.NewInt(cf.chainID))
 	if err != nil {
 		fatalf("build transactor: %v", err)
@@ -276,17 +299,23 @@ func runAcknowledge(args []string) {
 	auth.Context = ctx
 
 	accept := !*revoke
-	verb := "AcknowledgeTEESigner"
+	verb := "AcknowledgeApp"
 	if !accept {
-		verb = "RevokeTEESigner"
+		verb = "RevokeAcknowledgement"
 	}
 	fmt.Printf("User:     %s\n", userAddr.Hex())
 	fmt.Printf("Provider: %s\n", providerAddr.Hex())
-	fmt.Printf("\n[1/1] %s (accept=%v)...\n", verb, accept)
+	fmt.Printf("AppId:    %s\n", svc.AppId)
+	fmt.Printf("\n[1/1] tapp.%s...\n", verb)
 
-	tx, err := contract.AcknowledgeTEESigner(auth, providerAddr, accept)
+	var tx *types.Transaction
+	if accept {
+		tx, err = tapp.AcknowledgeApp(auth, svc.AppId)
+	} else {
+		tx, err = tapp.RevokeAcknowledgement(auth, svc.AppId)
+	}
 	if err != nil {
-		fatalf("AcknowledgeTEESigner: %v", err)
+		fatalf("%s: %v", verb, err)
 	}
 	fmt.Printf("      tx: %s\n", tx.Hash().Hex())
 	if _, err := bind.WaitMined(ctx, eth, tx); err != nil {
@@ -354,7 +383,7 @@ func runProviders(args []string) {
 			neuronTo0G(cpuPerSec), neuronTo0G(svc.PricePerCPUPerMin))
 		fmt.Printf("    Mem price:   %.6f 0G/GB/sec   (%.4f 0G/GB/min)\n",
 			neuronTo0G(memPerSec), neuronTo0G(svc.PricePerMemGBPerMin))
-		fmt.Printf("    TEE signer:  %s (v%s)\n", svc.TeeSignerAddress.Hex(), svc.SignerVersion)
+		fmt.Printf("    AppId:       %s\n", svc.AppId)
 		fmt.Println()
 	}
 	if len(providerAddrs) == 1 {

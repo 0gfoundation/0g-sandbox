@@ -12,17 +12,23 @@ import (
 
 // SignerClient is the slice of chain.Client needed by RunSignerMismatchMonitor.
 // Surfaced as an interface for unit tests.
+//
+// IsLocalTEEActiveNode returns true when the locally-derived TEE address is
+// an active node for the provider's configured app in TappRegistry. It
+// internally reads sandbox.services[provider].appId and queries
+// tapp.getNode(appId, settler).addedAt.
 type SignerClient interface {
 	SettlerAddress() common.Address
-	GetServiceTEESignerAddress(ctx context.Context, provider common.Address) (common.Address, error)
+	GetServiceAppId(ctx context.Context, provider common.Address) (string, error)
+	IsLocalTEEActiveNode(ctx context.Context) (bool, error)
 }
 
-// RunSignerMismatchMonitor compares the settler's local TEE key address
-// (which signs every voucher) against the on-chain `services[provider].teeSignerAddress`
-// (which the contract expects ecrecover to match). When they diverge — typically
-// because KMS rotated the TEE key but provider forgot to re-register on-chain —
-// every voucher silently fails with INVALID_SIGNATURE and no on-chain event is
-// emitted, so this alert is often the only signal until backlog explodes.
+// RunSignerMismatchMonitor checks whether the local TEE key is recognised
+// as an active node for the provider's app in TappRegistry. If not — typically
+// because the provider hasn't run `cmd/provider register` with the current
+// TEE address, or because the node was removed — every voucher silently fails
+// INVALID_SIGNATURE and no on-chain event is emitted, so this alert is often
+// the only signal until backlog explodes.
 //
 // Runs immediately at startup (boot-time check) then every 60s. Chain query
 // errors are logged but don't fire alerts — RPC blips would create false
@@ -51,28 +57,32 @@ func RunSignerMismatchMonitor(ctx context.Context, client SignerClient, provider
 }
 
 func checkSigner(ctx context.Context, client SignerClient, provider common.Address, alerter alert.Alerter, log *zap.Logger) {
-	settler := client.SettlerAddress()
-	onchain, err := client.GetServiceTEESignerAddress(ctx, provider)
+	appId, err := client.GetServiceAppId(ctx, provider)
 	if err != nil {
-		// RPC failure — don't false-alarm
-		log.Warn("on-chain signer lookup failed", zap.Error(err))
+		log.Warn("appId lookup failed", zap.Error(err))
 		return
 	}
-	if onchain == (common.Address{}) {
-		// Provider not registered yet — that's a different problem, but not
-		// a mismatch per se. Skip silently; provider registration is a setup step.
+	if appId == "" {
+		// Provider hasn't bound a service yet — that's a setup state, not a
+		// mismatch. Silent.
 		return
 	}
-	if settler == onchain {
-		return // healthy
+	isNode, err := client.IsLocalTEEActiveNode(ctx)
+	if err != nil {
+		log.Warn("tapp node lookup failed", zap.Error(err))
+		return
 	}
+	if isNode {
+		return
+	}
+	settler := client.SettlerAddress()
 	alerter.Notify(ctx, alert.KindSettlerSignerMismatch, alert.SeverityCritical,
-		"Settler TEE key does not match on-chain teeSignerAddress — every voucher will fail INVALID_SIGNATURE",
+		"Local TEE key is not an active node in TappRegistry for the configured app — every voucher will fail INVALID_SIGNATURE",
 		map[string]any{
-			"settler_addr":         settler.Hex(),
-			"onchain_signer_addr":  onchain.Hex(),
-			"provider":             provider.Hex(),
-			"fix":                  "run `cmd/provider register --tee-signer " + settler.Hex() + "` (or update via dashboard)",
+			"settler_addr": settler.Hex(),
+			"provider":     provider.Hex(),
+			"app_id":       appId,
+			"fix":          "register the TEE address as a tapp node, then call sandbox.addOrUpdateService with appId " + appId,
 		},
 	)
 }

@@ -47,20 +47,20 @@ func newRedis(t *testing.T) *redis.Client {
 
 var (
 	providerAddr = common.HexToAddress("0xABCDEF0000000000000000000000000000000001")
-	signerAddr   = common.HexToAddress("0x0000000000000000000000000000000000000002")
+	_            = common.HexToAddress("0x0000000000000000000000000000000000000002") // legacy signerAddr placeholder
 	testSvcInfo  = &chain.ServiceInfo{
 		URL:                 "http://provider-a.example.com:8080",
-		TEESignerAddress:    signerAddr,
+		AppId: "test-app",
 		PricePerCPUPerMin:   big.NewInt(1200), // → 20/sec
 		PricePerMemGBPerMin: big.NewInt(600),  // → 10/sec
 		CreateFee:           big.NewInt(5_000_000),
-		SignerVersion:       big.NewInt(1),
+		
 	}
 	testEvent = chain.ProviderEvent{
 		Provider:         providerAddr,
 		URL:              testSvcInfo.URL,
-		TEESignerAddress: signerAddr,
-		SignerVersion:    big.NewInt(1),
+		AppId: "test-app",
+		
 		Block:            100,
 	}
 )
@@ -115,11 +115,8 @@ func TestSync_indexesProvider(t *testing.T) {
 	if rec.Address != providerAddr.Hex() {
 		t.Errorf("Address = %q, want %q", rec.Address, providerAddr.Hex())
 	}
-	if rec.TEESigner != signerAddr.Hex() {
-		t.Errorf("TEESigner = %q, want %q", rec.TEESigner, signerAddr.Hex())
-	}
-	if rec.SignerVersion != testSvcInfo.SignerVersion.String() {
-		t.Errorf("SignerVersion = %q, want %q", rec.SignerVersion, testSvcInfo.SignerVersion.String())
+	if rec.AppId != "test-app" {
+		t.Errorf("AppId = %q, want test-app", rec.AppId)
 	}
 	if rec.UpdatedAt.IsZero() {
 		t.Error("UpdatedAt should not be zero")
@@ -165,13 +162,12 @@ func TestLoadFromRedis_restoresState(t *testing.T) {
 	rec := ProviderRecord{
 		Address:             providerAddr.Hex(),
 		URL:                 "http://example.com",
-		TEESigner:           signerAddr.Hex(),
+		AppId:               "test-app-load",
 		PricePerCPUPerMin:   "1200",
 		PricePerCPUPerSec:   "20",
 		PricePerMemGBPerMin: "600",
 		PricePerMemGBPerSec: "10",
 		CreateFee:           "5000000",
-		SignerVersion:       "1",
 		LastBlock:           50,
 		UpdatedAt:           time.Now().UTC(),
 	}
@@ -231,8 +227,8 @@ func TestSync_deduplicatesEvents(t *testing.T) {
 	mc := &mockChain{
 		// Same provider appears twice; block 30 is newer and should win.
 		events: []chain.ProviderEvent{
-			{Provider: providerAddr, URL: "http://old.example.com", TEESignerAddress: signerAddr, SignerVersion: big.NewInt(1), Block: 10},
-			{Provider: providerAddr, URL: "http://new.example.com", TEESignerAddress: signerAddr, SignerVersion: big.NewInt(1), Block: 30},
+			{Provider: providerAddr, URL: "http://old.example.com", AppId: "test-app",  Block: 10},
+			{Provider: providerAddr, URL: "http://new.example.com", AppId: "test-app",  Block: 30},
 		},
 		latestBlock: 30,
 		services:    map[string]*chain.ServiceInfo{providerAddr.Hex(): testSvcInfo},
@@ -251,16 +247,16 @@ func TestGetAll_returnsAllProviders(t *testing.T) {
 	provider2 := common.HexToAddress("0xABCDEF0000000000000000000000000000000002")
 	svc2 := &chain.ServiceInfo{
 		URL:                 "http://provider-b.example.com:8080",
-		TEESignerAddress:    signerAddr,
+		AppId: "test-app",
 		PricePerCPUPerMin:   big.NewInt(600),
 		PricePerMemGBPerMin: big.NewInt(300),
 		CreateFee:           big.NewInt(1_000_000),
-		SignerVersion:       big.NewInt(2),
+		
 	}
 	mc := &mockChain{
 		events: []chain.ProviderEvent{
 			testEvent,
-			{Provider: provider2, URL: svc2.URL, TEESignerAddress: signerAddr, SignerVersion: big.NewInt(2), Block: 101},
+			{Provider: provider2, URL: svc2.URL, AppId: "test-app",  Block: 101},
 		},
 		latestBlock: 101,
 		services: map[string]*chain.ServiceInfo{

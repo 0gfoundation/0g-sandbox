@@ -12,24 +12,33 @@ import (
 )
 
 type fakeSignerClient struct {
-	settler common.Address
-	onchain common.Address
-	err     error
+	settler   common.Address
+	appId     string
+	isNode    bool
+	appIdErr  error
+	nodeErr   error
 }
 
 func (f *fakeSignerClient) SettlerAddress() common.Address { return f.settler }
-func (f *fakeSignerClient) GetServiceTEESignerAddress(context.Context, common.Address) (common.Address, error) {
-	if f.err != nil {
-		return common.Address{}, f.err
+func (f *fakeSignerClient) GetServiceAppId(context.Context, common.Address) (string, error) {
+	if f.appIdErr != nil {
+		return "", f.appIdErr
 	}
-	return f.onchain, nil
+	return f.appId, nil
+}
+func (f *fakeSignerClient) IsLocalTEEActiveNode(context.Context) (bool, error) {
+	if f.nodeErr != nil {
+		return false, f.nodeErr
+	}
+	return f.isNode, nil
 }
 
-func TestCheckSigner_AlertsOnMismatch(t *testing.T) {
+func TestCheckSigner_AlertsWhenNotANode(t *testing.T) {
 	r := &recordingAlerter{}
 	c := &fakeSignerClient{
 		settler: common.HexToAddress("0x8401"),
-		onchain: common.HexToAddress("0x3Dc1"),
+		appId:   "sandbox-prod",
+		isNode:  false,
 	}
 	checkSigner(context.Background(), c, common.HexToAddress("0xB831"), r, zap.NewNop())
 
@@ -43,40 +52,44 @@ func TestCheckSigner_AlertsOnMismatch(t *testing.T) {
 	if got.severity != alert.SeverityCritical {
 		t.Errorf("severity: got %q", got.severity)
 	}
-	if got.details["settler_addr"] == got.details["onchain_signer_addr"] {
-		t.Errorf("addresses should differ in alert details")
+	if got.details["app_id"] != "sandbox-prod" {
+		t.Errorf("app_id missing: %+v", got.details)
 	}
 }
 
-func TestCheckSigner_SilentWhenAligned(t *testing.T) {
+func TestCheckSigner_SilentWhenIsNode(t *testing.T) {
 	r := &recordingAlerter{}
 	c := &fakeSignerClient{
 		settler: common.HexToAddress("0x8401"),
-		onchain: common.HexToAddress("0x8401"),
+		appId:   "sandbox-prod",
+		isNode:  true,
 	}
 	checkSigner(context.Background(), c, common.HexToAddress("0xB831"), r, zap.NewNop())
 	if _, ok := r.last(); ok {
-		t.Errorf("expected no alert when aligned, got %+v", r.alerts)
+		t.Errorf("expected no alert when local TEE is an active node, got %+v", r.alerts)
+	}
+}
+
+func TestCheckSigner_SilentWhenAppIdEmpty(t *testing.T) {
+	r := &recordingAlerter{}
+	c := &fakeSignerClient{
+		settler: common.HexToAddress("0x8401"),
+		appId:   "",
+	}
+	checkSigner(context.Background(), c, common.HexToAddress("0xB831"), r, zap.NewNop())
+	if _, ok := r.last(); ok {
+		t.Errorf("expected no alert when service not bound, got %+v", r.alerts)
 	}
 }
 
 func TestCheckSigner_SilentWhenRPCFails(t *testing.T) {
 	r := &recordingAlerter{}
-	c := &fakeSignerClient{err: errors.New("rpc down")}
+	c := &fakeSignerClient{
+		settler:  common.HexToAddress("0x8401"),
+		appIdErr: errors.New("rpc down"),
+	}
 	checkSigner(context.Background(), c, common.HexToAddress("0xB831"), r, zap.NewNop())
 	if _, ok := r.last(); ok {
 		t.Errorf("RPC error should not fire mismatch alert, got %+v", r.alerts)
-	}
-}
-
-func TestCheckSigner_SilentWhenProviderNotRegistered(t *testing.T) {
-	r := &recordingAlerter{}
-	c := &fakeSignerClient{
-		settler: common.HexToAddress("0x8401"),
-		onchain: common.Address{}, // zero = not registered
-	}
-	checkSigner(context.Background(), c, common.HexToAddress("0xB831"), r, zap.NewNop())
-	if _, ok := r.last(); ok {
-		t.Errorf("expected no alert when provider unregistered, got %+v", r.alerts)
 	}
 }

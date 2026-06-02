@@ -40,7 +40,7 @@ func main() {
 	memPerSec := new(big.Int).Div(svc.PricePerMemGBPerMin, big.NewInt(60))
 	fmt.Printf("pricePerMemGBPerSec:%s neuron/GB/sec (÷60)\n", memPerSec)
 	fmt.Printf("createFee:          %s neuron\n", svc.CreateFee)
-	fmt.Printf("signerVersion:      %s\n", svc.SignerVersion)
+	fmt.Printf("appId:              %s\n", svc.AppId)
 
 	// Recent settled voucher events
 	fmt.Println()

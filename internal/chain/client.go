@@ -49,11 +49,13 @@ func (s SettlementStatus) String() string {
 	}
 }
 
-// Client wraps go-ethereum and the generated SandboxServing binding.
+// Client wraps go-ethereum and the generated SandboxServing + TappRegistry bindings.
 type Client struct {
 	eth          *ethclient.Client
 	contract     *SandboxServing
 	contractAddr common.Address
+	tapp         *TappRegistry
+	tappAddr     common.Address
 	chainID      *big.Int
 	teeKey       *ecdsa.PrivateKey // signs vouchers (EIP-712, off-chain) and settlement txs
 	providerAddr common.Address    // registered provider address (from PROVIDER_ADDRESS)
@@ -76,12 +78,8 @@ func NewClient(cfg *config.Config) (*Client, error) {
 
 	// Provider address must be explicitly configured. It identifies which
 	// on-chain provider this billing service represents — the value goes into
-	// voucher.provider (EIP-712), the settler queue key, and on-chain pricing
-	// lookups, all of which must match the provider registered via
-	// `cmd/provider register`. The TEE key cannot stand in for it: the contract
-	// has no reverse lookup from teeSignerAddress to provider, and using the
-	// TEE-derived address as a fallback silently produces vouchers whose
-	// provider field will fail settlement.
+	// voucher.provider (EIP-712), the settler queue key, and on-chain lookups,
+	// all of which must match the provider registered via `cmd/provider register`.
 	if cfg.Chain.ProviderAddress == "" {
 		return nil, fmt.Errorf("PROVIDER_ADDRESS is required")
 	}
@@ -93,15 +91,33 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		return nil, fmt.Errorf("bind contract: %w", err)
 	}
 
+	// TappRegistry binding — used by voucher verification (node membership)
+	// and by user-ack lookups. Required because SandboxServing now delegates
+	// signer identity + ack state to tapp.
+	if cfg.Chain.TappRegistry == "" {
+		return nil, fmt.Errorf("TAPP_REGISTRY is required")
+	}
+	tappAddr := common.HexToAddress(cfg.Chain.TappRegistry)
+	tapp, err := NewTappRegistry(tappAddr, eth)
+	if err != nil {
+		return nil, fmt.Errorf("bind tapp: %w", err)
+	}
+
 	return &Client{
 		eth:          eth,
 		contract:     contract,
 		contractAddr: addr,
+		tapp:         tapp,
+		tappAddr:     tappAddr,
 		chainID:      big.NewInt(cfg.Chain.ChainID),
 		teeKey:       teeKey,
 		providerAddr: providerAddr,
 	}, nil
 }
+
+// TappRegistryAddress returns the on-chain TappRegistry address this client
+// is bound to. Useful for dashboard / CLI to display the trust root location.
+func (c *Client) TappRegistryAddress() common.Address { return c.tappAddr }
 
 // PrivateKey returns the TEE private key (for voucher signing).
 func (c *Client) PrivateKey() *ecdsa.PrivateKey { return c.teeKey }
@@ -131,17 +147,50 @@ func (c *Client) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
 	return c.eth.SuggestGasPrice(ctx)
 }
 
-// GetServiceTEESignerAddress returns the on-chain `services[provider].teeSignerAddress`
-// — the EVM address the contract expects voucher signatures to recover to.
-// Used by the signer-mismatch monitor to detect TEE key drift (e.g. KMS rotated
-// the key but provider didn't update on-chain).
-func (c *Client) GetServiceTEESignerAddress(ctx context.Context, provider common.Address) (common.Address, error) {
+// GetServiceAppId returns the appId bound to a provider's SandboxServing service.
+// Empty string when no service is registered.
+func (c *Client) GetServiceAppId(ctx context.Context, provider common.Address) (string, error) {
 	opts := &bind.CallOpts{Context: ctx}
 	svc, err := c.contract.Services(opts, provider)
 	if err != nil {
-		return common.Address{}, fmt.Errorf("Services: %w", err)
+		return "", fmt.Errorf("Services: %w", err)
 	}
-	return svc.TeeSignerAddress, nil
+	return svc.AppId, nil
+}
+
+// IsActiveNode returns true if `signer` is an active node for `appId` in
+// TappRegistry. Equivalent to `tapp.getNode(appId, signer).addedAt != 0`,
+// surfaced as a typed helper for downstream voucher/session verification.
+func (c *Client) IsActiveNode(ctx context.Context, appId string, signer common.Address) (bool, error) {
+	opts := &bind.CallOpts{Context: ctx}
+	node, err := c.tapp.GetNode(opts, appId, signer)
+	if err != nil {
+		return false, fmt.Errorf("tapp.GetNode: %w", err)
+	}
+	return node.AddedAt.Sign() != 0, nil
+}
+
+// IsLocalTEEActiveNode returns true if the locally-derived TEE address is an
+// active node for the configured provider's app in TappRegistry. Returns
+// (false, nil) when the provider hasn't bound a service or the app has no
+// matching node — both legitimate "not yet ready" states.
+// Replaces the previous GetServiceTEESignerAddress accessor: trust identity
+// now lives in tapp (per-node cluster), not in a single SandboxServing field.
+func (c *Client) IsLocalTEEActiveNode(ctx context.Context) (bool, error) {
+	settler := c.SettlerAddress()
+	opts := &bind.CallOpts{Context: ctx}
+	svc, err := c.contract.Services(opts, c.providerAddr)
+	if err != nil {
+		return false, fmt.Errorf("Services: %w", err)
+	}
+	if svc.AppId == "" {
+		return false, nil
+	}
+	node, err := c.tapp.GetNode(opts, svc.AppId, settler)
+	if err != nil {
+		return false, fmt.Errorf("tapp.GetNode: %w", err)
+	}
+	return node.AddedAt.Sign() != 0, nil
 }
 
 // transactOpts builds a *bind.TransactOpts signed by the TEE key.
@@ -494,13 +543,14 @@ func (c *Client) GetServicePricing(ctx context.Context, provider common.Address)
 }
 
 // ServiceInfo holds the full on-chain service registration for a provider.
+// Note: TEE signer identity now lives in TappRegistry (per-node cluster);
+// AppId is the link from sandbox commercial state to tapp trust state.
 type ServiceInfo struct {
 	URL                 string
-	TEESignerAddress    common.Address
+	AppId               string
 	PricePerCPUPerMin   *big.Int
 	PricePerMemGBPerMin *big.Int
 	CreateFee           *big.Int
-	SignerVersion       *big.Int
 }
 
 // GetServiceInfo returns the full on-chain service data for a provider.
@@ -520,22 +570,20 @@ func (c *Client) GetServiceInfo(ctx context.Context, provider common.Address) (*
 	}
 	return &ServiceInfo{
 		URL:                 svc.Url,
-		TEESignerAddress:    svc.TeeSignerAddress,
+		AppId:               svc.AppId,
 		PricePerCPUPerMin:   svc.PricePerCPUPerMin,
 		PricePerMemGBPerMin: svc.PricePerMemGBPerMin,
 		CreateFee:           svc.CreateFee,
-		SignerVersion:       svc.SignerVersion,
 	}, nil
 }
 
 // ProviderEvent holds a decoded ServiceUpdated event from the contract.
 type ProviderEvent struct {
-	Provider         common.Address
-	URL              string
-	TEESignerAddress common.Address
-	SignerVersion    *big.Int
-	Block            uint64
-	TxHash           string
+	Provider common.Address
+	URL      string
+	AppId    string
+	Block    uint64
+	TxHash   string
 }
 
 // GetServiceUpdatedEvents queries ServiceUpdated logs starting at fromBlock.
@@ -564,12 +612,11 @@ func (c *Client) GetServiceUpdatedEvents(ctx context.Context, fromBlock uint64) 
 	for iter.Next() {
 		e := iter.Event
 		events = append(events, ProviderEvent{
-			Provider:         e.Provider,
-			URL:              e.Url,
-			TEESignerAddress: e.TeeSignerAddress,
-			SignerVersion:    e.SignerVersion,
-			Block:            e.Raw.BlockNumber,
-			TxHash:           e.Raw.TxHash.Hex(),
+			Provider: e.Provider,
+			URL:      e.Url,
+			AppId:    e.AppId,
+			Block:    e.Raw.BlockNumber,
+			TxHash:   e.Raw.TxHash.Hex(),
 		})
 	}
 	if err := iter.Error(); err != nil {

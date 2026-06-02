@@ -62,7 +62,7 @@ const (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: provider <subcommand> [flags]")
-		fmt.Fprintln(os.Stderr, "  subcommands: register | status | withdraw | set-stake | push-image | snapshot | snapshots | delete-snapshot | gc-images")
+		fmt.Fprintln(os.Stderr, "  subcommands: register | status | withdraw | push-image | snapshot | snapshots | delete-snapshot | gc-images")
 		os.Exit(1)
 	}
 
@@ -73,8 +73,6 @@ func main() {
 		runStatus(os.Args[2:])
 	case "withdraw":
 		runWithdraw(os.Args[2:])
-	case "set-stake":
-		runSetStake(os.Args[2:])
 	case "push-image":
 		runPushImage(os.Args[2:])
 	case "snapshot":
@@ -87,20 +85,28 @@ func main() {
 		runGCImages(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
-		fmt.Fprintln(os.Stderr, "  subcommands: register | status | withdraw | set-stake | push-image | snapshot | snapshots | delete-snapshot | gc-images")
+		fmt.Fprintln(os.Stderr, "  subcommands: register | status | withdraw | push-image | snapshot | snapshots | delete-snapshot | gc-images")
 		os.Exit(1)
 	}
 }
 
 // ── register ──────────────────────────────────────────────────────────────────
 
+// runRegister binds the SandboxServing service to a TappRegistry appId and
+// sets prices. Prerequisites (done by the provider on tapp directly, in
+// separate txs; this CLI doesn't currently chain them):
+//
+//   1. tappRegistry.registerApp(appId, hashes, signer, teeUrl)  ← pays stake
+//   2. tappRegistry.authorizeInvalidator(appId, sandboxServingAddr)
+//
+// Then this command runs sandbox.addOrUpdateService(url, appId, prices).
 func runRegister(args []string) {
 	fs := flag.NewFlagSet("register", flag.ExitOnError)
 	rpc            := fs.String("rpc",           defaultRPC,              "RPC endpoint")
 	chainID        := fs.Int64("chain-id",        defaultChainID,          "Chain ID")
 	contractHex    := fs.String("contract",       defaultContract,         "Settlement contract address")
 	keyHex         := fs.String("key",            "",                      "Provider private key (hex); or set PROVIDER_KEY env")
-	teeSigner      := fs.String("tee-signer",     "",                      "TEE signer address (defaults to provider address)")
+	appId          := fs.String("app-id",         "",                      "TappRegistry appId to bind (required; must already be registered in tapp)")
 	serviceURL     := fs.String("url",            "",                      "Provider service URL (required)")
 	pricePerCPU    := fs.String("price-per-cpu",  "1000000000000000",      "Price per CPU per minute (neuron)")
 	pricePerMemGB  := fs.String("price-per-mem",  "500000000000000",       "Price per GB memory per minute (neuron)")
@@ -110,19 +116,18 @@ func runRegister(args []string) {
 	if *serviceURL == "" {
 		fatalf("--url is required")
 	}
+	if *appId == "" {
+		fatalf("--app-id is required")
+	}
 	privKey := resolveKey(*keyHex, "PROVIDER_KEY")
 	providerAddr := crypto.PubkeyToAddress(privKey.PublicKey)
 
-	teeAddr := providerAddr // default: TEE signer == provider (single-key / dev mode)
-	if *teeSigner != "" {
-		teeAddr = common.HexToAddress(*teeSigner)
-	}
 	pricePerCPUBig   := parseBigInt(*pricePerCPU, "--price-per-cpu")
 	pricePerMemGBBig := parseBigInt(*pricePerMemGB, "--price-per-mem")
 	createFeeBig     := parseBigInt(*createFee, "--fee")
 
 	fmt.Printf("Provider:       %s\n", providerAddr.Hex())
-	fmt.Printf("TEE signer:     %s\n", teeAddr.Hex())
+	fmt.Printf("AppId:          %s\n", *appId)
 	fmt.Printf("Contract:       %s\n", *contractHex)
 	fmt.Printf("Service URL:    %s\n", *serviceURL)
 	fmt.Printf("CPU price/min:  %s neuron\n", pricePerCPUBig.String())
@@ -134,32 +139,11 @@ func runRegister(args []string) {
 	eth, contract := dialContract(ctx, *rpc, *contractHex)
 	defer eth.Close()
 
-	callOpts := &bind.CallOpts{Context: ctx}
-	isRegistered, err := contract.ServiceExists(callOpts, providerAddr)
-	if err != nil {
-		fatalf("ServiceExists: %v", err)
-	}
-
 	auth := buildAuth(ctx, privKey, *chainID)
-	if !isRegistered {
-		// First registration: auto-read required stake and attach as msg.value.
-		requiredStake, err := contract.ProviderStake(callOpts)
-		if err != nil {
-			fatalf("ProviderStake: %v", err)
-		}
-		if requiredStake.Sign() > 0 {
-			auth.Value = requiredStake
-			fmt.Printf("Stake:          %s neuron (first registration, attached automatically)\n", requiredStake.String())
-		}
-	} else {
-		fmt.Println("Already registered — updating service (no stake required)")
-	}
-
 	fmt.Println("\n[1/1] AddOrUpdateService...")
-	tx, err := contract.AddOrUpdateService(auth, *serviceURL, teeAddr, pricePerCPUBig, createFeeBig, pricePerMemGBBig)
-	auth.Value = big.NewInt(0)
+	tx, err := contract.AddOrUpdateService(auth, *serviceURL, *appId, pricePerCPUBig, createFeeBig, pricePerMemGBBig)
 	if err != nil {
-		fatalf("AddOrUpdateService: %v", err)
+		fatalf("AddOrUpdateService: %v\n\nReminder: this requires tapp.registerApp(%s, ...) AND tapp.authorizeInvalidator(%s, %s) to have been called first.", err, *appId, *appId, *contractHex)
 	}
 	fmt.Printf("      tx: %s\n", tx.Hash().Hex())
 	if _, err := bind.WaitMined(ctx, eth, tx); err != nil {
@@ -198,10 +182,6 @@ func runStatus(args []string) {
 	if err != nil {
 		fatalf("ServiceExists: %v", err)
 	}
-	requiredStake, err := contract.ProviderStake(opts)
-	if err != nil {
-		fatalf("ProviderStake: %v", err)
-	}
 	owner, err := contract.Owner(opts)
 	if err != nil {
 		fatalf("Owner: %v", err)
@@ -210,7 +190,6 @@ func runStatus(args []string) {
 	fmt.Printf("Provider:       %s\n", providerAddr.Hex())
 	fmt.Printf("Contract:       %s\n", *contractHex)
 	fmt.Printf("Registered:     %v\n", registered)
-	fmt.Printf("Required stake: %s neuron\n", requiredStake.String())
 	fmt.Printf("Contract owner: %s\n", owner.Hex())
 
 	if registered {
@@ -218,23 +197,18 @@ func runStatus(args []string) {
 		if err != nil {
 			fatalf("Services: %v", err)
 		}
-		myStake, err := contract.ProviderStakes(opts, providerAddr)
-		if err != nil {
-			fatalf("ProviderStakes: %v", err)
-		}
 		earnings, err := contract.ProviderEarnings(opts, providerAddr)
 		if err != nil {
 			fatalf("ProviderEarnings: %v", err)
 		}
 		fmt.Printf("\nService:\n")
 		fmt.Printf("  URL:              %s\n", svc.Url)
-		fmt.Printf("  TEE signer:       %s\n", svc.TeeSignerAddress.Hex())
+		fmt.Printf("  AppId:            %s\n", svc.AppId)
 		fmt.Printf("  CPU price/min:    %s neuron\n", svc.PricePerCPUPerMin.String())
 		fmt.Printf("  Mem price/min:    %s neuron/GB\n", svc.PricePerMemGBPerMin.String())
 		fmt.Printf("  Create fee:       %s neuron\n", svc.CreateFee.String())
-		fmt.Printf("  Signer ver:       %s\n", svc.SignerVersion.String())
-		fmt.Printf("  My stake:         %s neuron\n", myStake.String())
 		fmt.Printf("  Earnings:         %s neuron\n", earnings.String())
+		fmt.Println("  (TEE signers + ack state now live in TappRegistry; query that contract for cluster info.)")
 	}
 }
 
@@ -280,49 +254,8 @@ func runWithdraw(args []string) {
 	fmt.Printf("  confirmed ✓  (%s neuron withdrawn)\n", earnings.String())
 }
 
-// ── set-stake ─────────────────────────────────────────────────────────────────
-
-func runSetStake(args []string) {
-	fs := flag.NewFlagSet("set-stake", flag.ExitOnError)
-	rpc         := fs.String("rpc",      defaultRPC,      "RPC endpoint")
-	chainID     := fs.Int64("chain-id",  defaultChainID,  "Chain ID")
-	contractHex := fs.String("contract", defaultContract, "Settlement contract address")
-	keyHex      := fs.String("key",      "",              "Owner private key; or set OWNER_KEY env")
-	stakeStr    := fs.String("stake",    "",              "New providerStake value in neuron (required)")
-	_ = fs.Parse(args)
-
-	if *stakeStr == "" {
-		fatalf("--stake is required")
-	}
-	newStake := parseBigInt(*stakeStr, "--stake")
-	privKey := resolveKey(*keyHex, "OWNER_KEY")
-	ownerAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	eth, contract := dialContract(ctx, *rpc, *contractHex)
-	defer eth.Close()
-
-	opts := &bind.CallOpts{Context: ctx}
-	currentStake, err := contract.ProviderStake(opts)
-	if err != nil {
-		fatalf("ProviderStake: %v", err)
-	}
-	fmt.Printf("Owner:          %s\n", ownerAddr.Hex())
-	fmt.Printf("Current stake:  %s neuron\n", currentStake.String())
-	fmt.Printf("New stake:      %s neuron\n", newStake.String())
-
-	fmt.Println("\nSetting provider stake...")
-	tx, err := contract.SetProviderStake(buildAuth(ctx, privKey, *chainID), newStake)
-	if err != nil {
-		fatalf("SetProviderStake: %v", err)
-	}
-	fmt.Printf("  tx: %s\n", tx.Hash().Hex())
-	if _, err := bind.WaitMined(ctx, eth, tx); err != nil {
-		fatalf("wait mined: %v", err)
-	}
-	fmt.Println("  confirmed ✓")
-}
+// `set-stake` was removed: stake collection moved to TappRegistry (per-node).
+// Use the tapp CLI to manage stakes.
 
 // ── push-image ────────────────────────────────────────────────────────────────
 

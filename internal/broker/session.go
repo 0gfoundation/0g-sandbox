@@ -34,6 +34,7 @@ type providerLookup interface {
 type sessionChainClient interface {
 	GetServicePricing(ctx context.Context, provider common.Address) (*big.Int, *big.Int, *big.Int, error)
 	GetProviderBalance(ctx context.Context, user, provider common.Address) (*big.Int, *big.Int, *big.Int, error)
+	IsActiveNode(ctx context.Context, appId string, signer common.Address) (bool, error)
 }
 
 // SessionHandler handles POST and DELETE /api/session on the Broker.
@@ -126,14 +127,22 @@ func (h *SessionHandler) HandlePost(c *gin.Context) {
 		return
 	}
 	signer, err := auth.Recover(msgHash, sig)
-	if err != nil || !strings.EqualFold(signer.Hex(), rec.TEESigner) {
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature"})
 		return
 	}
-
 	ctx := c.Request.Context()
 	provider := common.HexToAddress(req.ProviderAddr)
 	user := common.HexToAddress(req.UserAddr)
+	if rec.AppId == "" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "provider has no app bound"})
+		return
+	}
+	isNode, err := h.chain.IsActiveNode(ctx, rec.AppId, signer)
+	if err != nil || !isNode {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "signature does not match an active TEE node"})
+		return
+	}
 
 	// 3. Anti-replay (only when sandbox_id is set).
 	if req.SandboxID != "" {
@@ -259,8 +268,17 @@ func (h *SessionHandler) HandleDelete(c *gin.Context) {
 		return
 	}
 	signer, err := auth.Recover(msgHash, sig)
-	if err != nil || !strings.EqualFold(signer.Hex(), rec.TEESigner) {
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature"})
+		return
+	}
+	if rec.AppId == "" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "provider has no app bound"})
+		return
+	}
+	isNode, err := h.chain.IsActiveNode(ctx, rec.AppId, signer)
+	if err != nil || !isNode {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "signature does not match an active TEE node"})
 		return
 	}
 

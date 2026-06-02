@@ -19,24 +19,6 @@
   },
   {
     "type": "function",
-    "name": "acknowledgeTEESigner",
-    "inputs": [
-      {
-        "name": "provider",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "acknowledged",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "addOrUpdateService",
     "inputs": [
       {
@@ -45,9 +27,9 @@
         "internalType": "string"
       },
       {
-        "name": "teeSignerAddress",
-        "type": "address",
-        "internalType": "address"
+        "name": "appId",
+        "type": "string",
+        "internalType": "string"
       },
       {
         "name": "pricePerCPUPerMin",
@@ -66,7 +48,7 @@
       }
     ],
     "outputs": [],
-    "stateMutability": "payable"
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -205,9 +187,9 @@
     "name": "initialize",
     "inputs": [
       {
-        "name": "providerStake_",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "tappRegistry_",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [],
@@ -322,38 +304,6 @@
   },
   {
     "type": "function",
-    "name": "providerStake",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "providerStakes",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "requestRefund",
     "inputs": [
       {
@@ -406,9 +356,9 @@
         "internalType": "string"
       },
       {
-        "name": "teeSignerAddress",
-        "type": "address",
-        "internalType": "address"
+        "name": "appId",
+        "type": "string",
+        "internalType": "string"
       },
       {
         "name": "pricePerCPUPerMin",
@@ -416,35 +366,17 @@
         "internalType": "uint256"
       },
       {
-        "name": "createFee",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "signerVersion",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
         "name": "pricePerMemGBPerMin",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "createFee",
         "type": "uint256",
         "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "setProviderStake",
-    "inputs": [
-      {
-        "name": "newStake",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -496,6 +428,19 @@
       }
     ],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "tappRegistry",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract ITappRegistry"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -601,25 +546,6 @@
   },
   {
     "type": "event",
-    "name": "ProviderStakeUpdated",
-    "inputs": [
-      {
-        "name": "oldStake",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "newStake",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
     "name": "RefundRequested",
     "inputs": [
       {
@@ -685,47 +611,16 @@
         "internalType": "address"
       },
       {
-        "name": "url",
+        "name": "appId",
         "type": "string",
         "indexed": false,
         "internalType": "string"
       },
       {
-        "name": "teeSignerAddress",
-        "type": "address",
+        "name": "url",
+        "type": "string",
         "indexed": false,
-        "internalType": "address"
-      },
-      {
-        "name": "signerVersion",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "TEESignerAcknowledged",
-    "inputs": [
-      {
-        "name": "user",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "provider",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "acknowledged",
-        "type": "bool",
-        "indexed": false,
-        "internalType": "bool"
+        "internalType": "string"
       }
     ],
     "anonymous": false

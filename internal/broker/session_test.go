@@ -48,6 +48,8 @@ type mockSessionChain struct {
 	balanceAfterDeposit  *big.Int // if set, returned on 2nd+ GetProviderBalance calls
 	balCallCount         int
 	balErr               error
+	expectedTEEAddr      common.Address // signer must match for IsActiveNode → true
+	nodeErr              error
 }
 
 func (m *mockSessionChain) GetServicePricing(_ context.Context, _ common.Address) (*big.Int, *big.Int, *big.Int, error) {
@@ -65,6 +67,19 @@ func (m *mockSessionChain) GetProviderBalance(_ context.Context, _, _ common.Add
 		bal = m.balanceAfterDeposit
 	}
 	return bal, big.NewInt(0), big.NewInt(0), m.balErr
+}
+
+func (m *mockSessionChain) IsActiveNode(_ context.Context, _ string, signer common.Address) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.nodeErr != nil {
+		return false, m.nodeErr
+	}
+	if m.expectedTEEAddr == (common.Address{}) {
+		// Unconfigured — treat as "any signer accepted" (most tests don't care).
+		return true, nil
+	}
+	return signer == m.expectedTEEAddr, nil
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -85,12 +100,12 @@ func teeSign(key *ecdsa.PrivateKey, msgHash []byte) string {
 // is teeKey. Returns the handler, provider lookup mock, and a fresh Redis client.
 func newSessionSetup(t *testing.T, teeKey *ecdsa.PrivateKey, chain sessionChainClient, payment PaymentLayer) (*SessionHandler, *mockProviderLookup) {
 	t.Helper()
-	teeAddr := crypto.PubkeyToAddress(teeKey.PublicKey).Hex()
+	_ = crypto.PubkeyToAddress(teeKey.PublicKey) // teeAddr no longer in ProviderRecord; signer→node lookup is in tap
 	providers := &mockProviderLookup{
 		records: map[string]indexer.ProviderRecord{
 			strings.ToLower(provider1.Hex()): {
-				Address:   provider1.Hex(),
-				TEESigner: teeAddr,
+				Address: provider1.Hex(),
+				AppId:   "test-app",
 			},
 		},
 	}
@@ -109,6 +124,8 @@ func newSessionRouter(h *SessionHandler) *gin.Engine {
 }
 
 // defaultChain returns a mock chain with cpu=10/sec, mem=5/sec, given balance.
+// expectedTEEAddr left zero so IsActiveNode accepts any signer (the
+// signature-validity tests configure it explicitly when needed).
 func defaultChain(balance int64) *mockSessionChain {
 	return &mockSessionChain{
 		cpuPerSec: big.NewInt(10),
@@ -182,7 +199,9 @@ func TestHandlePost_providerNotFound(t *testing.T) {
 func TestHandlePost_invalidSignature(t *testing.T) {
 	teeKey, _ := crypto.GenerateKey()
 	wrongKey, _ := crypto.GenerateKey()
-	h, _ := newSessionSetup(t, teeKey, defaultChain(0), &mockPaymentLayer{})
+	chain := defaultChain(0)
+	chain.expectedTEEAddr = crypto.PubkeyToAddress(teeKey.PublicKey) // only teeKey recovers to a valid node
+	h, _ := newSessionSetup(t, teeKey, chain, &mockPaymentLayer{})
 	router := newSessionRouter(h)
 
 	req := buildPostReq(t, wrongKey, "sb-1", 2, 4) // signed with wrong key
@@ -388,7 +407,9 @@ func TestHandleDelete_providerNotFound(t *testing.T) {
 func TestHandleDelete_invalidSignature(t *testing.T) {
 	teeKey, _ := crypto.GenerateKey()
 	wrongKey, _ := crypto.GenerateKey()
-	h, _ := newSessionSetup(t, teeKey, defaultChain(0), &mockPaymentLayer{})
+	chain := defaultChain(0)
+	chain.expectedTEEAddr = crypto.PubkeyToAddress(teeKey.PublicKey)
+	h, _ := newSessionSetup(t, teeKey, chain, &mockPaymentLayer{})
 	router := newSessionRouter(h)
 
 	seedSession(t, h.rdb, SessionEntry{
