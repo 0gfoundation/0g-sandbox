@@ -208,24 +208,25 @@ tapp-cli -s http://<tapp-server>:50051 get-app-container-status --app-id 0g-sand
 tapp-cli -s http://<tapp-server>:50051 get-app-logs --app-id 0g-sandbox -n 100
 ```
 
-The TEE key is automatically generated and managed by the tapp-daemon. Retrieve the
-Ethereum address for provider registration:
+The TEE key is automatically generated and managed by the tapp-daemon. The provider
+registers an `appId` rather than a raw signer address; TappRegistry stores the active
+TEE node set and the billing proxy reads it on every voucher verification.
 
 ```bash
-tapp-cli -s http://<tapp-server>:50051 get-app-key --app-id 0g-sandbox
-# → Ethereum Address: 0x...  ← use as --tee-signer when registering the provider
+# Inspect the app's current trust root (compose hash, image hashes, TEE nodes)
+tapp-cli -s http://<tapp-server>:50051 get-app-info --app-id 0g-sandbox
 ```
 
-> **Note**: if the app is redeployed and the TEE key changes, re-register the provider
-> with the new signer address (`cmd/provider register --tee-signer <new-addr>`).
-> This increments `signerVersion` — all users must re-acknowledge before vouchers settle.
+> If the TEE key rotates (redeploy, manual `addNode` / `removeNode`), TappRegistry
+> bumps `ackVersion(appId)` and every prior user acknowledgement becomes stale.
+> Users re-acknowledge via `cmd/user acknowledge` before further vouchers settle.
 
 ---
 
 ## User Operations
 
 Users interact with the system via:
-1. **On-chain**: deposit funds and acknowledge the TEE signer
+1. **On-chain**: deposit funds and acknowledge the provider's `appId` in TappRegistry
 2. **HTTP API**: create, list, stop, and delete sandboxes (authenticated via EIP-191 signatures)
 
 See [`CLI.md`](CLI.md) for the full `cmd/user` reference and onboarding flow.

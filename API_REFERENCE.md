@@ -233,13 +233,12 @@ On-chain service data for all known providers.
   {
     "address":                "0x...",
     "url":                    "https://...",
-    "tee_signer":             "0x...",
+    "app_id":                 "0g-sandbox-provider",
     "price_per_cpu_per_min":  "1000000000000000",
     "price_per_cpu_per_sec":  "16666666666666",
     "price_per_mem_gb_per_min":"500000000000000",
     "price_per_mem_gb_per_sec":"8333333333333",
-    "create_fee":             "60000000000000000",
-    "signer_version":         "1"
+    "create_fee":             "60000000000000000"
   }
 ]
 ```
@@ -686,12 +685,17 @@ Deposit 0G tokens into a user's account for a specific provider.
 payable; msg.value = amount in neuron (wei)
 ```
 
-#### `acknowledgeOrRevokeTEESigner(address provider, address teeSigner, bool accept)`
+#### Acknowledging a provider (TappRegistry)
 
-Allow (`accept=true`) or revoke (`accept=false`) a provider's TEE signer to charge your account.
+The provider's TEE trust root lives in TappRegistry, not in SandboxServing.
+Users call `tappRegistry.acknowledgeApp(string appId)` to accept it and
+`tappRegistry.revokeAcknowledgement(string appId)` to revoke. The current
+`appId` for a provider is read from `sandbox.services(provider).appId`.
 
-> The simplified wrapper `AcknowledgeTEESigner(address provider, bool accept)` looks up the
-> current TEE signer from the provider's service registration automatically.
+When the active TEE node set changes, or when SandboxServing's prices/createFee
+are updated, TappRegistry bumps `ackVersion(appId)` and prior acknowledgements
+are invalidated automatically — users must re-acknowledge before further
+vouchers settle.
 
 #### `getBalance(address user, address provider) → (balance, pendingRefund, refundUnlockAt)`
 
@@ -711,11 +715,10 @@ Read-only. Returns provider registration details (public mapping auto-getter):
 ```solidity
 struct Service {
     string  url;
-    address teeSignerAddress;
+    string  appId;
     uint256 pricePerCPUPerMin;
-    uint256 createFee;
-    uint256 signerVersion;
     uint256 pricePerMemGBPerMin;
+    uint256 createFee;
 }
 ```
 
@@ -775,13 +778,12 @@ regardless of the `public` flag.
 {
   "address":                 "0x...",
   "url":                     "https://...",
-  "tee_signer":              "0x...",
+  "app_id":                  "0g-sandbox-provider",
   "price_per_cpu_per_min":   "1000000000000000",
   "price_per_cpu_per_sec":   "16666666666666",
   "price_per_mem_gb_per_min":"500000000000000",
   "price_per_mem_gb_per_sec":"8333333333333",
-  "create_fee":              "60000000000000000",
-  "signer_version":          "1"
+  "create_fee":              "60000000000000000"
 }
 ```
 

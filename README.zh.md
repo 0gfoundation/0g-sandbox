@@ -173,16 +173,18 @@ tapp-cli -s http://<tapp-server>:50051 get-app-container-status --app-id 0g-sand
 tapp-cli -s http://<tapp-server>:50051 get-app-logs --app-id 0g-sandbox -n 100
 ```
 
-TEE 密钥由 tapp-daemon 自动生成和管理。注册 Provider 前先获取其以太坊地址：
+TEE 密钥由 tapp-daemon 自动生成和管理。Provider 在 TappRegistry 中注册的是 `appId`，
+而不是 raw signer 地址；TappRegistry 记录该 app 当前的活跃 TEE 节点集合，billing proxy
+在每次 voucher 验签时都会查询。
 
 ```bash
-tapp-cli -s http://<tapp-server>:50051 get-app-key --app-id 0g-sandbox
-# → Ethereum Address: 0x...  ← 作为 --tee-signer 传给 cmd/provider register
+# 查看当前 app 的 trust root（composeHash、镜像 hash 列表、TEE 节点）
+tapp-cli -s http://<tapp-server>:50051 get-app-info --app-id 0g-sandbox
 ```
 
-> **注意**：若重新部署后 TEE 密钥发生变化，需用新地址重新注册 Provider
-> （`cmd/provider register --tee-signer <新地址>`）。
-> 这会递增 `signerVersion`，所有用户须重新 acknowledge 后 voucher 才能结算。
+> 若 TEE 密钥发生轮换（重新部署、手动 `addNode` / `removeNode`），TappRegistry 会
+> 自动递增 `ackVersion(appId)`，所有用户的旧 acknowledgement 都会失效，需通过
+> `cmd/user acknowledge` 重新签署后 voucher 才能继续结算。
 
 ---
 

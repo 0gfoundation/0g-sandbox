@@ -89,23 +89,35 @@ Requires the `-tags e2e` build tag.
 
 **1. Account setup**
 
-The TEE key address must have completed the following on-chain steps:
+Before running the E2E test the provider's `appId` must be registered in TappRegistry
+and the SandboxServing service must be bound to that `appId`, and the test wallet must
+have deposited funds and acknowledged the `appId`:
 
 ```
-contract.AddOrUpdateService(...)    # register provider service
-contract.Deposit(...)               # fund the user account (≥ 100 neuron recommended)
-contract.AcknowledgeTEESigner(...)  # acknowledge TEE signer
+tapp.registerApp(appId, ...)        # register the TEE-app trust root
+sandbox.addOrUpdateService(...)     # bind URL/prices to appId
+sandbox.deposit(user, provider, ...)# fund the user account (≥ 0.1 0G recommended)
+tapp.acknowledgeApp(appId)          # acknowledge under the active TEE node set
 ```
 
-Use `cmd/setup` to do this in one command:
+Run the ceremony from the CLI:
 
 ```bash
-MOCK_APP_PRIVATE_KEY=0x<TEE_PRIVATE_KEY> \
-go run ./cmd/setup/ \
-  --rpc      https://evmrpc-testnet.0g.ai \
-  --contract 0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210 \
-  --chain-id 16602 \
-  --deposit  0.01
+# Provider side
+PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ register \
+  --api      http://<billing-host>:8080 \
+  --app-id   <appId> \
+  --price-per-cpu <neuron/cpu/min> \
+  --price-per-mem <neuron/memGB/min> \
+  --create-fee    <neuron>
+
+# User side
+USER_KEY=0x<user-key> go run ./cmd/user/ deposit \
+  --provider 0x<provider-address> \
+  --amount   0.1
+USER_KEY=0x<user-key> go run ./cmd/user/ acknowledge \
+  --provider 0x<provider-address> \
+  --tapp     0x<tapp-registry-address>
 ```
 
 **2. Local services**

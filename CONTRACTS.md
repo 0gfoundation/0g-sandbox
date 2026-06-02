@@ -82,14 +82,17 @@ cast call <beacon> "owner()(address)"
 Deploys the full beacon-proxy stack in 3 steps:
 1. SandboxServing implementation (no constructor args)
 2. UpgradeableBeacon (impl, deployer)
-3. BeaconProxy (beacon, initialize(providerStake))
+3. BeaconProxy (beacon, initialize(tappRegistry))
+
+Prerequisite: TappRegistry deployed on the target chain (its address comes
+from the 0g-tapp repo's deployment record).
 
 ```bash
 go run ./cmd/deploy/ \
   --rpc      https://evmrpc-testnet.0g.ai \
   --key      0x<deployer-private-key> \
   --chain-id 16602 \
-  --stake    0
+  --tapp     0x<tapp-registry-address>
 ```
 
 Output:
@@ -97,6 +100,7 @@ Output:
 Implementation : 0x...
 Beacon         : 0x...
 Proxy (stable) : 0x...   ← set this as SETTLEMENT_CONTRACT
+TappRegistry   : 0x...   ← set this as TAPP_REGISTRY
 ```
 
 | Flag | Default | Description |
@@ -104,7 +108,7 @@ Proxy (stable) : 0x...   ← set this as SETTLEMENT_CONTRACT
 | `--rpc` | `https://evmrpc-testnet.0g.ai` | EVM RPC endpoint |
 | `--key` | (required) | Deployer private key (hex, with or without 0x) |
 | `--chain-id` | `16602` | Chain ID |
-| `--stake` | `0` | `providerStake` passed to `initialize()` (neuron) |
+| `--tapp` | (required) | TappRegistry contract address — passed to `initialize()` |
 
 ---
 
@@ -146,20 +150,35 @@ Verifies all three contracts on the block explorer.
 
 ## Provider Registration
 
-After deploying the contract, register the service on-chain using `cmd/provider`.
-See [`CLI.md`](CLI.md) for full details.
+The provider's trust root lives in **TappRegistry**: `appId` → composeHash, image hashes,
+and the active TEE node set. The provider registers the app there first (via `tapp-cli`),
+then binds commercial terms (URL, prices, createFee) to that `appId` in **SandboxServing**.
+
+See [`CLI.md`](CLI.md) for full flag reference.
 
 ```bash
-# Get TEE signer address from tapp-daemon
-tapp-cli -s http://<server>:50051 get-app-key --app-id 0g-sandbox
-# → Ethereum Address: 0x61beb835...
+# 1. Register the TEE-app trust root in TappRegistry (provider key must own the appId)
+tapp-cli -s http://<tapp-server>:50051 start-app \
+  --app-id 0g-sandbox-provider \
+  -f docker-compose.yml
 
-PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ init-service \
-  --tee-signer <TEE-signer-address> \
-  --url        http://<billing-proxy>:8080
+# 2. Authorize SandboxServing as an invalidator of this app's acks
+#    (so a price change in SandboxServing bumps ackVersion in TappRegistry)
+tapp-cli authorize-invalidator-onchain \
+  --app-id    0g-sandbox-provider \
+  --contract  0x<sandbox-serving-proxy>
+
+# 3. Bind commercial terms to the appId in SandboxServing
+PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ register \
+  --api            http://<billing-proxy>:8080 \
+  --app-id         0g-sandbox-provider \
+  --price-per-cpu  <neuron/cpu/min> \
+  --price-per-mem  <neuron/memGB/min> \
+  --create-fee     <neuron>
 ```
 
-Then set `PROVIDER_ADDRESS` in `.env` and fund the TEE address with 0G for gas.
+Then set `PROVIDER_ADDRESS` and `TAPP_REGISTRY` in `.env`, and ensure the provider
+wallet holds enough 0G to pay gas for settlement.
 
 ---
 
@@ -167,4 +186,5 @@ Then set `PROVIDER_ADDRESS` in `.env` and fund the TEE address with 0G for gas.
 
 - **Proxy address never changes** — upgrading only replaces the implementation; the proxy address is the stable external-facing address
 - **Open settlement** — `settleFeesWithTEE` can be called by anyone; the provider is identified by `v.provider` in the voucher, not `msg.sender`
-- **Provider stake has no exit mechanism** — staked ETH cannot currently be withdrawn; `requestExit` / `withdrawStake` to be implemented
+- **Trust root delegation** — SandboxServing holds only commercial terms; TEE signer identity and user acknowledgement live in TappRegistry and are queried on every voucher verification
+- **`appId` is set-once** — once `addOrUpdateService` has bound a non-empty `appId`, subsequent calls must use the same value (provider can only update URL / prices / createFee, not the trust root)

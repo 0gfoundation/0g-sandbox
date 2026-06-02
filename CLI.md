@@ -15,12 +15,19 @@ Private keys can be passed via `--key` flag or environment variable (`PROVIDER_K
 
 ### `register` / `init-service`
 
-Register a new service, or update an existing one, on the settlement contract.
+Bind a SandboxServing service to a TappRegistry appId and set its prices.
 (`init-service` is an alias for `register`.)
+
+Prerequisites (done on TappRegistry by the same provider wallet, in separate txs
+via `tapp-cli`):
+
+1. `tapp-cli register-onchain` — registers the app + first TEE node, pays stake.
+2. `tapp-cli authorize-invalidator-onchain --invalidator <SETTLEMENT_CONTRACT>` —
+   permits this contract to bump the app's ack version on price changes.
 
 ```bash
 PROVIDER_KEY=0x<hex> go run ./cmd/provider/ register \
-  --tee-signer  <TEE-signer-address> \
+  --app-id      <tapp-app-id> \
   --url         <0g-sandbox-url> \
   [--price-per-cpu <neuron-per-cpu-per-minute>] \
   [--price-per-mem <neuron-per-gb-per-minute>] \
@@ -34,8 +41,8 @@ PROVIDER_KEY=0x<hex> go run ./cmd/provider/ register \
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--key` | `PROVIDER_KEY` env | Provider private key (hex) |
-| `--tee-signer` | (provider address) | TEE signer address (`tapp-cli get-app-key --app-id 0g-sandbox`); defaults to provider address in dev mode |
+| `--key` | `PROVIDER_KEY` env | Provider private key (hex). Must derive to the app owner registered in TappRegistry. |
+| `--app-id` | (required) | TappRegistry appId this service is bound to. Must already be registered + have this contract authorized as an invalidator. |
 | `--url` | (required) | Public URL of the billing proxy (e.g. `http://1.2.3.4:8080`) |
 | `--price-per-cpu` | `1000000000000000` | Price per CPU core per minute (neuron) |
 | `--price-per-mem` | `500000000000000` | Price per GB memory per minute (neuron) |
@@ -44,40 +51,45 @@ PROVIDER_KEY=0x<hex> go run ./cmd/provider/ register \
 | `--chain-id` | `16602` | Chain ID |
 | `--contract` | deployed testnet addr | Settlement contract (BeaconProxy) address |
 
-On first registration the required provider stake is read from the contract and attached automatically as `msg.value`.
+The contract verifies on call: `tap.getAppInfo(appId).owner == msg.sender` and
+`tap.isAuthorizedInvalidator(appId, address(this)) == true`. Stake is not
+collected here — TappRegistry holds per-node stake.
+
+The appId field on the service is **set-once**: the first call writes it,
+subsequent calls must pass the same value or revert. To switch to a different
+appId, the operator must deregister and re-register.
 
 **Example — testnet**
 
 ```bash
-# Get TEE signer address first:
-tapp-cli -s http://<server>:50051 get-app-key --app-id 0g-sandbox
-# → Ethereum Address: 0x61beb835...
+# Steps 1 + 2: register the app in TappRegistry + authorize this contract.
+# See the `tapp-cli` documentation in the 0g-tapp repo for the full command set.
 
-PROVIDER_KEY=0x859c3bd1... go run ./cmd/provider/ register \
-  --tee-signer   0x61BEb835D1935Eec8cC04efa2f4e2B3cC8B8B6E3 \
-  --url          http://<provider-host>:8080 \
+# Step 3: bind the service in SandboxServing.
+PROVIDER_KEY=0x... go run ./cmd/provider/ register \
+  --app-id        my-sandbox-app \
+  --url           http://<provider-host>:8080 \
   --price-per-cpu 1000000000000000 \
   --price-per-mem 500000000000000 \
-  --fee          60000000000000000
+  --fee           60000000000000000
 ```
 
 **Output**
 
 ```
-Provider:       0xB831371eb2703305f1d9F8542163633D0675CEd7
-TEE signer:     0x61BEb835D1935Eec8cC04efa2f4e2B3cC8B8B6E3
-Contract:       0xd7e0CD227e602FedBb93c36B1F5bf415398508a4
+Provider:       0xea69...1837
+AppId:          my-sandbox-app
+Contract:       0x<proxy-address>
 Service URL:    http://<provider-host>:8080
 CPU price/min:  1000000000000000 neuron
 Mem price/min:  500000000000000 neuron/GB
 Create fee:     60000000000000000 neuron
-Stake:          100000000000000000000 neuron (first registration, attached automatically)
 
 [1/1] AddOrUpdateService...
       tx: 0x...
       confirmed ✓
 
-Done. Provider address: 0xB831371eb2703305f1d9F8542163633D0675CEd7
+Done. Provider address: 0xea69...1837
 ```
 
 > **After calling `register`**: set `PROVIDER_ADDRESS` in your `.env`, then redeploy the billing service.
@@ -86,7 +98,7 @@ Done. Provider address: 0xB831371eb2703305f1d9F8542163633D0675CEd7
 
 ### `status`
 
-Show the current on-chain registration, pricing, stake, and earnings for a provider.
+Show the current on-chain service registration, pricing, and earnings for a provider.
 
 ```bash
 PROVIDER_KEY=0x<hex> go run ./cmd/provider/ status \
@@ -100,6 +112,9 @@ PROVIDER_KEY=0x<hex> go run ./cmd/provider/ status \
 | `--key` | `PROVIDER_KEY` env | Provider private key (address derived from it) |
 | `--address` | — | Provider address (alternative to `--key`) |
 
+TEE signer and per-node stake are managed in TappRegistry — query that
+contract directly for the cluster view.
+
 **Example**
 
 ```bash
@@ -107,19 +122,17 @@ PROVIDER_KEY=0x<hex> go run ./cmd/provider/ status
 ```
 
 ```
-Provider:       0xB831371eb2703305f1d9F8542163633D0675CEd7
-Contract:       0xd7e0CD227e602FedBb93c36B1F5bf415398508a4
+Provider:       0xea69...1837
+Contract:       0x<proxy-address>
 Registered:     true
-Required stake: 100000000000000000000 neuron
+Contract owner: 0x...
 
 Service:
   URL:              http://<provider-host>:8080
-  TEE signer:       0x61BEb835D1935Eec8cC04efa2f4e2B3cC8B8B6E3
+  AppId:            my-sandbox-app
   CPU price/min:    1000000000000000 neuron
   Mem price/min:    500000000000000 neuron/GB
   Create fee:       60000000000000000 neuron
-  Signer ver:       4
-  My stake:         100000000000000000000 neuron
   Earnings:         5000000000000000000 neuron
 ```
 
@@ -143,32 +156,13 @@ PROVIDER_KEY=0x<hex> go run ./cmd/provider/ withdraw
 ```
 
 ```
-Provider:  0xB831371eb2703305f1d9F8542163633D0675CEd7
+Provider:  0xea69...1837
 Earnings:  5000000000000000000 neuron
 
 Withdrawing earnings...
   tx: 0x...
   confirmed ✓  (5000000000000000000 neuron withdrawn)
 ```
-
----
-
-### `set-stake`
-
-(Contract owner only) Update the required provider stake amount.
-
-```bash
-OWNER_KEY=0x<hex> go run ./cmd/provider/ set-stake \
-  --stake    <neuron> \
-  [--rpc     <rpc-url>] \
-  [--chain-id <chain-id>] \
-  [--contract <proxy-address>]
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--key` | `OWNER_KEY` env | Contract owner private key |
-| `--stake` | (required) | New provider stake value in neuron |
 
 ---
 
@@ -437,13 +431,21 @@ New balance (for provider 0xB831...): 100000000000000000 neuron  (0.100000 0G)
 
 #### `acknowledge`
 
-Acknowledge (or revoke) the provider's TEE signer. Must be done once before creating sandboxes.
+Acknowledge (or revoke) the provider's TEE identity. Required once per
+`(user, app)` before creating sandboxes against that provider. The call
+itself targets TappRegistry's `acknowledgeApp(appId)`; the CLI first resolves
+`appId` from `sandbox.services(provider)` and prints both the commercial
+terms (URL/prices/createFee from SandboxServing) and the trust root
+(composeHash/imageHashes/active TEE nodes from TappRegistry) before
+prompting.
 
 ```bash
 go run ./cmd/user/ acknowledge \
   --provider <provider-address> \
+  --tapp     <tapp-registry-address> \
   [--key     <hex>] \
   [--revoke] \
+  [--yes] \
   [--rpc     <rpc-url>] \
   [--contract <proxy-address>] \
   [--chain-id <chain-id>]
@@ -451,27 +453,54 @@ go run ./cmd/user/ acknowledge \
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--provider` | (required) | Provider address to acknowledge |
+| `--provider` | (required) | Sandbox-service provider address |
+| `--tapp` | `TAPP_REGISTRY` env | TappRegistry contract address (required) |
 | `--key` | `USER_KEY` env | User private key |
-| `--revoke` | false | Revoke instead of acknowledge |
+| `--revoke` | false | Revoke instead of acknowledge (calls `revokeAcknowledgement`) |
+| `--yes` | false | Skip the interactive `[y/N]` prompt (use in scripts) |
 
 **Example**
 
 ```bash
 USER_KEY=0x<hex> go run ./cmd/user/ acknowledge \
-  --provider 0xB831371eb2703305f1d9F8542163633D0675CEd7
+  --provider 0x<provider> \
+  --tapp     0x<tapp-registry>
 ```
 
 ```
-User:     0xdAc113A24f4c7c57792B67127D99Fdda258e1023
-Provider: 0xB831371eb2703305f1d9F8542163633D0675CEd7
+== Provider commercial terms (SandboxServing 0x...) ==
+  URL:           http://<provider-host>:8082
+  AppId:         my-sandbox-app
+  Create fee:    60000000000000000 neuron  (0.060000 0G per sandbox)
+  CPU price:     1000000000000000 neuron/CPU/min
+  Mem price:     500000000000000 neuron/GB/min
 
-[1/1] AcknowledgeTEESigner (accept=true)...
+== Trust root (TappRegistry 0x...) ==
+  App owner:     0xea69...1837   (matches provider ✓)
+  Registered:    2026-06-02T03:14:48Z
+  Ack version:   0
+  Compose hash:  0x...
+  Volumes hash:  0x...
+  Image hashes:  (11)
+                 sha256:c12037...
+                 ...
+  Active TEE nodes (1):
+    0x0EB3...DB8
+      teeUrl: http://<tapp-server>:50051
+
+User:            0xdAc113A24f4c7c57792B67127D99Fdda258e1023
+Current ack:     false
+
+→ tapp.acknowledgeApp("my-sandbox-app")   on chain 16602
+Proceed? [y/N]: y
       tx: 0x...
       confirmed ✓
 ```
 
-> If the provider updates their TEE signer (`init-service` called again), users must re-acknowledge.
+> Whenever the provider triggers a TEE node change (via `tapp-cli`) or a
+> price update in SandboxServing, the app's `ackVersion` bumps in
+> TappRegistry and every user's prior ack becomes stale — they must call
+> `acknowledge` again.
 
 ---
 
@@ -616,12 +645,14 @@ Complete flow for a new user to start using sandboxes:
 
 # 2. Deposit into the settlement contract (--provider required)
 USER_KEY=0x<hex> go run ./cmd/user/ deposit \
-  --provider 0xB831371eb2703305f1d9F8542163633D0675CEd7 \
+  --provider 0x<provider-address> \
   --amount 0.1
 
-# 3. Acknowledge the TEE signer for the provider
+# 3. Acknowledge the provider's trust root (lives in TappRegistry).
+#    CLI prints prices + composeHash + active TEE nodes, then prompts.
 USER_KEY=0x<hex> go run ./cmd/user/ acknowledge \
-  --provider 0xB831371eb2703305f1d9F8542163633D0675CEd7
+  --provider 0x<provider-address> \
+  --tapp     0x<tapp-registry-address>
 
 # 4. Create a sandbox
 USER_KEY=0x<hex> go run ./cmd/user/ create --api http://<0g-sandbox>:8080

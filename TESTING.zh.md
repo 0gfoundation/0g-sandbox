@@ -89,23 +89,34 @@ go test ./cmd/billing/ -v -run TestComponent
 
 **1. 账户准备**
 
-TEE 私钥对应的地址必须已完成以下链上操作：
+E2E 测试运行前需要 provider 的 `appId` 已在 TappRegistry 中注册、SandboxServing
+中已绑定该 `appId`，并且测试钱包已充值并 acknowledge：
 
 ```
-contract.AddOrUpdateService(...)    # 注册 provider 服务
-contract.Deposit(...)               # 充值（建议 ≥ 100 neuron）
-contract.AcknowledgeTEESigner(...)  # 确认 TEE 签名者
+tapp.registerApp(appId, ...)        # 注册 TEE-app trust root
+sandbox.addOrUpdateService(...)     # 把 URL/价格/createFee 绑定到 appId
+sandbox.deposit(user, provider, ...)# 用户账户充值（建议 ≥ 0.1 0G）
+tapp.acknowledgeApp(appId)          # 用户在当前 TEE 节点集合下 acknowledge
 ```
 
-可使用 `cmd/setup` 一键完成：
+通过 CLI 走完这套流程：
 
 ```bash
-MOCK_APP_PRIVATE_KEY=0x<TEE_PRIVATE_KEY> \
-go run ./cmd/setup/ \
-  --rpc      https://evmrpc-testnet.0g.ai \
-  --contract 0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210 \
-  --chain-id 16602 \
-  --deposit  0.01
+# Provider 侧
+PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ register \
+  --api      http://<billing-host>:8080 \
+  --app-id   <appId> \
+  --price-per-cpu <neuron/cpu/min> \
+  --price-per-mem <neuron/memGB/min> \
+  --create-fee    <neuron>
+
+# 用户侧
+USER_KEY=0x<user-key> go run ./cmd/user/ deposit \
+  --provider 0x<provider-address> \
+  --amount   0.1
+USER_KEY=0x<user-key> go run ./cmd/user/ acknowledge \
+  --provider 0x<provider-address> \
+  --tapp     0x<tapp-registry-address>
 ```
 
 **2. 本地服务**

@@ -82,14 +82,16 @@ cast call <beacon> "owner()(address)"
 分三步部署完整的 beacon-proxy 合约栈：
 1. SandboxServing 实现合约（无构造参数）
 2. UpgradeableBeacon（impl, deployer）
-3. BeaconProxy（beacon, initialize(providerStake)）
+3. BeaconProxy（beacon, initialize(tappRegistry)）
+
+前置条件：目标链上已有 TappRegistry 部署（地址查阅 0g-tapp repo 的部署记录）。
 
 ```bash
 go run ./cmd/deploy/ \
   --rpc      https://evmrpc-testnet.0g.ai \
   --key      0x<deployer-private-key> \
   --chain-id 16602 \
-  --stake    0
+  --tapp     0x<tapp-registry-address>
 ```
 
 输出：
@@ -97,6 +99,7 @@ go run ./cmd/deploy/ \
 Implementation : 0x...
 Beacon         : 0x...
 Proxy (stable) : 0x...   ← 将此地址设为 SETTLEMENT_CONTRACT
+TappRegistry   : 0x...   ← 将此地址设为 TAPP_REGISTRY
 ```
 
 | 参数 | 默认值 | 说明 |
@@ -104,7 +107,7 @@ Proxy (stable) : 0x...   ← 将此地址设为 SETTLEMENT_CONTRACT
 | `--rpc` | `https://evmrpc-testnet.0g.ai` | EVM RPC 地址 |
 | `--key` | （必填）| 部署者私钥（十六进制，0x 可选）|
 | `--chain-id` | `16602` | 链 ID |
-| `--stake` | `0` | 传入 `initialize()` 的 `providerStake`（neuron）|
+| `--tapp` | （必填）| TappRegistry 合约地址 — 传入 `initialize()` |
 
 ---
 
@@ -146,20 +149,35 @@ go run ./cmd/upgrade/ \
 
 ## Provider 注册
 
-合约部署后，使用 `cmd/provider` 在链上注册服务。
-完整说明见 [`CLI.md`](CLI.md)。
+Provider 的 trust root 存放在 **TappRegistry**：`appId` → composeHash、镜像 hash 列表、
+当前活跃 TEE 节点集合。Provider 先通过 `tapp-cli` 在 TappRegistry 注册 app，再在
+**SandboxServing** 中把 URL / 价格 / createFee 绑定到该 `appId`。
+
+完整 flag 说明见 [`CLI.md`](CLI.md)。
 
 ```bash
-# 从 tapp-daemon 获取 TEE 签名地址
-tapp-cli -s http://<server>:50051 get-app-key --app-id 0g-sandbox
-# → Ethereum Address: 0x61beb835...
+# 1. 在 TappRegistry 中启动并注册 app（owner 必须是 provider 私钥）
+tapp-cli -s http://<tapp-server>:50051 start-app \
+  --app-id 0g-sandbox-provider \
+  -f docker-compose.yml
 
-PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ init-service \
-  --tee-signer <TEE-signer-address> \
-  --url        http://<billing-proxy>:8080
+# 2. 把 SandboxServing 加为该 app 的 invalidator
+#    （后续在 SandboxServing 改价格会自动 bump TappRegistry 的 ackVersion）
+tapp-cli authorize-invalidator-onchain \
+  --app-id    0g-sandbox-provider \
+  --contract  0x<sandbox-serving-proxy>
+
+# 3. 在 SandboxServing 中把商业条款绑定到 appId
+PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ register \
+  --api            http://<billing-proxy>:8080 \
+  --app-id         0g-sandbox-provider \
+  --price-per-cpu  <neuron/cpu/min> \
+  --price-per-mem  <neuron/memGB/min> \
+  --create-fee     <neuron>
 ```
 
-完成后在 `.env` 中设置 `PROVIDER_ADDRESS`，并向 TEE 地址充入少量 0G 用于 gas。
+完成后在 `.env` 中设置 `PROVIDER_ADDRESS` 与 `TAPP_REGISTRY`，并确保 provider 钱包
+持有足够 0G 用于结算 gas。
 
 ---
 
@@ -167,4 +185,5 @@ PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ init-service \
 
 - **Proxy 地址永不变** — 升级只替换 implementation，proxy 地址是对外稳定地址
 - **结算开放** — `settleFeesWithTEE` 任何人可调用，provider 由 voucher 内的 `v.provider` 字段标识，与 `msg.sender` 无关
-- **Provider stake 未实现退出机制** — 质押 ETH 目前无法取回，待后续实现 `requestExit` / `withdrawStake`
+- **Trust root 委托** — SandboxServing 只持有商业条款；TEE 签名身份与用户 acknowledgement 都在 TappRegistry 中，每次 voucher 验签都会查询
+- **`appId` 写一次** — 一旦 `addOrUpdateService` 绑定了非空 `appId`，之后只能修改 URL / 价格 / createFee，无法替换 trust root

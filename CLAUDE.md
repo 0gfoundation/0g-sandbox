@@ -45,8 +45,7 @@ cmd/
   deploy/     deploy beacon-proxy stack (3 steps: impl → beacon → proxy)
   upgrade/    upgrade via beacon.upgradeTo(newImpl)
   verify/     verify contracts on block explorer
-  setup/      legacy one-time setup script (superseded by cmd/provider)
-  provider/   provider CLI: register, status, withdraw, snapshot management
+  provider/   provider CLI: register (binds appId), status, withdraw, snapshot management
   user/       user CLI: create/stop/delete sandbox, exec, balance
   checkbal/   quick balance/nonce/earnings check for a private key
 internal/
@@ -219,11 +218,18 @@ MOCK_APP_PRIVATE_KEY=0x<hex-key> \
 DAYTONA_API_URL=http://localhost:3000 \
 DAYTONA_ADMIN_KEY=<key> \
 SETTLEMENT_CONTRACT=0x<proxy-addr> \
+TAPP_REGISTRY=0x<tapp-registry-addr> \
+PROVIDER_ADDRESS=0x<provider-eoa> \
+BACKEND_APP_NAME=<tapp-app-id> \
 RPC_URL=https://evmrpc-testnet.0g.ai \
 CHAIN_ID=16602 \
 PROXY_DOMAIN=<your-ip>.nip.io:4000 \
 go run ./cmd/billing/
 ```
+
+`TAPP_REGISTRY` and `BACKEND_APP_NAME` are required — at startup the billing
+server reads `services[PROVIDER_ADDRESS].appId` from SandboxServing and queries
+TappRegistry for signer + ack state on every voucher.
 
 `PROXY_DOMAIN` controls the URL format for accessing user-defined service ports inside the
 sandbox. Format: `http://<port>-<sandboxId>.<PROXY_DOMAIN>/<path>`. The Daytona proxy listens
@@ -275,21 +281,57 @@ without holding the provider's settlement key.
 
 ## First-Time Contract Setup
 
-```bash
-# 1. Deploy impl + beacon + proxy
-go run ./cmd/deploy/ --rpc https://evmrpc-testnet.0g.ai --key 0x<deployer-key> --chain-id 16602
-# → set SETTLEMENT_CONTRACT=<proxy address> in .env
+SandboxServing delegates TEE signer identity, per-node stake, and user
+acknowledgement to **TappRegistry** (separate contract; lives in the
+[0g-tapp](https://github.com/0gfoundation/0g-tapp) repo). First-time setup
+spans both contracts.
 
-# 2. Register provider service on-chain
-#    TEE address must be known first (get via `tapp-cli get-app-key` after first deploy)
+```bash
+# 0. TappRegistry must already be deployed on the target chain.
+#    Get its address from the 0g-tapp repo's deployment record.
+
+# 1. Deploy SandboxServing impl + beacon + proxy, bound to TappRegistry.
+go run ./cmd/deploy/ \
+  --rpc      https://evmrpc-testnet.0g.ai \
+  --chain-id 16602 \
+  --tapp     0x<tapp-registry-address> \
+  --key      0x<deployer-key>
+# Outputs proxy address. Set in .env:
+#   SETTLEMENT_CONTRACT=<proxy address>
+#   TAPP_REGISTRY=<tapp-registry-address>
+
+# 2. Start the app on a tapp server. This provisions the TEE, generates the
+#    app's signing key, and exposes the gRPC endpoint that doubles as its
+#    on-chain teeUrl. Done from the 0g-tapp repo / tapp-cli.
+tapp-cli -s http://<tapp-server>:50051 start-app -f docker-compose.yml --app-id <appId>
+
+# 3. Register the app in TappRegistry on-chain. tapp-cli reads the
+#    composeHash / volumesHash / imageHashes and the TEE signerAddress
+#    directly from the tapp server in step 2, then sends the registerApp tx.
+tapp-cli -s http://<tapp-server>:50051 -k 0x<deployer-key> register-onchain \
+  --app-id   <appId> \
+  --rpc-url  https://evmrpc-testnet.0g.ai \
+  --contract 0x<tapp-registry-address> \
+  --stake-wei <amount>
+
+# 4. Authorize SandboxServing as an ack invalidator for this app.
+#    Required so price changes in step 5 can invalidate user acks.
+#    (No tapp-cli subcommand for this yet — call the contract directly
+#     until tapp-cli adds `authorize-invalidator-onchain`.)
+cast send 0x<tapp-registry-address> \
+  "authorizeInvalidator(string,address)" "<appId>" 0x<SETTLEMENT_CONTRACT> \
+  --rpc-url https://evmrpc-testnet.0g.ai \
+  --private-key 0x<provider-key>
+
+# 5. Bind the SandboxServing service to the appId + set prices.
 PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ register \
-  --api http://<billing-host>:8080 \
-  --tee-signer <tee-address> \
+  --app-id        <appId> \
+  --url           https://<sandbox-host> \
   --price-per-cpu <neuron/cpu/min> \
   --price-per-mem <neuron/memGB/min> \
-  --create-fee <neuron>
+  --fee           <neuron>
 
-# 3. Check balance/nonce/earnings
+# 6. Check balance/nonce/earnings
 go run ./cmd/checkbal/
 ```
 
@@ -297,13 +339,16 @@ go run ./cmd/checkbal/
 
 ## Tapp Production Deployment
 
-Deploying to a 0G Tapp TEE server via `tapp-cli`. app-id: `0g-sandbox`.
+Deploying to a 0G Tapp TEE server via `tapp-cli`. The tapp app-id is the same
+string used as the `appId` in TappRegistry and in SandboxServing's `services()`
+binding — keep them in sync.
 
 ### One-time setup
 
 ```bash
 export TAPP_PRIVATE_KEY=0x<key>
 TAPP_SERVER=http://<tapp-server-host>:50051
+APP_ID=<app-id>                              # e.g. 0g-sandbox-provider
 
 # Login to container registry (one-time per server)
 tapp-cli -s $TAPP_SERVER docker-login \
@@ -311,33 +356,32 @@ tapp-cli -s $TAPP_SERVER docker-login \
   -u <user> -p <password>
 ```
 
-### First deploy (chicken-and-egg order)
-
-TEE address is only known after the app starts — so registration must happen after first deploy.
+### First deploy
 
 ```bash
-# 1. Prepare env (must be named .env for docker compose to pick it up)
+# 1. Prepare env (must be named .env for docker compose to pick it up).
+#    Required: SETTLEMENT_CONTRACT, TAPP_REGISTRY, PROVIDER_ADDRESS,
+#              BACKEND_APP_NAME (= $APP_ID).
 cp .env.testnet .env
 
-# 2. Deploy
-tapp-cli -s $TAPP_SERVER start-app -f docker-compose.yml --app-id 0g-sandbox
+# 2. Deploy — this registers the app in TappRegistry with the composeHash and
+#    image hashes derived from docker-compose.yml, and starts the TEE container.
+tapp-cli -s $TAPP_SERVER start-app -f docker-compose.yml --app-id $APP_ID
 tapp-cli -s $TAPP_SERVER get-task-status --task-id <task-id>
 
-# 3. Get TEE address (needed for on-chain registration)
-tapp-cli -s $TAPP_SERVER get-app-key --app-id 0g-sandbox
-# → e.g. 0xe29b6f4e65a796d77196faf511e0e0b859503656
+# 3. Authorize the SandboxServing contract to invalidate this app's acks
+#    (so a future price change in SandboxServing bumps ackVersion in TappRegistry)
+tapp-cli authorize-invalidator-onchain \
+  --app-id   $APP_ID \
+  --contract 0x<sandbox-serving-proxy>
 
-# 4. Register provider service on-chain (use PROVIDER_KEY = provider wallet private key)
+# 4. Bind commercial terms to the appId in SandboxServing
 PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ register \
-  --api http://<sandbox-host>:8080 \
-  --tee-signer <tee-address-from-step3> \
-  --price-per-cpu <neuron/cpu/min> \
-  --price-per-mem <neuron/memGB/min> \
-  --create-fee <neuron>
-
-# 5. Restart to pick up the new registration (must use stop-app/start-app, not stop-service/start-service)
-tapp-cli -s $TAPP_SERVER stop-app --app-id 0g-sandbox
-tapp-cli -s $TAPP_SERVER start-app -f docker-compose.yml --app-id 0g-sandbox
+  --api            http://<sandbox-host>:8080 \
+  --app-id         $APP_ID \
+  --price-per-cpu  <neuron/cpu/min> \
+  --price-per-mem  <neuron/memGB/min> \
+  --create-fee     <neuron>
 ```
 
 ### Redeploy after code changes
@@ -352,15 +396,18 @@ docker build --target sandbox --build-arg BUILD_TAGS=sealdebug \
   -t <registry>/<image>:sealdebug .
 docker push <registry>/<image>:sealdebug
 
-# 2. Redeploy
-tapp-cli -s $TAPP_SERVER stop-app --app-id 0g-sandbox
-tapp-cli -s $TAPP_SERVER start-app -f docker-compose.yml --app-id 0g-sandbox
+# 2. Redeploy. If docker-compose.yml or any image digest changes, TappRegistry
+#    treats this as a TEE-node / composeHash change → ackVersion bumps and
+#    every user's prior acknowledgement is invalidated.
+tapp-cli -s $TAPP_SERVER stop-app --app-id $APP_ID
+tapp-cli -s $TAPP_SERVER start-app -f docker-compose.yml --app-id $APP_ID
 tapp-cli -s $TAPP_SERVER get-task-status --task-id <task-id>
 ```
 
 ### Key notes
-- `BACKEND_APP_NAME` in `.env` must match the tapp app-id exactly (`0g-sandbox`)
+- `BACKEND_APP_NAME` in `.env` must match the tapp app-id exactly, and that same string is the `appId` registered in both TappRegistry and SandboxServing
 - `.env` is uploaded because docker-compose.yml mounts `./.env:/app/.env:ro` — this mount's only purpose is to trigger tapp-cli to upload the file; docker compose on the server reads it from the working directory for `${VAR}` substitution
-- Provider wallet needs 100 0G staked on first registration
+- The provider wallet only needs enough 0G to pay gas for `addOrUpdateService` and ongoing `settleFeesWithTEE` batches; SandboxServing no longer holds a provider stake
 - `cmd/provider register` uses `PROVIDER_KEY` env var (not `MOCK_APP_PRIVATE_KEY`)
+- Updating prices via `cmd/provider register` bumps `ackVersion(appId)` in TappRegistry — every existing user must call `cmd/user acknowledge` again before further vouchers settle
 - **`RESOURCE_LIMITS_DISABLED=false` on the runner service is load-bearing.** The `daytonaio/daytona-runner` image bakes `ENV RESOURCE_LIMITS_DISABLED=true` into its Dockerfile, so omitting the var in compose falls back to `true` and the runner skips setting Docker CFS / memory cgroup limits — every sandbox runs unconstrained on host resources regardless of snapshot tier. To verify: `docker exec 0g-sandbox-runner-1 env | grep RESOURCE_LIMITS` should print `=false`, and any sandbox container's `docker inspect` should show non-zero `HostConfig.CpuQuota` / `Memory`.
