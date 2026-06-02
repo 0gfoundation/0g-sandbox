@@ -14,7 +14,8 @@ services:
       REDIS_ADDR:              sandbox-redis:6379
       REDIS_PASSWORD:          ${REDIS_PASSWORD:-}
       # TEE / Chain
-      SETTLEMENT_CONTRACT:     ${SETTLEMENT_CONTRACT:-0xd7e0CD227e602FedBb93c36B1F5bf415398508a4}
+      SETTLEMENT_CONTRACT:     ${SETTLEMENT_CONTRACT:?SETTLEMENT_CONTRACT is required}
+      TAPP_REGISTRY:           ${TAPP_REGISTRY:?TAPP_REGISTRY is required}
       CHAIN_ID:                ${CHAIN_ID:-16602}
       RPC_URL:                 ${RPC_URL:-https://evmrpc-testnet.0g.ai}
       PROVIDER_ADDRESS:        ${PROVIDER_ADDRESS:?PROVIDER_ADDRESS is required}

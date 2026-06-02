@@ -2,10 +2,9 @@
 //
 // Subcommands:
 //
-//	register       Register (or update) the service on the settlement contract
-//	status         Show provider registration, stake, and earnings
+//	register       Bind URL, prices, and createFee to an appId in SandboxServing
+//	status         Show provider registration and earnings
 //	withdraw       Withdraw accumulated earnings
-//	set-stake      (owner only) Update the minimum stake required for new providers
 //	push-image     Load a local Docker image into the internal registry via the runner
 //	snapshot       Register a registry image as a named Daytona snapshot
 //	snapshots      List all snapshots
@@ -14,14 +13,15 @@
 // Examples:
 //
 //	PROVIDER_KEY=0x<hex> go run ./cmd/provider/ register \
-//	  --contract 0x... \
-//	  --url https://provider.example.com \
-//	  --price 1000000000000000 \
-//	  --fee 60000000000000000
+//	  --contract       0x... \
+//	  --api            http://billing-host:8080 \
+//	  --app-id         0g-sandbox-provider \
+//	  --price-per-cpu  1000000000000000 \
+//	  --price-per-mem   500000000000000 \
+//	  --create-fee    60000000000000000
 //
 //	PROVIDER_KEY=0x<hex> go run ./cmd/provider/ status   --contract 0x...
 //	PROVIDER_KEY=0x<hex> go run ./cmd/provider/ withdraw --contract 0x...
-//	OWNER_KEY=0x<hex>    go run ./cmd/provider/ set-stake --contract 0x... --stake 100000000000000000
 //
 //	go run ./cmd/provider/ push-image --image rust-sandbox:1.0.0
 //	PROVIDER_KEY=0x<hex> go run ./cmd/provider/ snapshot --api http://... --image registry:6000/daytona/rust-sandbox:1.0.0 --name rust-sandbox

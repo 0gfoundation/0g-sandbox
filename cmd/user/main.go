@@ -37,6 +37,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/ecdsa"
@@ -251,15 +252,19 @@ func runDeposit(args []string) {
 
 // ── acknowledge ──────────────────────────────────────────────────────────────
 
-// runAcknowledge resolves provider → appId via sandbox.services(), then calls
-// tappRegistry.acknowledgeApp(appId) (or revokeAcknowledgement). User ack lives
-// in tapp now, not in SandboxServing.
+// runAcknowledge prints both the provider's commercial terms (from
+// SandboxServing) and the app's trust root (from TappRegistry), then writes
+// the ack to TappRegistry. Acknowledgement on the chain is a single
+// tap.acknowledgeApp call, but the user needs both surfaces to make an
+// informed decision — what they'll be charged AND what TEE code they're
+// trusting.
 func runAcknowledge(args []string) {
 	fs := flag.NewFlagSet("acknowledge", flag.ExitOnError)
 	cf := addChainFlags(fs)
-	keyHex      := fs.String("key",      "", "User private key (hex); or set USER_KEY env")
-	providerHex := fs.String("provider", "", "Provider address (required)")
+	keyHex      := fs.String("key",      "",    "User private key (hex); or set USER_KEY env")
+	providerHex := fs.String("provider", "",    "Provider address (required)")
 	revoke      := fs.Bool("revoke",     false, "Revoke instead of acknowledge")
+	yes         := fs.Bool("yes",        false, "Skip interactive confirmation (for scripts)")
 	_ = fs.Parse(args)
 
 	if *providerHex == "" {
@@ -277,36 +282,105 @@ func runAcknowledge(args []string) {
 
 	eth, contract := mustDialContract(ctx, cf.rpc, cf.contract)
 	defer eth.Close()
-
-	// Step 1: look up the appId the provider is bound to.
-	svc, err := contract.Services(&bind.CallOpts{Context: ctx}, providerAddr)
+	tapp, err := chain.NewTappRegistry(common.HexToAddress(cf.tapp), eth)
 	if err != nil {
-		fatalf("Services lookup: %v", err)
+		fatalf("bind tappRegistry: %v", err)
+	}
+	opts := &bind.CallOpts{Context: ctx}
+
+	// ── (A) SandboxServing: commercial terms ─────────────────────────────────
+	svc, err := contract.Services(opts, providerAddr)
+	if err != nil {
+		fatalf("sandbox.services lookup: %v", err)
 	}
 	if svc.AppId == "" {
 		fatalf("provider %s has not registered a service yet (no appId)", providerAddr.Hex())
 	}
 
-	// Step 2: bind tappRegistry and call ack / revoke there.
-	tapp, err := chain.NewTappRegistry(common.HexToAddress(cf.tapp), eth)
+	// ── (B) TappRegistry: trust root ─────────────────────────────────────────
+	appInfo, err := tapp.GetAppInfo(opts, svc.AppId)
 	if err != nil {
-		fatalf("bind tappRegistry: %v", err)
+		fatalf("tapp.getAppInfo: %v", err)
 	}
+	if appInfo.Owner == (common.Address{}) {
+		fatalf("app %q is not registered in TappRegistry (or was unregistered)", svc.AppId)
+	}
+	// Sanity check: sandbox service's provider must be the app owner.
+	if appInfo.Owner != providerAddr {
+		fatalf("trust mismatch: sandbox provider %s ≠ tap app owner %s — refuse to ack",
+			providerAddr.Hex(), appInfo.Owner.Hex())
+	}
+	nodes, err := tapp.GetNodeList(opts, svc.AppId)
+	if err != nil {
+		fatalf("tapp.getNodeList: %v", err)
+	}
+	ackVersion, err := tapp.GetAckVersion(opts, svc.AppId)
+	if err != nil {
+		fatalf("tapp.getAckVersion: %v", err)
+	}
+	alreadyAcked, err := tapp.IsAcknowledged(opts, userAddr, svc.AppId)
+	if err != nil {
+		fatalf("tapp.isAcknowledged: %v", err)
+	}
+
+	// ── Print summary ────────────────────────────────────────────────────────
+	fmt.Println()
+	fmt.Printf("== Provider commercial terms (SandboxServing %s) ==\n", cf.contract)
+	fmt.Printf("  URL:           %s\n", svc.Url)
+	fmt.Printf("  AppId:         %s\n", svc.AppId)
+	fmt.Printf("  Create fee:    %s neuron  (%.6f 0G per sandbox)\n",
+		svc.CreateFee.String(), neuronTo0G(svc.CreateFee))
+	fmt.Printf("  CPU price:     %s neuron/CPU/min\n", svc.PricePerCPUPerMin.String())
+	fmt.Printf("  Mem price:     %s neuron/GB/min\n", svc.PricePerMemGBPerMin.String())
+	fmt.Println()
+	fmt.Printf("== Trust root (TappRegistry %s) ==\n", cf.tapp)
+	fmt.Printf("  App owner:     %s   (matches provider ✓)\n", appInfo.Owner.Hex())
+	fmt.Printf("  Registered:    %s\n", time.Unix(appInfo.RegisteredAt.Int64(), 0).UTC().Format(time.RFC3339))
+	fmt.Printf("  Ack version:   %s\n", ackVersion.String())
+	fmt.Printf("  Compose hash:  0x%s\n", hex.EncodeToString(appInfo.ComposeHash))
+	fmt.Printf("  Volumes hash:  0x%s\n", hex.EncodeToString(appInfo.VolumesHash))
+	fmt.Printf("  Image hashes:  (%d)\n", len(appInfo.ImageHashes))
+	for _, h := range appInfo.ImageHashes {
+		fmt.Printf("                 %s\n", string(h))
+	}
+	fmt.Printf("  Active TEE nodes (%d):\n", len(nodes))
+	for _, n := range nodes {
+		ni, err := tapp.GetNode(opts, svc.AppId, n)
+		if err != nil {
+			fmt.Printf("    %s  (getNode error: %v)\n", n.Hex(), err)
+			continue
+		}
+		fmt.Printf("    %s\n", n.Hex())
+		fmt.Printf("      teeUrl: %s\n", ni.TeeUrl)
+	}
+	fmt.Println()
+	fmt.Printf("User:            %s\n", userAddr.Hex())
+	fmt.Printf("Current ack:     %v\n", alreadyAcked)
+	fmt.Println()
+
+	accept := !*revoke
+	verb := "tapp.acknowledgeApp"
+	if !accept {
+		verb = "tapp.revokeAcknowledgement"
+	}
+	fmt.Printf("→ %s(%q)   on chain %d\n", verb, svc.AppId, cf.chainID)
+
+	if !*yes {
+		fmt.Print("Proceed? [y/N]: ")
+		reader := bufio.NewReader(os.Stdin)
+		ans, _ := reader.ReadString('\n')
+		ans = strings.TrimSpace(strings.ToLower(ans))
+		if ans != "y" && ans != "yes" {
+			fmt.Println("aborted")
+			return
+		}
+	}
+
 	auth, err := bind.NewKeyedTransactorWithChainID(privKey, big.NewInt(cf.chainID))
 	if err != nil {
 		fatalf("build transactor: %v", err)
 	}
 	auth.Context = ctx
-
-	accept := !*revoke
-	verb := "AcknowledgeApp"
-	if !accept {
-		verb = "RevokeAcknowledgement"
-	}
-	fmt.Printf("User:     %s\n", userAddr.Hex())
-	fmt.Printf("Provider: %s\n", providerAddr.Hex())
-	fmt.Printf("AppId:    %s\n", svc.AppId)
-	fmt.Printf("\n[1/1] tapp.%s...\n", verb)
 
 	var tx *types.Transaction
 	if accept {

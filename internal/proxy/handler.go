@@ -187,6 +187,9 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	// ── Admin-only: list all billing sessions ──────────────────────────────
 	rg.GET("/sessions", h.handleSessions)
 
+	// ── Admin-only: close one orphan billing session ───────────────────────
+	rg.DELETE("/sessions/:id", h.handleCloseSession)
+
 	// ── Admin-only: local Redis billing audit log (created/stopped/auto_stopped/settled) ──
 	rg.GET("/audit-log", h.handleAuditLog)
 }
@@ -828,6 +831,33 @@ func (h *Handler) handleSessions(c *gin.Context) {
 		result = append(result, r)
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// handleCloseSession deletes the billing session for one sandbox and
+// deregisters it from the broker. Used to clean up orphan sessions left
+// behind when Daytona auto-archives a sandbox (bypassing OnStop). Admin only.
+//
+// Charging continues from the user's pre-deducted reserve until this is
+// called, so the action is one-shot and idempotent: calling it on a sandbox
+// without an open session is a no-op success.
+func (h *Handler) handleCloseSession(c *gin.Context) {
+	wallet := c.GetString("wallet_address")
+	if !h.isAdmin(wallet) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin only"})
+		return
+	}
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox id required"})
+		return
+	}
+	ctx := c.Request.Context()
+	if err := billing.DeleteSession(ctx, h.rdb, id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	h.BrokerDeregister(ctx, id)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 // ── Labels ──────────────────────────────────────────────────────────────────

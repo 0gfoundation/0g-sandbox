@@ -10,7 +10,8 @@ services:
       # Chain
       RPC_URL:              ${RPC_URL:-https://evmrpc-testnet.0g.ai}
       CHAIN_ID:             ${CHAIN_ID:-16602}
-      SETTLEMENT_CONTRACT:  ${SETTLEMENT_CONTRACT}
+      SETTLEMENT_CONTRACT:  ${SETTLEMENT_CONTRACT:?SETTLEMENT_CONTRACT is required}
+      TAPP_REGISTRY:        ${TAPP_REGISTRY:?TAPP_REGISTRY is required}
       # Redis (broker-only instance)
       REDIS_ADDR:           broker-redis:6379
       REDIS_PASSWORD:       ${BROKER_REDIS_PASSWORD:-}

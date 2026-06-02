@@ -149,11 +149,6 @@ tbody tr:hover td{background:var(--surf2)}
 
 /* ─ Misc ─ */
 .empty{color:var(--muted);font-size:13px;padding:32px 20px;text-align:center;line-height:1.6}
-.queue-tab{background:transparent;border:none;border-bottom:2px solid transparent;padding:8px 14px;font-size:12px;color:var(--muted);cursor:pointer;font-weight:600;letter-spacing:.02em;display:flex;align-items:center;gap:6px}
-.queue-tab:hover{color:var(--text)}
-.queue-tab.active{color:var(--text);border-bottom-color:var(--p)}
-.tab-count{background:var(--surf);padding:1px 6px;border-radius:8px;font-size:10px;color:var(--muted)}
-.queue-tab.active .tab-count{background:var(--p);color:#fff}
 .empty-icon{font-size:24px;margin-bottom:8px}
 .err{color:var(--red);font-size:12px;margin-top:4px}
 .loading{color:var(--muted);font-size:12px;margin-top:6px}
@@ -227,7 +222,7 @@ tbody tr:hover td{background:var(--surf2)}
           <div class="info-row"><span class="ik">Status</span><span id="svcRegistered">—</span></div>
           <div class="info-row"><span class="ik">Provider Addr</span><span class="iv mono" id="infoProvider" title="" style="font-size:11px">—</span></div>
           <div class="info-row"><span class="ik">Service URL</span><span class="iv" id="svcUrl">—</span></div>
-          <div class="info-row"><span class="ik">TEE Signer (on-chain)</span><span class="iv purple" id="svcTEE" title="">—</span></div>
+          <div class="info-row"><span class="ik">AppId (on-chain)</span><span class="iv purple" id="svcTEE" title="">—</span></div>
 
           <!-- Health: signer-match check is cascading — if it mismatches,
                balance is moot because no voucher can settle. -->
@@ -259,7 +254,6 @@ tbody tr:hover td{background:var(--surf2)}
           <div class="info-row"><span class="ik">Address</span><span class="iv mono" id="infoContract" title="" style="font-size:11px">—</span></div>
           <div class="info-row"><span class="ik">Chain ID</span><span class="iv" id="infoChain">—</span></div>
           <div class="info-row"><span class="ik">Owner</span><span class="iv purple" id="contractOwner" title="" style="font-size:11px">—</span></div>
-          <div class="info-row"><span class="ik">Required Stake</span><span class="iv" id="svcStake">—</span></div>
         </div>
       </div>
 
@@ -271,7 +265,6 @@ tbody tr:hover td{background:var(--surf2)}
         </div>
         <div class="card-body">
           <div class="info-row"><span class="ik">Accumulated</span><span class="iv big" id="providerEarnings">—</span></div>
-          <div class="info-row"><span class="ik">Staked</span><span class="iv" id="providerStaked">—</span></div>
           <button class="btn btn-sm btn-prim" style="margin-top:14px" onclick="withdrawEarnings()">Withdraw Earnings</button>
         </div>
       </div>
@@ -307,39 +300,14 @@ tbody tr:hover td{background:var(--surf2)}
       </div>
     </div>
 
-    <!-- ── Voucher Queue ── -->
-    <div class="card" style="margin-top:4px">
-      <div class="card-head">
-        <span class="card-title">Voucher Queue</span>
-        <div style="display:flex;gap:8px;align-items:center">
-          <span id="backlogMeta" style="font-size:11px;color:var(--muted)"></span>
-          <button class="btn btn-sm btn-ghost" onclick="loadQueueCard()">↻</button>
-        </div>
-      </div>
-      <div class="card-body">
-        <div id="queueSummary" style="margin-bottom:12px"></div>
-        <div id="queueTabs" style="display:flex;gap:4px;margin-bottom:12px;border-bottom:1px solid var(--border)">
-          <button class="queue-tab active" data-tab="main" onclick="switchQueueTab('main')">Main <span class="tab-count" id="mainCount">0</span></button>
-          <button class="queue-tab" data-tab="dlq" onclick="switchQueueTab('dlq')">DLQ <span class="tab-count" id="dlqCount">0</span></button>
-        </div>
-        <div id="mainPanel"><div class="empty">Click ↻ to load.</div></div>
-        <div id="dlqPanel" style="display:none"></div>
-      </div>
-    </div>
-
-    <!-- ── Recent Alerts ── -->
-    <div class="card" style="margin-top:4px">
-      <div class="card-head">
-        <span class="card-title">Recent Alerts</span>
-        <div style="display:flex;gap:8px;align-items:center">
-          <span id="alertsMeta" style="font-size:11px;color:var(--muted)"></span>
-          <button class="btn btn-sm btn-ghost" onclick="loadObservability()">↻</button>
-        </div>
-      </div>
-      <div class="card-body">
-        <div id="alertsContent"><div class="empty">Click ↻ to load.</div></div>
-      </div>
-    </div>
+    <!--
+      Voucher Queue / DLQ inspector and Recent Alerts cards intentionally
+      omitted from the dashboard. Endpoints stay reachable for ops:
+        GET  /api/queue/summary, /api/queue/dlq         (per-(user, provider) backlog + DLQ list)
+        POST /api/queue/aggregate, /api/queue/dlq/discard
+        GET  /api/observability                         (queue depth + alert history)
+      Webhook delivery (`alert.Webhook` → `ALERT_WEBHOOK_URL`) continues to fire.
+    -->
 
     <!-- ── Voucher Settlement History ── -->
     <div class="card" style="margin-top:4px">
@@ -377,14 +345,13 @@ tbody tr:hover td{background:var(--surf2)}
   <div class="modal">
     <div class="modal-title">Register / Update Service</div>
     <div class="field"><label>Service URL</label><input id="svcUrlInput" type="text" placeholder="https://your-daytona-url"></div>
-    <div class="field"><label>TEE Signer Address</label><input id="svcTEEInput" type="text" placeholder="0x…"></div>
+    <div class="field">
+      <label>App ID (must already be registered + authorize-invalidator'd in TappRegistry)</label>
+      <input id="svcAppIdInput" type="text" placeholder="0g-sandbox-provider">
+    </div>
     <div class="field"><label>CPU Price / min (neuron)</label><input id="svcCPUPriceInput" type="number" value="1000000000000000" min="0"></div>
     <div class="field"><label>Mem Price / GB / min (neuron)</label><input id="svcMemPriceInput" type="number" value="500000000000000" min="0"></div>
-    <div class="field"><label>Create Fee (neuron)</label><input id="svcFeeInput" type="number" value="5000000" min="0"></div>
-    <div class="field">
-      <label>Stake (0G) — required for first registration</label>
-      <input id="svcStakeInput" type="number" step="0.001" value="0" min="0">
-    </div>
+    <div class="field"><label>Create Fee (neuron)</label><input id="svcFeeInput" type="number" value="60000000000000000" min="0"></div>
     <div class="err" id="serviceErr"></div>
     <div class="modal-btns">
       <button class="btn btn-ghost" onclick="closeModal('serviceModal')">Cancel</button>
@@ -473,14 +440,13 @@ function _onAccountsChanged(a) {
 }
 
 const ABI = [
-  "function providerStake() view returns (uint256)",
-  "function services(address) view returns (string url, address teeSignerAddress, uint256 pricePerCPUPerMin, uint256 createFee, uint256 signerVersion, uint256 pricePerMemGBPerMin)",
+  "function services(address) view returns (string url, string appId, uint256 pricePerCPUPerMin, uint256 pricePerMemGBPerMin, uint256 createFee)",
   "function serviceExists(address) view returns (bool)",
   "function providerEarnings(address) view returns (uint256)",
-  "function providerStakes(address) view returns (uint256)",
-  "function addOrUpdateService(string url, address teeSignerAddress, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin) payable",
+  "function addOrUpdateService(string url, string appId, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin)",
   "function withdrawEarnings()",
   "function owner() view returns (address)",
+  "function tappRegistry() view returns (address)",
 ];
 
 window.addEventListener('eip6963:announceProvider', e => eip6963Providers.set(e.detail.info.uuid, e.detail));
@@ -494,9 +460,10 @@ window.onload = async () => {
     const cEl = document.getElementById('infoContract'); cEl.textContent = shortAddr(info.contract_address||'') || '—'; cEl.title = info.contract_address || '';
     document.getElementById('infoChain').textContent = info.chain_id || '—';
     const pEl = document.getElementById('infoProvider'); pEl.textContent = shortAddr(info.provider_address||'') || '—'; pEl.title = info.provider_address || '';
-    // Pre-fill TEE signer with provider address from server info
-    if (info.tee_signer) document.getElementById('svcTEEInput').value = info.tee_signer;
-    else if (info.provider_address) document.getElementById('svcTEEInput').value = info.provider_address;
+    // Pre-fill AppId from /info.signer.app_id (set after first registration).
+    if (info.signer && info.signer.app_id) {
+      document.getElementById('svcAppIdInput').value = info.signer.app_id;
+    }
   }
 
   const lastUUID = localStorage.getItem('walletUUID');
@@ -574,7 +541,7 @@ async function initWallet(addr, prov) {
   await loadProviderData();
   loadProviderSnapshots();
   loadAllSandboxes();
-  loadQueueCard();   // refresh summary + main + dlq panels together
+  // (Voucher Queue + Recent Alerts cards removed; ops uses endpoints directly.)
 
   if (_activeProvider && _activeProvider !== prov) try { _activeProvider.removeListener('accountsChanged', _onAccountsChanged); } catch (_) {}
   if (_activeProvider !== prov) { prov.on('accountsChanged', _onAccountsChanged); _activeProvider = prov; }
@@ -626,20 +593,16 @@ async function loadProviderData() {
       const svc = await contract.services(walletAddr);
       document.getElementById('svcUrl').textContent = svc.url || '—';
       const teeEl = document.getElementById('svcTEE');
-      teeEl.textContent = shortAddr(svc.teeSignerAddress); teeEl.title = svc.teeSignerAddress;
+      teeEl.textContent = svc.appId || '—'; teeEl.title = svc.appId || '';
       document.getElementById('svcCPUPrice').textContent = fmtNeuron(svc.pricePerCPUPerMin.toString()) + '/min';
       document.getElementById('svcMemPrice').textContent = fmtNeuron(svc.pricePerMemGBPerMin.toString()) + '/GB/min';
       document.getElementById('svcFee').textContent = fmtNeuron(svc.createFee.toString());
     }
-    const [stake, earn, staked, owner] = await Promise.all([
-      contract.providerStake(),
+    const [earn, owner] = await Promise.all([
       contract.providerEarnings(walletAddr),
-      contract.providerStakes(walletAddr),
       contract.owner().catch(() => null),
     ]);
-    document.getElementById('svcStake').textContent = fmtNeuron(stake.toString());
     document.getElementById('providerEarnings').textContent = fmtNeuron(earn.toString());
-    document.getElementById('providerStaked').textContent = fmtNeuron(staked.toString());
     if (owner) { const el = document.getElementById('contractOwner'); el.textContent = shortAddr(owner); el.title = owner; }
 
     // Signer-match + settler-balance health both come from the public /info
@@ -654,15 +617,13 @@ async function loadProviderData() {
 
 async function doRegisterService() {
   const url      = document.getElementById('svcUrlInput').value.trim();
-  const tee      = document.getElementById('svcTEEInput').value.trim();
+  const appId    = document.getElementById('svcAppIdInput').value.trim();
   const cpuPrice = document.getElementById('svcCPUPriceInput').value;
   const memPrice = document.getElementById('svcMemPriceInput').value;
   const fee      = document.getElementById('svcFeeInput').value;
-  const stake    = document.getElementById('svcStakeInput').value;
-  if (!url || !tee) { setErr('serviceErr', 'URL and TEE address are required'); return; }
+  if (!url || !appId) { setErr('serviceErr', 'URL and AppId are required'); return; }
   setErr('serviceErr', '');
-  const value = stake && parseFloat(stake) > 0 ? ethers.parseEther(stake) : 0n;
-  await sendTx('Service update', () => contract.addOrUpdateService(url, tee, BigInt(cpuPrice), BigInt(fee), BigInt(memPrice), { value }), {
+  await sendTx('Service update', () => contract.addOrUpdateService(url, appId, BigInt(cpuPrice), BigInt(fee), BigInt(memPrice)), {
     onSuccess: async () => { closeModal('serviceModal'); await loadProviderData(); },
     errEl: 'serviceErr',
   });
@@ -779,17 +740,46 @@ async function loadAllSandboxes() {
     const resp = await signedFetch('GET', '/api/sessions');
     const data = await resp.json().catch(() => []);
     if (!resp.ok) { el.innerHTML = `<div class="empty">${esc(data.error || 'Failed to load')}</div>`; return; }
-    if (!data?.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">📭</div>No active billing sessions.</div>'; return; }
-    el.innerHTML = `<table><thead><tr><th>Sandbox ID</th><th>Owner</th><th>State</th><th>Accrued</th><th></th></tr></thead><tbody>${
-      data.map(s => `<tr>
-        <td><span class="mono">${esc(s.sandbox_id)}</span></td>
-        <td><span class="mono" title="${esc(s.owner || '')}">${s.owner ? s.owner.slice(0, 10) + '…' : '—'}</span></td>
-        <td><span class="badge ${stateBadge(s.state)}">${esc(s.state || '—')}</span></td>
-        <td>${s.accrued_neuron ? fmtNeuron(s.accrued_neuron) : '—'}</td>
-        <td><button class="btn btn-sm btn-danger" onclick="doForceDelete('${esc(s.sandbox_id)}')">Delete</button></td>
-      </tr>`).join('')
+    if (!data?.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">📭</div>No sandboxes.</div>'; return; }
+    // sandbox states where a still-open billing session is an orphan and
+    // keeps charging the user — surface a Close Session button on those rows.
+    const orphanStates = new Set(['stopped', 'archived', 'archiving', 'error', 'destroyed', 'destroying']);
+    el.innerHTML = `<table><thead><tr><th>Sandbox ID</th><th>Owner</th><th>State</th><th>Session</th><th></th></tr></thead><tbody>${
+      data.map(s => {
+        const hasSession = !!(s.next_voucher_at || s.price_per_sec);
+        const orphan = hasSession && orphanStates.has((s.state || '').toLowerCase());
+        let sessionCell;
+        if (!hasSession) {
+          sessionCell = '<span style="color:var(--muted)">—</span>';
+        } else if (orphan) {
+          sessionCell = '<span class="badge red" title="Sandbox is not running but billing session is still open — user keeps getting charged">orphan</span>';
+        } else {
+          sessionCell = '<span class="badge green" title="Live billing session">open</span>';
+        }
+        const actions = [];
+        if (hasSession) {
+          actions.push(`<button class="btn btn-sm ${orphan ? 'btn-danger' : 'btn-warn'}" onclick="doCloseSession('${esc(s.sandbox_id)}')">Close Session</button>`);
+        }
+        actions.push(`<button class="btn btn-sm btn-danger" onclick="doForceDelete('${esc(s.sandbox_id)}')">Delete</button>`);
+        return `<tr>
+          <td><span class="mono">${esc(s.sandbox_id)}</span></td>
+          <td><span class="mono" title="${esc(s.owner || '')}">${s.owner ? s.owner.slice(0, 10) + '…' : '—'}</span></td>
+          <td><span class="badge ${stateBadge(s.state)}">${esc(s.state || '—')}</span></td>
+          <td>${sessionCell}</td>
+          <td style="display:flex;gap:6px;justify-content:flex-end">${actions.join('')}</td>
+        </tr>`;
+      }).join('')
     }</tbody></table>`;
   } catch (e) { el.innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`; }
+}
+
+async function doCloseSession(id) {
+  if (!confirm(`Close billing session for ${id}?\n\nStops further voucher charges for this sandbox. The sandbox itself is not deleted.`)) return;
+  const resp = await signedFetch('DELETE', `/api/sessions/${id}`);
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) { toast(data.error || 'Close session failed', 'error'); return; }
+  toast(`Session ${id.slice(0, 8)}… closed`, 'success');
+  loadAllSandboxes();
 }
 
 async function doForceDelete(id) {
@@ -916,130 +906,6 @@ function stateBadge(s) {
     default:          return '';
   }
 }
-// ── Voucher Queue card (Main / DLQ tabs) ────────────────────────────────
-let _activeQueueTab = 'main';
-function switchQueueTab(tab) {
-  _activeQueueTab = tab;
-  for (const el of document.querySelectorAll('.queue-tab')) {
-    el.classList.toggle('active', el.getAttribute('data-tab') === tab);
-  }
-  document.getElementById('mainPanel').style.display = tab === 'main' ? '' : 'none';
-  document.getElementById('dlqPanel').style.display = tab === 'dlq' ? '' : 'none';
-}
-// Single ↻ refreshes summary bar + both tab payloads at once so the visible
-// counts are always consistent. Each tab caches its rendered HTML.
-async function loadQueueCard() {
-  const meta = document.getElementById('backlogMeta');
-  meta.textContent = 'loading…';
-  await Promise.all([loadObservability(), loadMainPanel(), loadDLQPanel()]);
-  meta.textContent = 'updated ' + new Date().toLocaleTimeString();
-}
-async function loadMainPanel() {
-  const el = document.getElementById('mainPanel');
-  el.innerHTML = '<div class="empty">Loading…</div>';
-  try {
-    const resp = await signedFetch('GET', '/api/queue/summary?min_count=1');
-    if (!resp || !resp.ok) {
-      el.innerHTML = '<div class="empty" style="color:var(--danger,#c33)">' + (resp ? esc(await resp.text()) : 'request failed') + '</div>';
-      return;
-    }
-    const data = await resp.json();
-    const rows = data.rows || [];
-    document.getElementById('mainCount').textContent = rows.reduce((sum, r) => sum + r.count, 0).toLocaleString();
-    if (rows.length === 0) {
-      el.innerHTML = '<div class="empty">Main queue is empty.</div>';
-      return;
-    }
-    rows.sort((a, b) => b.count - a.count);
-    let html = '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="border-bottom:1px solid var(--border);text-align:left">';
-    html += '<th style="padding:6px 8px">User</th><th style="padding:6px 8px">Provider</th><th style="padding:6px 8px;text-align:right">Count</th><th style="padding:6px 8px;text-align:right">Total Fee</th><th style="padding:6px 8px"></th></tr></thead><tbody>';
-    for (const r of rows) {
-      html += '<tr style="border-bottom:1px solid var(--border)">';
-      html += '<td style="padding:6px 8px;font-family:monospace">' + esc(shortAddr(r.user)) + '</td>';
-      html += '<td style="padding:6px 8px;font-family:monospace">' + esc(shortAddr(r.provider)) + '</td>';
-      html += '<td style="padding:6px 8px;text-align:right;font-weight:600">' + r.count.toLocaleString() + '</td>';
-      html += '<td style="padding:6px 8px;text-align:right">' + fmtNeuron(r.total_fee_wei) + '</td>';
-      html += '<td style="padding:6px 8px;text-align:right">';
-      if (r.count >= 2) {
-        const args = JSON.stringify({user: r.user, provider: r.provider}).replace(/"/g, '&quot;');
-        html += '<button class="btn btn-sm btn-prim" data-row="' + args + '" onclick="doAggregate(this)">Aggregate</button>';
-      } else {
-        html += '<span style="font-size:11px;color:var(--muted)">already 1</span>';
-      }
-      html += '</td></tr>';
-    }
-    html += '</tbody></table>';
-    if (data.truncated) {
-      html += '<div style="margin-top:8px;font-size:11px;color:var(--muted)">Main queue larger than scan limit (' + (data.limit || '—').toLocaleString() + '). Aggregate the biggest groups first, then reload.</div>';
-    }
-    el.innerHTML = html;
-  } catch (e) {
-    el.innerHTML = '<div class="empty" style="color:var(--danger,#c33)">' + esc(String(e)) + '</div>';
-  }
-}
-async function loadDLQPanel() {
-  const el = document.getElementById('dlqPanel');
-  el.innerHTML = '<div class="empty">Loading…</div>';
-  try {
-    const resp = await signedFetch('GET', '/api/queue/dlq');
-    if (!resp || !resp.ok) {
-      el.innerHTML = '<div class="empty" style="color:var(--danger,#c33)">' + (resp ? esc(await resp.text()) : 'request failed') + '</div>';
-      return;
-    }
-    const data = await resp.json();
-    const entries = data.entries || [];
-    document.getElementById('dlqCount').textContent = entries.length.toLocaleString();
-    if (entries.length === 0) {
-      el.innerHTML = '<div class="empty">DLQ is empty.</div>';
-      return;
-    }
-    let html = '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Rejected vouchers (INVALID_SIGNATURE / PROVIDER_MISMATCH). Historical records only — re-queueing is intentionally disabled (would charge users under a world state they never acked). Discard when handled out-of-band.</div>';
-    html += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="border-bottom:1px solid var(--border);text-align:left">';
-    html += '<th style="padding:6px 8px">User</th><th style="padding:6px 8px">Sandbox</th><th style="padding:6px 8px;text-align:right">Fee</th><th style="padding:6px 8px;text-align:right">Nonce</th><th style="padding:6px 8px"></th></tr></thead><tbody>';
-    for (const e of entries) {
-      html += '<tr style="border-bottom:1px solid var(--border)">';
-      html += '<td style="padding:6px 8px;font-family:monospace">' + esc(shortAddr(e.user)) + '</td>';
-      html += '<td style="padding:6px 8px;font-family:monospace">' + (e.aggregated ? '<span style="font-size:11px;color:var(--muted);font-style:italic">aggregated</span>' : esc((e.sandbox_id || '').slice(0, 10) + '…')) + '</td>';
-      html += '<td style="padding:6px 8px;text-align:right">' + fmtNeuron(e.total_fee_wei) + '</td>';
-      html += '<td style="padding:6px 8px;text-align:right;font-family:monospace">' + esc(e.nonce || '—') + '</td>';
-      const args = JSON.stringify({user: e.user, provider: e.provider, nonce: e.nonce}).replace(/"/g, '&quot;');
-      html += '<td style="padding:6px 8px;text-align:right;white-space:nowrap">';
-      html += '<button class="btn btn-sm btn-ghost" data-row="' + args + '" onclick="doDiscard(this)" style="color:#c33">Discard</button>';
-      html += '</td></tr>';
-    }
-    html += '</tbody></table>';
-    el.innerHTML = html;
-  } catch (e) {
-    el.innerHTML = '<div class="empty" style="color:var(--danger,#c33)">' + esc(String(e)) + '</div>';
-  }
-}
-async function doAggregate(btn) {
-  const row = JSON.parse(btn.getAttribute('data-row').replace(/&quot;/g, '"'));
-  if (!confirm('Aggregate vouchers for user ' + shortAddr(row.user) + '?\n\nAll queued vouchers matching this (user, provider) pair will be replaced by a single voucher with the summed total fee, across all sandboxes. This is destructive — the original individual vouchers are gone after aggregation.')) return;
-  btn.disabled = true; btn.textContent = 'Aggregating…';
-  try {
-    const resp = await signedFetch('POST', '/api/queue/aggregate', row);
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) { toast(data.error || ('HTTP ' + resp.status), 'error'); return; }
-    toast('Merged ' + data.matched + ' vouchers into 1 (' + fmtNeuron(data.total_fee_wei) + ')', 'success');
-    await loadQueueCard();
-  } catch (e) { toast(String(e), 'error'); }
-  finally { btn.disabled = false; btn.textContent = 'Aggregate'; }
-}
-async function doDiscard(btn) {
-  const row = JSON.parse(btn.getAttribute('data-row').replace(/&quot;/g, '"'));
-  if (!confirm('Discard this DLQ voucher permanently?\n\nThe fee will NOT be collected. Use only when the voucher is unrecoverable (user gone, sandbox long deleted, etc).')) return;
-  btn.disabled = true; btn.textContent = 'Discarding…';
-  try {
-    const resp = await signedFetch('POST', '/api/queue/dlq/discard', row);
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) { toast(data.error || ('HTTP ' + resp.status), 'error'); return; }
-    toast(data.removed > 0 ? 'Discarded.' : 'No matching entry.', data.removed > 0 ? 'success' : 'error');
-    await loadQueueCard();
-  } catch (e) { toast(String(e), 'error'); }
-  finally { btn.disabled = false; btn.textContent = 'Discard'; }
-}
-
 // ── Top Up Settler ───────────────────────────────────────────────────────
 function openTopUpModal(dest) {
   document.getElementById('topUpDest').value = dest;
@@ -1053,34 +919,14 @@ async function doTopUp() {
   if (!dest || !amt || parseFloat(amt) <= 0) { setErr('topUpErr', 'Amount must be > 0'); return; }
   setErr('topUpErr', '');
   await sendTx('Top up settler', () => signer.sendTransaction({ to: dest, value: ethers.parseEther(amt) }), {
-    onSuccess: () => { closeModal('topUpModal'); loadObservability(); },
+    onSuccess: () => { closeModal('topUpModal'); loadProviderData(); },
     errEl: 'topUpErr',
   });
 }
 
-// ── Operator state dispatch ───────────────────────────────────────────────
-// /api/observability is admin-only and returns operator-internal state
-// (voucher queue + DLQ depth + alert history). Signer-match and balance
-// health are public — they're rendered from /info inside loadProviderData().
+// Last settler address learned from /info, for the Top Up modal default.
 let _lastSettlerAddr = null;
-async function loadObservability() {
-  const alertsEl = document.getElementById('alertsContent');
-  const meta = document.getElementById('alertsMeta');
-  try {
-    const resp = await signedFetch('GET', '/api/observability');
-    if (!resp || !resp.ok) {
-      const msg = resp ? esc(await resp.text()) : 'request failed';
-      alertsEl.innerHTML = '<div class="empty" style="color:var(--danger,#c33)">' + msg + '</div>';
-      return;
-    }
-    const data = await resp.json();
-    renderQueueSummary(data.queue || {});
-    renderRecentAlerts(data.alerts_recent || []);
-    meta.textContent = 'updated ' + new Date().toLocaleTimeString();
-  } catch (e) {
-    alertsEl.innerHTML = '<div class="empty" style="color:var(--danger,#c33)">' + esc(String(e)) + '</div>';
-  }
-}
+
 function statusPill(status) {
   const colors = { healthy: '#2a7', ok: '#2a7', aligned: '#2a7', warning: '#c80', critical: '#c33', mismatch: '#c33', backlogged: '#c80', unregistered: '#888', unknown: '#888' };
   const c = colors[status] || '#888';
@@ -1127,38 +973,6 @@ function renderBalanceHealth(b, signerStatus) {
     html += '<span style="color:#c33">' + esc(b.error) + '</span>';
   }
   detail.innerHTML = html;
-}
-function renderQueueSummary(q) {
-  const el = document.getElementById('queueSummary');
-  if (q.depth === undefined) { el.innerHTML = ''; return; }
-  let html = '<div style="display:flex;gap:24px;font-size:12px;padding:8px 12px;background:var(--surf);border-radius:4px">';
-  html += '<div><span style="color:var(--muted)">Main: </span><strong>' + q.depth.toLocaleString() + '</strong></div>';
-  html += '<div><span style="color:var(--muted)">DLQ: </span><strong style="' + (q.dlq_depth > 0 ? 'color:#c33' : '') + '">' + (q.dlq_depth ?? 0).toLocaleString() + '</strong></div>';
-  html += '<div><span style="color:var(--muted)">Threshold: </span>' + (q.threshold ?? '—').toLocaleString() + '</div>';
-  html += '<div style="margin-left:auto">' + statusPill(q.status || 'unknown') + '</div>';
-  html += '</div>';
-  el.innerHTML = html;
-}
-function renderRecentAlerts(alerts) {
-  const el = document.getElementById('alertsContent');
-  if (alerts.length === 0) {
-    el.innerHTML = '<div class="empty">No alerts in recent history.</div>';
-    return;
-  }
-  let html = '<div style="display:flex;flex-direction:column;gap:6px;max-height:340px;overflow:auto">';
-  for (const a of alerts) {
-    const sev = a.severity === 'critical' ? '#c33' : '#c80';
-    html += '<div style="display:flex;gap:10px;padding:8px 10px;border-left:3px solid ' + sev + ';background:var(--surf);font-size:12px">';
-    html += '<div style="color:var(--muted);font-family:monospace;white-space:nowrap">' + esc(a.timestamp || '') + '</div>';
-    html += '<div style="flex:1;min-width:0"><div style="font-weight:600">' + esc(a.kind) + '</div><div style="color:var(--muted)">' + esc(a.message) + '</div>';
-    if (a.details && Object.keys(a.details).length) {
-      const lines = Object.entries(a.details).map(([k, v]) => esc(k) + ': ' + esc(typeof v === 'object' ? JSON.stringify(v) : String(v))).join(' &middot; ');
-      html += '<div style="color:var(--muted);font-size:11px;margin-top:2px">' + lines + '</div>';
-    }
-    html += '</div></div>';
-  }
-  html += '</div>';
-  el.innerHTML = html;
 }
 function openTopUpFromCard() {
   if (!_lastSettlerAddr) { toast('Settler address not loaded — refresh first', 'error'); return; }

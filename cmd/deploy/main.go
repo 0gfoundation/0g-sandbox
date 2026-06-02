@@ -3,10 +3,13 @@
 // Three-step deploy:
 //   1. Deploy SandboxServing implementation (no constructor args)
 //   2. Deploy UpgradeableBeacon(impl, deployer) — beacon owns the upgrade key
-//   3. Deploy BeaconProxy(beacon, initialize(providerStake)) — this is the stable address
+//   3. Deploy BeaconProxy(beacon, initialize(tappRegistry)) — stable address
+//
+// Prerequisite: TappRegistry must already be deployed on the target chain.
+// Pass its address via --tapp.
 //
 // Usage:
-//   go run ./cmd/deploy/ --rpc <url> --key <hex> --chain-id <id> [--stake <neuron>]
+//   go run ./cmd/deploy/ --rpc <url> --key <hex> --chain-id <id> --tapp 0x<addr>
 package main
 
 import (
@@ -22,6 +25,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
@@ -32,13 +36,18 @@ func main() {
 	rpcURL  := flag.String("rpc",      "https://evmrpc-testnet.0g.ai", "EVM RPC endpoint")
 	keyHex  := flag.String("key",      "",    "deployer private key (hex, with or without 0x)")
 	chainID := flag.Int64("chain-id",  16602, "chain ID")
-	stake   := flag.String("stake",    "0",   "providerStake for initialize() (neuron)")
+	tappHex := flag.String("tapp",     "",    "TappRegistry contract address (required)")
 	flag.Parse()
 
 	if *keyHex == "" {
 		fmt.Fprintln(os.Stderr, "error: --key is required")
 		os.Exit(1)
 	}
+	if *tappHex == "" {
+		fmt.Fprintln(os.Stderr, "error: --tapp is required (TappRegistry must be deployed first)")
+		os.Exit(1)
+	}
+	tappAddr := common.HexToAddress(*tappHex)
 
 	// ── private key ───────────────────────────────────────────────────────────
 	keyStr := strings.TrimPrefix(*keyHex, "0x")
@@ -67,13 +76,6 @@ func main() {
 		os.Exit(1)
 	}
 	auth.Context = ctx
-
-	// ── parse providerStake ───────────────────────────────────────────────────
-	providerStake := new(big.Int)
-	if _, ok := providerStake.SetString(*stake, 10); !ok {
-		fmt.Fprintf(os.Stderr, "invalid stake value: %s\n", *stake)
-		os.Exit(1)
-	}
 
 	// ── helper: load bytecode from Foundry artifact ───────────────────────────
 	loadBytecode := func(artifactPath string) []byte {
@@ -155,12 +157,12 @@ func main() {
 	}
 	fmt.Printf("  Beacon  : %s\n", beaconAddr.Hex())
 
-	// ── Step 3: Deploy BeaconProxy(beacon, initialize(providerStake)) ─────────
-	fmt.Printf("\n[3/3] Deploying BeaconProxy(beacon=%s, stake=%s neuron)...\n",
-		beaconAddr.Hex(), providerStake)
+	// ── Step 3: Deploy BeaconProxy(beacon, initialize(tappRegistry)) ──────────
+	fmt.Printf("\n[3/3] Deploying BeaconProxy(beacon=%s, tappRegistry=%s)...\n",
+		beaconAddr.Hex(), tappAddr.Hex())
 
-	// Build initialize(providerStake) calldata
-	initCalldata, err := implABI.Pack("initialize", providerStake)
+	// Build initialize(tappRegistry) calldata
+	initCalldata, err := implABI.Pack("initialize", tappAddr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "pack initialize calldata: %v\n", err)
 		os.Exit(1)
@@ -208,13 +210,15 @@ DEPLOY COMPLETE
 Implementation : %s
 Beacon         : %s
 Proxy (stable) : %s
+TappRegistry   : %s
 
 Set in .env:
   SETTLEMENT_CONTRACT=%s
+  TAPP_REGISTRY=%s
 
 Explorer (proxy):
   https://chainscan-galileo.0g.ai/address/%s
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-`, implAddr.Hex(), beaconAddr.Hex(), proxyAddr.Hex(),
-		proxyAddr.Hex(), proxyAddr.Hex())
+`, implAddr.Hex(), beaconAddr.Hex(), proxyAddr.Hex(), tappAddr.Hex(),
+		proxyAddr.Hex(), tappAddr.Hex(), proxyAddr.Hex())
 }
