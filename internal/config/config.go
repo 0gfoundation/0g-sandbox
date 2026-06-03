@@ -213,7 +213,7 @@ func LoadBroker() (*Config, error) {
 		"redis.password":                "REDIS_PASSWORD",
 		"chain.rpc_url":                 "RPC_URL",
 		"chain.contract_address":        "SETTLEMENT_CONTRACT",
-		"chain.provider_address":        "PROVIDER_ADDRESS",
+		"chain.tapp_registry":           "TAPP_REGISTRY",
 		"chain.chain_id":                "CHAIN_ID",
 		"server.port":                   "BROKER_PORT",
 		"broker.monitor_interval_sec":   "BROKER_MONITOR_INTERVAL_SEC",
@@ -239,6 +239,9 @@ func LoadBroker() (*Config, error) {
 	}
 	if cfg.Chain.ContractAddress == "" {
 		return nil, fmt.Errorf("required config missing: SETTLEMENT_CONTRACT")
+	}
+	if cfg.Chain.TappRegistry == "" {
+		return nil, fmt.Errorf("required config missing: TAPP_REGISTRY")
 	}
 	if cfg.Chain.ChainID == 0 {
 		return nil, fmt.Errorf("required config missing: CHAIN_ID")

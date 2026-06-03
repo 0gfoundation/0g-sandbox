@@ -44,6 +44,15 @@ func main() {
 		log.Fatal("config load failed", zap.Error(err))
 	}
 
+	// PROVIDER_ADDRESS identifies which on-chain provider this billing service
+	// represents — it goes into voucher.provider (EIP-712), the settler queue
+	// key, and provider-bound chain lookups. Enforced here (not in
+	// chain.NewClient) so broker can reuse the same chain client without
+	// declaring a provider identity it doesn't have.
+	if cfg.Chain.ProviderAddress == "" {
+		log.Fatal("PROVIDER_ADDRESS is required for the billing service")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

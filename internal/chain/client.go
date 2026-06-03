@@ -76,13 +76,13 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		return nil, fmt.Errorf("parse tee private key: %w", err)
 	}
 
-	// Provider address must be explicitly configured. It identifies which
-	// on-chain provider this billing service represents — the value goes into
-	// voucher.provider (EIP-712), the settler queue key, and on-chain lookups,
-	// all of which must match the provider registered via `cmd/provider register`.
-	if cfg.Chain.ProviderAddress == "" {
-		return nil, fmt.Errorf("PROVIDER_ADDRESS is required")
-	}
+	// Provider address identifies which on-chain provider this client represents
+	// — the value goes into voucher.provider (EIP-712), the settler queue key,
+	// and provider-bound lookups (IsLocalTEEActiveNode, IsAcknowledged(user)).
+	// Required for the billing/sandbox provider; optional for clients that only
+	// inspect chain state across all providers (broker, indexer, dashboards).
+	// Methods that rely on it will receive the zero address and surface a
+	// clear runtime error to the caller if invoked without it being set.
 	providerAddr := common.HexToAddress(cfg.Chain.ProviderAddress)
 
 	addr := common.HexToAddress(cfg.Chain.ContractAddress)
