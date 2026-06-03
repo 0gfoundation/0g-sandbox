@@ -168,7 +168,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 
 
 	// ── DELETE /sandbox/:id (no action suffix, safe to register separately) ─
-	rg.DELETE("/sandbox/:id", h.withOwner(h.handleDelete))
+	rg.DELETE("/sandbox/:id", h.withOwnerOrAdmin(h.handleDelete))
 
 	// ── Catch-all for /sandbox/:id/<action> ────────────────────────────────
 	// Blocked (autostop/autoarchive), lifecycle hooks, label protection, and
@@ -176,7 +176,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.Any("/sandbox/:id/*action", h.handleCatchAll)
 
 	// ── GET /sandbox/:id (no wildcard suffix) ─────────────────────────────
-	rg.GET("/sandbox/:id", h.withOwner(h.forward))
+	rg.GET("/sandbox/:id", h.withOwnerOrAdmin(h.forward))
 
 	// ── Toolbox API (/api/toolbox/:id/*) — owner check + sealed check + transparent forward
 	rg.Any("/toolbox/:id/*action", h.withOwnerNotSealed(h.forward))
@@ -1069,11 +1069,11 @@ func (h *Handler) handleCatchAll(c *gin.Context) {
 	case method == http.MethodPost && action == "/start":
 		h.withOwner(h.handleStart)(c)
 	case method == http.MethodPost && action == "/stop":
-		h.withOwner(h.handleStop)(c)
+		h.withOwnerOrAdmin(h.handleStop)(c)
 	case method == http.MethodPost && action == "/archive":
-		h.withOwner(h.handleArchive)(c)
+		h.withOwnerOrAdmin(h.handleArchive)(c)
 	case method == http.MethodPost && action == "/ensure-billing":
-		h.withOwner(h.handleEnsureBilling)(c)
+		h.withOwnerOrAdmin(h.handleEnsureBilling)(c)
 	case method == http.MethodPost && action == "/ssh-access":
 		h.withOwner(h.handleSSHAccess)(c)
 	case method == http.MethodDelete && action == "/force":
@@ -1096,6 +1096,28 @@ func (h *Handler) withOwner(next gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
 		wallet := c.GetString("wallet_address")
+		if err := CheckOwner(c.Request.Context(), h.dtona, id, wallet); err != nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+		next(c)
+	}
+}
+
+// withOwnerOrAdmin lets admins act on any sandbox without holding the owner
+// key, while still enforcing ownership for non-admins. The /sandbox/:id/force*
+// routes predate this and remain as explicit operator-intent endpoints (the
+// distinct path makes operator overrides easy to audit), but the standard
+// /stop and /delete routes route through here so admins don't need the side
+// path for routine cleanup.
+func (h *Handler) withOwnerOrAdmin(next gin.HandlerFunc) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		wallet := c.GetString("wallet_address")
+		if h.isAdmin(wallet) {
+			next(c)
+			return
+		}
+		id := c.Param("id")
 		if err := CheckOwner(c.Request.Context(), h.dtona, id, wallet); err != nil {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 			return
