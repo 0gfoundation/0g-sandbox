@@ -415,20 +415,31 @@ fired (e.g., client disconnected before the 2xx response arrived).
 
 ---
 
-#### `GET /api/sessions` — Active billing sessions (provider only)
+#### `GET /api/sessions` — Active billing sessions (admin only)
 
 **Headers:** auth headers (action = `"list"`, resource_id = `""`)
 
-Caller must match `PROVIDER_ADDRESS`.
+Caller wallet must be in `ADMIN_ADDRESSES`.
 
 **Response `200`:** Array of session objects (see [Data Types](#data-types--objects))
 
 ---
 
-#### `POST /api/archive-all` — Archive all running sandboxes (provider only)
+#### `DELETE /api/sessions/:id` — Close one billing session (admin only)
 
-Used before redeployment. Caller must match `PROVIDER_ADDRESS`.
-Stops then archives all `started`/`starting` sandboxes; archives `stopped` sandboxes directly.
+Deletes the Redis session for one sandbox and deregisters it from the broker.
+The sandbox itself is not stopped or deleted — use this to clean up an orphan
+session left behind when a sandbox was archived outside the billing-proxy
+control path. Idempotent: succeeds even if no session exists.
+
+**Response `200`:** `{"ok": true}`
+
+---
+
+#### `POST /api/archive-all` — Archive all running sandboxes (admin only)
+
+Used before redeployment. Stops then archives all `started`/`starting` sandboxes;
+archives `stopped` sandboxes directly.
 
 **Response `200`:**
 ```json
@@ -437,12 +448,51 @@ Stops then archives all `started`/`starting` sandboxes; archives `stopped` sandb
 
 ---
 
-#### `DELETE /api/sandbox/:id/force` — Force-delete any sandbox (provider only)
+#### `DELETE /api/sandbox/:id/force` — Force-delete any sandbox (admin only)
 
-Caller must match `PROVIDER_ADDRESS`. Deletes regardless of owner.
+Operator-intent override of `DELETE /api/sandbox/:id`. Deletes regardless of owner.
+Kept distinct from the standard delete (which also accepts admin via
+`withOwnerOrAdmin`) so operator overrides are easy to grep in audit logs.
 
 **Response `200`:** Response from Daytona
 **Billing:** Emits a final compute voucher.
+
+---
+
+#### `POST /api/sandbox/:id/force-stop` — Force-stop any sandbox (admin only)
+
+Operator-intent override of `POST /api/sandbox/:id/stop`. Synchronous: blocks
+until Daytona reports the sandbox in stopped/archived/error state so a
+follow-up start cannot race the in-progress stop.
+
+**Response `200`:** `{"id": "...", "state": "stopped"}`
+**Billing:** Triggers `OnStop` and broker deregister.
+
+---
+
+#### `GET /api/audit-log` — Local Redis billing event log (admin only)
+
+Append-only stream of billing-relevant events (created / stopped / auto_stopped /
+settled). Distinct from `GET /api/events`, which reads on-chain `VoucherSettled`
+logs — this one captures broker-proxy-side state changes that may never reach
+chain (e.g. stopped before first voucher).
+
+**Response `200`:** Array of `{timestamp, kind, sandbox_id, owner, …}` entries.
+
+---
+
+#### Queue + observability (admin only)
+
+These power the operator dashboard; reachable from `cmd/user` only with an
+admin wallet.
+
+| Path | Purpose |
+|---|---|
+| `GET /api/queue/summary` | Pending voucher count per `(user, provider)` |
+| `GET /api/queue/dlq` | Vouchers in the dead-letter queue (signature mismatch / provider mismatch) |
+| `POST /api/queue/dlq/discard` | Discard a DLQ entry by signature digest |
+| `POST /api/queue/aggregate` | Collapse pending vouchers for one `(user, provider)` into a single voucher |
+| `GET /api/observability` | Queue depth + recent alert history |
 
 ---
 

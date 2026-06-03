@@ -250,20 +250,43 @@ The server starts on port 8080 (`PORT` env var) and exposes:
 - `POST /api/sandbox` — create sandbox (billing: create-fee voucher)
 - `GET /api/sandbox` — list sandboxes (filtered to caller's own)
 - `GET /api/sandbox/paginated` — paginated list
-- `GET /api/sandbox/:id` — get sandbox (403 if not owner)
-- `DELETE /api/sandbox/:id` — delete sandbox (billing: final compute voucher)
+- `GET /api/sandbox/:id` — get sandbox (admin or owner)
+- `DELETE /api/sandbox/:id` — delete sandbox (admin or owner; billing: final compute voucher)
+- `POST /api/sandbox/:id/start` — start a stopped sandbox (owner only)
+- `POST /api/sandbox/:id/stop` — stop a running sandbox (admin or owner; billing: OnStop)
+- `POST /api/sandbox/:id/archive` — archive a stopped sandbox (admin or owner)
+- `POST /api/sandbox/:id/ensure-billing` — idempotent backfill if the create-time billing hook missed
+- `POST /api/sandbox/:id/ssh-access` — owner-only; sealed sandboxes return 403
+- `PUT /api/sandbox/:id/labels` — owner only (strips `daytona-owner` from the payload)
+- `Any /api/sandbox/:id/<other>` — transparent Daytona proxy (owner only)
+- `Any /api/toolbox/:id/*` — Daytona toolbox proxy (owner only, sealed sandboxes blocked)
 - `GET /api/volumes` — list volumes owned by caller
+- `GET /api/snapshots` `POST /api/snapshots` `DELETE /api/snapshots/:id` — snapshot mgmt
 - `GET /api/events` — on-chain VoucherSettled events
 
+Most management-plane routes use `withOwnerOrAdmin`: admins skip the owner
+check, non-admins still need to own the sandbox. Routes that read or run the
+user's workload (`/start`, `/ssh-access`, `/toolbox/*`, transparent
+`/sandbox/:id/<other>`) intentionally stay owner-only — exposing them to
+admins would let the operator read user code or trigger billable starts,
+violating the workload-privacy guarantee.
+
 **Admin-only (caller wallet must be in `ADMIN_ADDRESSES`):**
-- `POST /api/snapshots` — create snapshot
-- `DELETE /api/snapshots/:id` — delete snapshot
 - `POST /api/registry/pull` — pull image into internal registry
 - `POST /api/registry/gc` — garbage-collect orphan derived tags
-- `POST /api/archive-all` — archive every running sandbox + clears Redis sessions
-- `DELETE /api/sandbox/force/:id` — delete any sandbox regardless of owner
+- `POST /api/archive-all` — archive every running sandbox + clear Redis sessions
+- `DELETE /api/sandbox/:id/force` — operator-intent override of `DELETE /api/sandbox/:id`
+- `POST /api/sandbox/:id/force-stop` — operator-intent override of `POST /api/sandbox/:id/stop`
 - `GET /api/sessions` — list all open billing sessions across owners
+- `DELETE /api/sessions/:id` — close one orphan billing session (no Daytona action)
 - `GET /api/audit-log` — local Redis billing event log (created/stopped/auto_stopped/settled)
+- `GET /api/queue/summary` `GET /api/queue/dlq` — voucher queue depth + DLQ entries
+- `POST /api/queue/dlq/discard` — discard a DLQ voucher
+- `POST /api/queue/aggregate` — collapse pending vouchers for a `(user, provider)` pair
+- `GET /api/observability` — queue depth + recent alert history for the dashboard
+
+The two `/force*` paths predate `withOwnerOrAdmin` and remain as explicit
+operator-intent endpoints so log/audit grep is unambiguous.
 
 `ADMIN_ADDRESSES` is comma-separated. When unset, defaults to `[PROVIDER_ADDRESS]` for
 backward compatibility with single-key deployments. Distinct from `PROVIDER_ADDRESS`
@@ -273,8 +296,8 @@ without holding the provider's settlement key.
 ### Dashboard
 
 `web/dashboard.html` is embedded into the billing binary at build time via `//go:embed` in
-`web/static.go` and served at `GET /dashboard`. Calls live API endpoints (`/info`, `/api/providers`,
-`/api/sandbox_list`, `/api/snapshots`, etc.).
+`web/static.go` and served at `GET /dashboard`. Calls live API endpoints (`/api/info`,
+`/api/providers`, `/api/sandbox_list`, `/api/snapshots`, etc.).
 
 
 ---

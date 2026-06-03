@@ -299,6 +299,8 @@ Derived from **T_react** — time from alert to funds landing on-chain:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SETTLEMENT_CONTRACT` | (required) | BeaconProxy address (same as billing proxy) |
+| `TAPP_REGISTRY` | (required) | TappRegistry contract address — broker verifies session signatures against active TEE nodes per provider's `appId` |
+| `BACKEND_APP_NAME` | (required) | Broker's own tapp app-id — used to fetch its TEE key and surfaced via `GET /api/info` so the user frontend can ack the broker in TappRegistry |
 | `RPC_URL` | `https://evmrpc-testnet.0g.ai` | EVM RPC endpoint |
 | `CHAIN_ID` | `16602` | Chain ID |
 | `BROKER_PORT` | `8082` | HTTP port |
