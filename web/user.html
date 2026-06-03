@@ -691,8 +691,8 @@ body.v-market .view-market{display:block}
 </div>
 
 <div class="modal-bg" id="confirmModal">
-  <div class="modal" style="width:340px">
-    <p id="confirmMsg" style="color:var(--text2);font-size:13px;margin-bottom:20px;line-height:1.65;font-family:var(--mono)"></p>
+  <div class="modal" style="width:min(560px, 92vw)">
+    <p id="confirmMsg" style="color:var(--text2);font-size:12px;margin-bottom:20px;line-height:1.6;font-family:var(--mono);white-space:pre-wrap;max-height:60vh;overflow:auto;word-break:break-all"></p>
     <div class="modal-btns">
       <button class="btn btn-ghost" id="confirmCancel">Cancel</button>
       <button class="btn btn-danger" id="confirmOk">Confirm</button>
@@ -704,7 +704,7 @@ body.v-market .view-market{display:block}
 
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
-let walletAddr = null, signer = null, contract = null, info = null;
+let walletAddr = null, signer = null, contract = null, tap = null, info = null;
 let selectedProvider = null, _providerMap = {};
 const _subscribePending = new Set();
 let _chainCache = {};
@@ -718,11 +718,23 @@ function _onAccountsChanged(a) {
 
 const ABI = [
   "function getBalance(address user, address provider) view returns (uint256 balance, uint256 pendingRefund, uint256 refundUnlockAt)",
-  "function isTEEAcknowledged(address user, address provider) view returns (bool)",
   "function deposit(address recipient, address provider) payable",
-  "function acknowledgeTEESigner(address provider, bool acknowledged)",
   "function requestRefund(address provider, uint256 amount)",
   "function withdrawRefund(address provider)",
+];
+
+// TappRegistry — trust root for both the broker and each sandbox provider.
+// User acknowledges an app's current TEE node set + composeHash here, not on
+// SandboxServing. Provider's appId comes from /api/providers; broker's own
+// appId from /api/info.
+const TAP_ABI = [
+  "function acknowledgeApp(string appId)",
+  "function revokeAcknowledgement(string appId)",
+  "function isAcknowledged(address user, string appId) view returns (bool)",
+  "function getAckVersion(string appId) view returns (uint256)",
+  "function getNodeList(string appId) view returns (address[])",
+  "function getNode(string appId, address signer) view returns (tuple(string teeUrl, uint256 addedAt, uint256 stakeAmount))",
+  "function getAppInfo(string appId) view returns (tuple(bytes composeHash, bytes volumesHash, bytes[] imageHashes, address owner, uint256 registeredAt))",
 ];
 
 window.addEventListener('eip6963:announceProvider', e => eip6963Providers.set(e.detail.info.uuid, e.detail));
@@ -876,6 +888,7 @@ async function initWallet(addr, prov) {
   const provider = new ethers.BrowserProvider(prov);
   signer = await provider.getSigner();
   contract = new ethers.Contract(info.contract_address, ABI, signer);
+  tap = info.tapp_registry ? new ethers.Contract(info.tapp_registry, TAP_ABI, signer) : null;
 
   document.querySelectorAll('.addr-chip,.logout-btn').forEach(el=>el.remove());
   document.getElementById('connectBtn').style.display = 'none';
@@ -893,6 +906,127 @@ async function initWallet(addr, prov) {
   await loadUserData();
   if (_refreshTimer) clearInterval(_refreshTimer);
   _refreshTimer = setInterval(()=>{ if(walletAddr) refreshBalances(); }, 30000);
+
+  // After the wallet is hooked up + initial data loaded, prompt to ack the
+  // broker itself (its TEE handles deposit triggers on the user's behalf).
+  // Provider-level ack happens later, just before sandbox create/start.
+  ensureBrokerAck().catch(e => console.error('broker ack check', e));
+}
+
+// ── TappRegistry ack helpers ──────────────────────────────────────────────────
+// Fetch the on-chain trust root for an app: composeHash, volumesHash, image
+// hashes, owner, the active TEE node set, and current ackVersion. Returns
+// null when the appId isn't registered (getAppInfo reverts).
+async function fetchAppTrustRoot(appId) {
+  if (!tap || !appId) return null;
+  try {
+    const [info, nodes, ackVer] = await Promise.all([
+      tap.getAppInfo(appId),
+      tap.getNodeList(appId).catch(() => []),
+      tap.getAckVersion(appId).catch(() => 0n),
+    ]);
+    // Pull each node's teeUrl so the user can independently fetch attestation
+    // evidence from it. One RPC per node; node sets are typically tiny (1-3).
+    const nodeDetails = await Promise.all(
+      nodes.map(async (signer) => {
+        try {
+          const n = await tap.getNode(appId, signer);
+          return { signer, teeUrl: n.teeUrl, addedAt: n.addedAt };
+        } catch (_) {
+          return { signer, teeUrl: '', addedAt: 0n };
+        }
+      })
+    );
+    return { info, nodes: nodeDetails, ackVer };
+  } catch (_) {
+    return null; // app not registered (getAppInfo reverts on unknown appId)
+  }
+}
+
+function _shortHash(hex) {
+  if (!hex || hex === '0x') return '—';
+  const h = hex.startsWith('0x') ? hex.slice(2) : hex;
+  return h.length > 16 ? `0x${h.slice(0,8)}…${h.slice(-8)}` : `0x${h}`;
+}
+
+function _formatTrustRoot(appId, root) {
+  const ts = root.info.registeredAt > 0n
+    ? new Date(Number(root.info.registeredAt) * 1000).toISOString().replace('T',' ').replace(/\.\d+Z$/,'Z')
+    : '—';
+  const imgs = root.info.imageHashes || [];
+  const nodes = root.nodes || [];
+  const imgList = imgs.length
+    ? imgs.slice(0, 4).map(h => `    · ${_shortHash(h)}`).join('\n') + (imgs.length > 4 ? `\n    · …(${imgs.length - 4} more)` : '')
+    : '    (none)';
+  const nodeList = nodes.length
+    ? nodes.map(n => `    · ${n.signer}\n      teeUrl: ${n.teeUrl || '—'}`).join('\n')
+    : '    (none — app has no active TEE node)';
+  const verifyHint = nodes.length
+    ? [
+        '',
+        'How to verify before acknowledging:',
+        '  Each teeUrl above hosts the tapp-daemon. Fetch its TDX attestation',
+        '  evidence and remote-attest it — the verified quote binds the TEE',
+        '  signer (first 20 bytes of report_data) and lets you replay the',
+        '  app\'s full update history on-chain to confirm the running TEE',
+        '  matches the trust root above:',
+        '',
+        '    tapp-cli -s <teeUrl> get-evidence --app-id ' + appId,
+        '',
+        '  After RA passes you can cross-check ackVersion / composeHash /',
+        '  imageHashes against this on-chain record to confirm the operator',
+        '  has not silently rotated nodes or images.',
+      ].join('\n')
+    : '';
+  return [
+    `appId:        ${appId}`,
+    `owner:        ${root.info.owner}`,
+    `registered:   ${ts}`,
+    `ackVersion:   ${root.ackVer}`,
+    `composeHash:  ${_shortHash(root.info.composeHash)}`,
+    `volumesHash:  ${_shortHash(root.info.volumesHash)}`,
+    `imageHashes (${imgs.length}):`,
+    imgList,
+    `TEE nodes (${nodes.length}):`,
+    nodeList,
+    verifyHint,
+  ].join('\n');
+}
+
+async function ensureAcked(appId, label, description) {
+  if (!tap || !walletAddr || !appId) return true;
+  let acked = false;
+  try { acked = await tap.isAcknowledged(walletAddr, appId); } catch(_) {}
+  if (acked) return true;
+
+  // Pull the on-chain trust root so the user can review what they're signing.
+  const root = await fetchAppTrustRoot(appId);
+  if (!root) {
+    toast(`${label} (appId: ${appId}) is not registered in TappRegistry — cannot acknowledge`, 'error');
+    return false;
+  }
+  const ok = await showConfirm(
+    `Acknowledge ${label}?\n\n${description}\n\n── Trust root (TappRegistry) ──\n${_formatTrustRoot(appId, root)}\n\nSigning records the above configuration as accepted by your wallet. If the operator later changes nodes or images, ackVersion bumps and you'll be asked again.`,
+    'Acknowledge'
+  );
+  if (!ok) return false;
+  let success = false;
+  await sendTx(`Acknowledge ${label}`, () => tap.acknowledgeApp(appId), {
+    onSuccess: () => { success = true; },
+  });
+  return success;
+}
+
+async function ensureBrokerAck() {
+  if (!info?.app_id) return true; // older broker without app_id in /api/info
+  return ensureAcked(info.app_id, 'broker',
+    "The broker's TEE holds authority to call the Payment Layer and trigger deposits on your behalf.");
+}
+
+async function ensureProviderAck(p) {
+  if (!p?.app_id) return true; // provider not bound to an appId — nothing to ack
+  return ensureAcked(p.app_id, `provider ${shortAddr(p.address)}`,
+    "This provider's TEE signs the billing vouchers that settle against your on-chain balance.");
 }
 
 async function ensureChain(prov) {
@@ -908,7 +1042,7 @@ async function logout() {
     try { _activeProvider.removeListener('accountsChanged',_onAccountsChanged); } catch(_){}
     _activeProvider = null;
   }
-  walletAddr=null; signer=null; contract=null; selectedProvider=null; _chainCache={};
+  walletAddr=null; signer=null; contract=null; tap=null; selectedProvider=null; _chainCache={};
   if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer=null; }
   localStorage.removeItem('walletUUID');
   document.querySelectorAll('.addr-chip,.logout-btn').forEach(el=>el.remove());
@@ -990,7 +1124,7 @@ async function loadProviders(forceChain=false) {
         balancesArr = cacheKeys.map(k => _chainCache[k].balance);
       } else {
         [ackedArr, balancesArr] = await Promise.all([
-          Promise.all(providers.map(p => contract.isTEEAcknowledged(walletAddr, p.address).catch(()=>false))),
+          Promise.all(providers.map(p => (tap && p.app_id) ? tap.isAcknowledged(walletAddr, p.app_id).catch(()=>false) : false)),
           Promise.all(providers.map(p => contract.getBalance(walletAddr, p.address).catch(()=>[0n,0n,0n]))),
         ]);
         providers.forEach((p, i) => {
@@ -1033,17 +1167,13 @@ async function loadProviders(forceChain=false) {
         bodyHTML = `
           <div class="pv-detail-section">
             <div class="pv-detail-row"><span class="pv-detail-key">address</span><span class="pv-detail-val">${p.address}</span></div>
-            <div class="pv-detail-row"><span class="pv-detail-key">tee_signer</span><span class="pv-detail-val">${p.tee_signer}<span class="tip"><span class="tip-icon">?</span><span class="tip-box">Billing runs inside a TDX hardware enclave. The signing key is physically isolated — the operator cannot forge charges or read your sandbox.</span></span></span></div>
+            <div class="pv-detail-row"><span class="pv-detail-key">app_id</span><span class="pv-detail-val">${p.app_id || '—'}<span class="tip"><span class="tip-icon">?</span><span class="tip-box">The provider's TEE trust root in TappRegistry — compose hash, image hashes, and the active TEE node set are all keyed by this appId.</span></span></span></div>
           </div>
           <div class="pv-connect-prompt">connect wallet to acknowledge and create sandboxes</div>`;
-      } else if (!isAcked) {
-        bodyHTML = `
-          <div class="pv-detail-section">
-            <div class="pv-detail-row"><span class="pv-detail-key">address</span><span class="pv-detail-val">${p.address}</span></div>
-            <div class="pv-detail-row"><span class="pv-detail-key">tee_signer</span><span class="pv-detail-val">${p.tee_signer}<span class="tip"><span class="tip-icon">?</span><span class="tip-box">Billing runs inside a TDX hardware enclave. The signing key is physically isolated — the operator cannot forge charges or read your sandbox.</span></span></span></div>
-          </div>
-          <div class="pv-connect-prompt">acknowledge this provider's TEE signer to deposit balance and create sandboxes</div>`;
       } else {
+        // Wallet is connected. Show balance + create UI regardless of ack
+        // state — clicking "+ new" or "start" runs ensureProviderAck first
+        // and prompts for ack if needed.
         bodyHTML = `
           <div class="pv-balance-section">
             <div class="pv-balance-label">balance</div>
@@ -1152,8 +1282,10 @@ function renderSandboxRows(sandboxes, providerAddr) {
 
 async function doSubscribe(addr, btn) {
   if (_subscribePending.has(addr)) return;
+  const p = _providerMap[addr.toLowerCase()];
+  if (!tap || !p?.app_id) { toast('this provider has no appId bound on-chain', 'error'); return; }
   _subscribePending.add(addr); btn.disabled=true; btn.textContent='…';
-  await sendTx('Acknowledge', () => contract.acknowledgeTEESigner(addr, true), {
+  await sendTx('Acknowledge', () => tap.acknowledgeApp(p.app_id), {
     onSuccess: () => { _subscribePending.delete(addr); const k=`${walletAddr}:${addr}`; if(_chainCache[k]) _chainCache[k].acked=true; loadProviders(false); },
     onError:   () => { _subscribePending.delete(addr); btn.disabled=false; btn.textContent='acknowledge'; },
   });
@@ -1161,8 +1293,10 @@ async function doSubscribe(addr, btn) {
 
 async function doUnsubscribe(addr, btn) {
   if (_subscribePending.has(addr)) return;
+  const p = _providerMap[addr.toLowerCase()];
+  if (!tap || !p?.app_id) { toast('this provider has no appId bound on-chain', 'error'); return; }
   _subscribePending.add(addr); btn.disabled=true; btn.textContent='…';
-  await sendTx('Revoke', () => contract.acknowledgeTEESigner(addr, false), {
+  await sendTx('Revoke', () => tap.revokeAcknowledgement(p.app_id), {
     onSuccess: () => { _subscribePending.delete(addr); const k=`${walletAddr}:${addr}`; if(_chainCache[k]) _chainCache[k].acked=false; loadProviders(false); },
     onError:   () => { _subscribePending.delete(addr); btn.disabled=false; btn.textContent='revoke'; },
   });
@@ -1238,6 +1372,12 @@ async function fetchSandboxIds() {
 
 async function doCreate() {
   if (!selectedProvider) { setErr('createErr','no provider selected'); return; }
+  // Trust gates: ack the broker first (its TEE represents the user across
+  // providers), then the specific provider. Vouchers won't settle without
+  // both acknowledgements. Cancel or chain failure aborts cleanly with no
+  // side effects on the sandbox state.
+  if (!await ensureBrokerAck()) { setErr('createErr','broker acknowledgement required to create sandboxes'); return; }
+  if (!await ensureProviderAck(selectedProvider)) { setErr('createErr','provider acknowledgement required'); return; }
   const name=document.getElementById('sandboxName').value.trim();
   const snapshot=document.getElementById('snapshotSelect').value;
   setErr('createErr',''); setLoading('createErr','');
@@ -1282,6 +1422,8 @@ async function doStop(id, label, providerAddr) {
 
 async function doStart(id, providerAddr) {
   selectedProvider = _providerMap[providerAddr.toLowerCase()];
+  if (!await ensureBrokerAck()) { toast('broker acknowledgement required','error'); return; }
+  if (!await ensureProviderAck(selectedProvider)) return;
   const card = document.getElementById('pv-' + providerAddr.toLowerCase());
   const row = card?.querySelector(`.pv-sandbox-row[data-id="${id}"]`);
   if (row) { row.querySelector('.tag').outerHTML=stateTag('starting'); row.querySelectorAll('button').forEach(b=>b.disabled=true); }
