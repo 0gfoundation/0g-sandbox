@@ -128,6 +128,7 @@ contract SandboxServing {
     );
     event EarningsWithdrawn(address indexed provider, uint256 amount);
     event ServiceUpdated(address indexed provider, string appId, string url);
+    event ServiceDeregistered(address indexed provider);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
     // ─── Modifiers ────────────────────────────────────────────────────────────
@@ -406,6 +407,21 @@ contract SandboxServing {
         }
 
         emit ServiceUpdated(msg.sender, appId, url);
+    }
+
+    /// @notice Clear the caller's own service registration so it can be
+    ///         re-registered under a different appId (appId is set-once in
+    ///         addOrUpdateService).
+    /// @dev Soft clear: only the service entry (url/appId/prices/createFee) is
+    ///      removed. User balances, pending refunds, settled nonces, and accrued
+    ///      providerEarnings are keyed elsewhere and preserved — they remain
+    ///      withdrawable, and nonces stay put so old vouchers can't be replayed
+    ///      after a re-register.
+    function deregisterService() external {
+        require(serviceExists[msg.sender], "no service to deregister");
+        delete services[msg.sender];
+        serviceExists[msg.sender] = false;
+        emit ServiceDeregistered(msg.sender);
     }
 
     // ─── View Functions ───────────────────────────────────────────────────────

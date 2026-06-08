@@ -62,13 +62,15 @@ const (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: provider <subcommand> [flags]")
-		fmt.Fprintln(os.Stderr, "  subcommands: register | status | withdraw | push-image | snapshot | snapshots | delete-snapshot | gc-images")
+		fmt.Fprintln(os.Stderr, "  subcommands: register | deregister | status | withdraw | push-image | snapshot | snapshots | delete-snapshot | gc-images")
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
 	case "register", "init-service":
 		runRegister(os.Args[2:])
+	case "deregister":
+		runDeregister(os.Args[2:])
 	case "status":
 		runStatus(os.Args[2:])
 	case "withdraw":
@@ -85,7 +87,7 @@ func main() {
 		runGCImages(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
-		fmt.Fprintln(os.Stderr, "  subcommands: register | status | withdraw | push-image | snapshot | snapshots | delete-snapshot | gc-images")
+		fmt.Fprintln(os.Stderr, "  subcommands: register | deregister | status | withdraw | push-image | snapshot | snapshots | delete-snapshot | gc-images")
 		os.Exit(1)
 	}
 }
@@ -151,6 +153,50 @@ func runRegister(args []string) {
 	}
 	fmt.Println("      confirmed ✓")
 	fmt.Printf("\nDone. Provider address: %s\n", providerAddr.Hex())
+}
+
+// ── deregister ──────────────────────────────────────────────────────────────────
+
+// runDeregister clears the caller's own SandboxServing service entry so its
+// appId can be changed (appId is set-once in addOrUpdateService). Soft clear:
+// on-chain balances, pending refunds, settled nonces, and accrued earnings are
+// preserved. After this, re-run `register` with the new appId.
+func runDeregister(args []string) {
+	fs := flag.NewFlagSet("deregister", flag.ExitOnError)
+	rpc         := fs.String("rpc",      defaultRPC,      "RPC endpoint")
+	chainID     := fs.Int64("chain-id",  defaultChainID,  "Chain ID")
+	contractHex := fs.String("contract", defaultContract, "Settlement contract address")
+	keyHex      := fs.String("key",      "",              "Provider private key (hex); or set PROVIDER_KEY env")
+	_ = fs.Parse(args)
+
+	privKey := resolveKey(*keyHex, "PROVIDER_KEY")
+	providerAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	eth, contract := dialContract(ctx, *rpc, *contractHex)
+	defer eth.Close()
+
+	if exists, err := contract.ServiceExists(&bind.CallOpts{Context: ctx}, providerAddr); err != nil {
+		fatalf("ServiceExists: %v", err)
+	} else if !exists {
+		fatalf("no service registered for %s on %s — nothing to deregister", providerAddr.Hex(), *contractHex)
+	}
+
+	fmt.Printf("Provider:  %s\n", providerAddr.Hex())
+	fmt.Printf("Contract:  %s\n", *contractHex)
+	fmt.Println("\n[1/1] DeregisterService (clears url/appId/prices; balances & earnings preserved)...")
+	auth := buildAuth(ctx, privKey, *chainID)
+	tx, err := contract.DeregisterService(auth)
+	if err != nil {
+		fatalf("DeregisterService: %v", err)
+	}
+	fmt.Printf("      tx: %s\n", tx.Hash().Hex())
+	if _, err := bind.WaitMined(ctx, eth, tx); err != nil {
+		fatalf("wait mined: %v", err)
+	}
+	fmt.Println("      confirmed ✓")
+	fmt.Printf("\nDone. Service cleared. Re-run `register` with the new appId.\n")
 }
 
 // ── status ────────────────────────────────────────────────────────────────────
