@@ -37,6 +37,17 @@ func (m *mockChain) GetServiceInfo(_ context.Context, provider common.Address) (
 	return svc, nil
 }
 
+// GetAppOwner maps appId → the provider whose service declares it, so each
+// indexed provider is treated as the live owner of its own appId.
+func (m *mockChain) GetAppOwner(_ context.Context, appId string) (common.Address, error) {
+	for hexAddr, svc := range m.services {
+		if svc.AppId == appId {
+			return common.HexToAddress(hexAddr), nil
+		}
+	}
+	return common.Address{}, nil
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func newRedis(t *testing.T) *redis.Client {
@@ -221,6 +232,9 @@ func (m *mockChainCapture) GetServiceUpdatedEvents(_ context.Context, fromBlock 
 func (m *mockChainCapture) GetServiceInfo(_ context.Context, _ common.Address) (*chain.ServiceInfo, error) {
 	return nil, nil
 }
+func (m *mockChainCapture) GetAppOwner(_ context.Context, _ string) (common.Address, error) {
+	return common.Address{}, nil
+}
 
 func TestSync_deduplicatesEvents(t *testing.T) {
 	rdb := newRedis(t)
@@ -247,16 +261,16 @@ func TestGetAll_returnsAllProviders(t *testing.T) {
 	provider2 := common.HexToAddress("0xABCDEF0000000000000000000000000000000002")
 	svc2 := &chain.ServiceInfo{
 		URL:                 "http://provider-b.example.com:8080",
-		AppId: "test-app",
+		AppId: "test-app-2",
 		PricePerCPUPerMin:   big.NewInt(600),
 		PricePerMemGBPerMin: big.NewInt(300),
 		CreateFee:           big.NewInt(1_000_000),
-		
+
 	}
 	mc := &mockChain{
 		events: []chain.ProviderEvent{
 			testEvent,
-			{Provider: provider2, URL: svc2.URL, AppId: "test-app",  Block: 101},
+			{Provider: provider2, URL: svc2.URL, AppId: "test-app-2",  Block: 101},
 		},
 		latestBlock: 101,
 		services: map[string]*chain.ServiceInfo{

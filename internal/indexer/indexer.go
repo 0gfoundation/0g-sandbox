@@ -42,6 +42,11 @@ type ProviderRecord struct {
 type chainClient interface {
 	GetServiceUpdatedEvents(ctx context.Context, fromBlock uint64) ([]chain.ProviderEvent, uint64, error)
 	GetServiceInfo(ctx context.Context, provider common.Address) (*chain.ServiceInfo, error)
+	// GetAppOwner returns the current TappRegistry owner of appId (zero address
+	// if unregistered). Used to drop stale providers: SandboxServing service
+	// entries are permanent, so a provider is only "live" while it is still the
+	// app owner in TappRegistry — the real source of truth for (de)registration.
+	GetAppOwner(ctx context.Context, appId string) (common.Address, error)
 }
 
 // Indexer maintains a live in-memory index of all providers registered on-chain,
@@ -70,6 +75,7 @@ func New(c chainClient, rdb *redis.Client, log *zap.Logger) *Indexer {
 func (idx *Indexer) Run(ctx context.Context) {
 	idx.log.Info("provider indexer started")
 	idx.sync(ctx)
+	idx.revalidate(ctx)
 
 	t := time.NewTicker(pollInterval)
 	defer t.Stop()
@@ -80,6 +86,57 @@ func (idx *Indexer) Run(ctx context.Context) {
 			return
 		case <-t.C:
 			idx.sync(ctx)
+			idx.revalidate(ctx)
+		}
+	}
+}
+
+// isLiveProvider reports whether provider `addr` is still the live owner of
+// `appId` in TappRegistry — the source of truth for (de)registration. Returns
+// true on RPC error (fail-open: a transient lookup failure must not drop a
+// provider; revalidate rechecks next cycle). False when no appId is bound or
+// the current app owner is a different address (stale/superseded provider).
+func (idx *Indexer) isLiveProvider(ctx context.Context, addrKey, appId string, provider common.Address) bool {
+	if appId == "" {
+		return false
+	}
+	owner, err := idx.chain.GetAppOwner(ctx, appId)
+	if err != nil {
+		idx.log.Warn("indexer: GetAppOwner failed; keeping provider this round",
+			zap.String("provider", addrKey), zap.String("app_id", appId), zap.Error(err))
+		return true
+	}
+	return strings.EqualFold(owner.Hex(), provider.Hex())
+}
+
+// removeProvider drops a provider from the in-memory store and the Redis cache.
+func (idx *Indexer) removeProvider(ctx context.Context, addrKey string) {
+	idx.mu.Lock()
+	_, existed := idx.store[addrKey]
+	delete(idx.store, addrKey)
+	idx.mu.Unlock()
+	idx.rdb.Del(ctx, redisCachePrefix+addrKey) //nolint:errcheck
+	if existed {
+		idx.log.Info("indexer: dropped stale provider (no longer app owner)",
+			zap.String("provider", addrKey))
+	}
+}
+
+// revalidate re-checks every indexed provider against TappRegistry and prunes
+// any that are no longer the live app owner. Deregistration / owner transfer
+// happens in TappRegistry and emits no SandboxServing ServiceUpdated event, so
+// sync() alone would never revisit an already-stored stale provider.
+func (idx *Indexer) revalidate(ctx context.Context) {
+	idx.mu.RLock()
+	appIDByAddr := make(map[string]string, len(idx.store))
+	for k, r := range idx.store {
+		appIDByAddr[k] = r.AppId
+	}
+	idx.mu.RUnlock()
+
+	for addrKey, appId := range appIDByAddr {
+		if !idx.isLiveProvider(ctx, addrKey, appId, common.HexToAddress(addrKey)) {
+			idx.removeProvider(ctx, addrKey)
 		}
 	}
 }
@@ -159,6 +216,15 @@ func (idx *Indexer) sync(ctx context.Context) {
 		if err != nil || svcInfo == nil {
 			idx.log.Warn("indexer: GetServiceInfo failed",
 				zap.String("provider", addrKey), zap.Error(err))
+			continue
+		}
+
+		// Liveness gate: only index a provider while it is still the appId's
+		// owner in TappRegistry. SandboxServing keeps service entries forever,
+		// so a deregistered/superseded provider (e.g. after an owner transfer)
+		// would otherwise linger. On RPC error we skip this round (don't drop).
+		if !idx.isLiveProvider(ctx, addrKey, svcInfo.AppId, ev.Provider) {
+			idx.removeProvider(ctx, addrKey)
 			continue
 		}
 

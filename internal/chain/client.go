@@ -158,6 +158,20 @@ func (c *Client) GetServiceAppId(ctx context.Context, provider common.Address) (
 	return svc.AppId, nil
 }
 
+// GetAppOwner returns the current owner of appId in TappRegistry, or the zero
+// address if the app is not registered. TappRegistry is the source of truth for
+// who currently owns an app: SandboxServing has no removeService, so a stale
+// service entry (e.g. left behind after an owner transfer) is detected by
+// comparing its provider address against this owner.
+func (c *Client) GetAppOwner(ctx context.Context, appId string) (common.Address, error) {
+	opts := &bind.CallOpts{Context: ctx}
+	info, err := c.tapp.GetAppInfo(opts, appId)
+	if err != nil {
+		return common.Address{}, fmt.Errorf("tapp.GetAppInfo: %w", err)
+	}
+	return info.Owner, nil
+}
+
 // IsActiveNode returns true if `signer` is an active node for `appId` in
 // TappRegistry. Equivalent to `tapp.getNode(appId, signer).addedAt != 0`,
 // surfaced as a typed helper for downstream voucher/session verification.
