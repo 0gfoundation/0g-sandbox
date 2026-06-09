@@ -9,6 +9,17 @@ Two command-line tools are provided for operators and users:
 
 Private keys can be passed via `--key` flag or environment variable (`PROVIDER_KEY` / `USER_KEY`). The `0x` prefix is optional.
 
+For local testing, avoid typing private keys directly into long shell commands.
+Prefer a local env file that is not committed:
+
+```bash
+printf 'export USER_KEY=0x<hex>\n' > .env.user
+chmod 600 .env.user
+source .env.user
+```
+
+Keep `.env.user` out of git. Use placeholders only in shared logs, docs, and issues.
+
 ---
 
 ## `cmd/provider` — Provider Operations

@@ -552,6 +552,15 @@ curl -X GET "http://<proxy>/api/toolbox/<sandbox-id>/toolbox/files" \
 The `cmd/user` binary provides a reference client for both on-chain and proxy operations.
 Set `USER_KEY=0x<private-key>` as an environment variable to avoid passing `--key` every time.
 
+For local testing, avoid typing private keys directly into long shell commands.
+Prefer a local env file that is not committed:
+
+```bash
+printf 'export USER_KEY=0x<key>\n' > .env.user
+chmod 600 .env.user
+source .env.user
+```
+
 ### Chain Subcommands
 
 #### `balance` — Check account balance
@@ -670,6 +679,16 @@ USER_KEY=0x<key> go run ./cmd/user/ exec \
 
 Output: stdout/stderr of the command. Exits with the command's exit code.
 
+For shell features such as `&&`, pipes, redirects, globs, or environment
+expansion, wrap the command explicitly:
+
+```bash
+USER_KEY=0x<key> go run ./cmd/user/ exec \
+  --api http://<proxy>:8080 \
+  --id <sandbox-id> \
+  --cmd "sh -lc 'mkdir -p /tmp/demo && ls -ld /tmp/demo'"
+```
+
 #### `toolbox` — Arbitrary toolbox API call
 
 ```bash
@@ -696,28 +715,42 @@ USER_KEY=0x<key> go run ./cmd/user/ toolbox --api http://<proxy>:8080 --id <id> 
 
 #### `ssh-access` — Get temporary SSH access token
 
-Token valid for 60 minutes. The token is used as the **SSH username** (no password needed).
+Token valid for 60 minutes. The CLI prints the SSH command to stdout and the
+temporary password token to stderr. Quote the token when passing it to
+automation, because it may contain shell metacharacters.
 
 ```bash
 USER_KEY=0x<key> go run ./cmd/user/ ssh-access \
   --api http://<proxy>:8080 \
   --id <sandbox-id>
-# → prints: ssh -p 2222 TOKEN@<host>
+# stdout: ssh -p 2222 <user>@<host>
+# stderr: Password: <token>
 ```
 
 Use for direct SSH or rsync sync:
 ```bash
-SSH_CMD=$(USER_KEY=0x<key> go run ./cmd/user/ ssh-access --api http://<proxy>:8080 --id <id> 2>/dev/null)
+SSH_OUTPUT=$(USER_KEY=0x<key> go run ./cmd/user/ ssh-access --api http://<proxy>:8080 --id <id> 2>&1)
+SSH_CMD=$(printf '%s\n' "$SSH_OUTPUT" | grep '^ssh ')
+TOKEN=$(printf '%s\n' "$SSH_OUTPUT" | awk '/^Password:/ {print $2}')
 PORT=$(echo $SSH_CMD | awk '{print $3}')
 USER_HOST=$(echo $SSH_CMD | awk '{print $4}')
 
 # Direct SSH
 ssh -p $PORT -o StrictHostKeyChecking=no $USER_HOST
+```
 
+Some provider SSH gateways may not support `scp` or the rsync remote protocol.
+Test with a small file before relying on rsync for project sync:
+
+```bash
 # Rsync local directory to sandbox
-rsync -avz --delete -e "ssh -p $PORT -o StrictHostKeyChecking=no" \
+sshpass -p "$TOKEN" rsync -avz --delete -e "ssh -p $PORT -o StrictHostKeyChecking=no" \
   ./my-project/ "${USER_HOST}:/home/daytona/project/"
 ```
+
+If rsync closes the connection or hangs, use the toolbox `files/upload` endpoint
+or `cmd/user exec` with a verified archive upload until first-class CLI upload
+support is available.
 
 ---
 
