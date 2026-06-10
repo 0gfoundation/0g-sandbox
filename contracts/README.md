@@ -4,7 +4,7 @@ Network: **0G Galileo Testnet** (chain ID 16602)
 Explorer: https://chainscan-galileo.0g.ai
 Deployer/Owner: `0xB831371eb2703305f1d9F8542163633D0675CEd7`
 
-> Chinese version: [CONTRACTS.zh.md](CONTRACTS.zh.md)
+> Chinese version: [CONTRACTS.zh.md](README.zh.md)
 
 ---
 
@@ -36,15 +36,20 @@ SETTLEMENT_CONTRACT=0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3
 
 | Component | Address |
 |-----------|---------|
-| **Proxy** (stable) | `0xd7e0CD227e602FedBb93c36B1F5bf415398508a4` |
-| Beacon | `0xe75F37A353EbCbAA497Ea752a6c910c9d0462382` |
-| Implementation | `0x6B789e297bcC3c2F375779f1224b534A4c576445` |
+| **Proxy** (stable) | `0xA07b0033cA65B06B090535944C121D8677FDC12c` |
+| Beacon | `0xfdc08C0CdF629589D05E03849846006c37E800D5` |
 
-**Deployed:** 2026-03-10
-**Provider stake:** 100 0G (`100000000000000000000` neuron)
+**Upgrade history:**
+
+| Date | Impl | Notes |
+|------|------|-------|
+| 2026-06-08 | `0xf870247949B35dC8174212F338DcdE9fCa95d5Bb` | Redeploy on a fresh proxy (supersedes `0xd7e0CD22…`); per-resource pricing + TappRegistry trust root |
+| 2026-06-08 | `0xe95DA05Bf17CAF09Cb129A706760bA52B55f14eE` | Add `deregisterService` — soft-clear a service entry so its (set-once) `appId` can be changed |
+
+**Provider stake:** 100 0G (`100000000000000000000` neuron), held in TappRegistry per node (not in SandboxServing).
 
 ```env
-SETTLEMENT_CONTRACT=0xd7e0CD227e602FedBb93c36B1F5bf415398508a4
+SETTLEMENT_CONTRACT=0xA07b0033cA65B06B090535944C121D8677FDC12c
 ```
 
 ---
@@ -74,6 +79,55 @@ cast call <beacon> "implementation()(address)"
 # Beacon owner
 cast call <beacon> "owner()(address)"
 ```
+
+---
+
+## Interface
+
+`SandboxServing` is the settlement contract. Users deposit 0G earmarked for a
+specific provider; the provider binds commercial terms (URL, prices, createFee)
+to a TappRegistry `appId`; TEE-signed vouchers then settle compute fees on-chain.
+Trust identity — the active TEE signer set and user acknowledgements — lives in
+**TappRegistry** and is queried on every settlement.
+
+**User (billing)**
+
+| Function | Notes |
+|---|---|
+| `deposit(recipient, provider)` payable | Fund `recipient`'s balance earmarked for `provider` |
+| `requestRefund(provider, amount)` | Start a refund; withdrawable after `LOCK_TIME` |
+| `withdrawRefund(provider)` | Withdraw an unlocked refund |
+| `getBalance(user, provider)` → (balance, pendingRefund, refundUnlockAt) | view |
+| `balanceOfBatch(users[], provider)` → uint256[] | view |
+| `getLastNonce(user, provider)` → uint256 | view — last settled voucher nonce |
+| `isTEEAcknowledged(user, provider)` → bool | view — delegates to `tapp.isAcknowledged(user, appId)` |
+
+**Provider**
+
+| Function | Notes |
+|---|---|
+| `addOrUpdateService(url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)` | Register/update; `appId` set-once; caller must be the appId's TappRegistry owner |
+| `deregisterService()` | Soft-clear the caller's service so `appId` can change; balances/earnings/nonces preserved |
+| `withdrawEarnings()` | Withdraw accrued settlement earnings |
+| `services(provider)` / `serviceExists(provider)` | view — commercial terms |
+| `getProviderEarnings(provider)` → uint256 | view |
+
+**Settlement**
+
+| Function | Notes |
+|---|---|
+| `settleFeesWithTEE(vouchers[])` → statuses[] | Permissionless; provider identified by `v.provider`; verifies the EIP-712 signature against the appId's active TEE node in TappRegistry |
+| `previewSettlementResults(vouchers[])` → statuses[] | view — dry-run statuses |
+
+**Admin / setup**
+
+| Function | Notes |
+|---|---|
+| `initialize(tappRegistry_)` | One-time, on the proxy |
+| `owner()` / `transferOwnership(newOwner)` | Contract admin |
+| `tappRegistry()` / `domainSeparator()` / `LOCK_TIME()` | view |
+
+**Events:** `Deposited`, `RefundRequested`, `RefundWithdrawn`, `VoucherSettled`, `EarningsWithdrawn`, `ServiceUpdated`, `ServiceDeregistered`, `OwnershipTransferred`.
 
 ---
 
@@ -154,10 +208,10 @@ The provider's trust root lives in **TappRegistry**: `appId` → composeHash, im
 and the active TEE node set. The provider registers the app there first (via `tapp-cli`),
 then binds commercial terms (URL, prices, createFee) to that `appId` in **SandboxServing**.
 
-See [`CLI.md`](CLI.md) for full flag reference.
+See [`CLI.md`](../docs/CLI.md) for full flag reference.
 
 ```bash
-# 1. Register the TEE-app trust root in TappRegistry (provider key must own the appId)
+# 1. Register the TEE-app trust root in TappRegistry (run with the provider wallet so it becomes the app owner)
 tapp-cli -s http://<tapp-server>:50051 start-app \
   --app-id 0g-sandbox-provider \
   -f docker-compose.yml
@@ -187,4 +241,4 @@ wallet holds enough 0G to pay gas for settlement.
 - **Proxy address never changes** — upgrading only replaces the implementation; the proxy address is the stable external-facing address
 - **Open settlement** — `settleFeesWithTEE` can be called by anyone; the provider is identified by `v.provider` in the voucher, not `msg.sender`
 - **Trust root delegation** — SandboxServing holds only commercial terms; TEE signer identity and user acknowledgement live in TappRegistry and are queried on every voucher verification
-- **`appId` is set-once** — once `addOrUpdateService` has bound a non-empty `appId`, subsequent calls must use the same value (provider can only update URL / prices / createFee, not the trust root)
+- **`appId` is set-once** — once `addOrUpdateService` has bound a non-empty `appId`, subsequent calls must pass the same value (a provider can only update URL / prices / createFee in place, not the trust root). To bind a *different* `appId`, call **`deregisterService`** first: a soft clear of the caller's service entry (url/appId/prices/createFee) that preserves user balances, pending refunds, settled nonces, and accrued `providerEarnings` — all still withdrawable — then re-register. Emits `ServiceDeregistered(provider)`.

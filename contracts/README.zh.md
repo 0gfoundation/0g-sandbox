@@ -4,7 +4,7 @@
 浏览器：https://chainscan-galileo.0g.ai
 部署者/所有者：`0xB831371eb2703305f1d9F8542163633D0675CEd7`
 
-> English version: [CONTRACTS.md](CONTRACTS.md)
+> English version: [CONTRACTS.md](README.md)
 
 ---
 
@@ -36,15 +36,20 @@ SETTLEMENT_CONTRACT=0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3
 
 | 组件 | 地址 |
 |------|------|
-| **Proxy**（稳定地址）| `0xd7e0CD227e602FedBb93c36B1F5bf415398508a4` |
-| Beacon | `0xe75F37A353EbCbAA497Ea752a6c910c9d0462382` |
-| Implementation | `0x6B789e297bcC3c2F375779f1224b534A4c576445` |
+| **Proxy**（稳定地址）| `0xA07b0033cA65B06B090535944C121D8677FDC12c` |
+| Beacon | `0xfdc08C0CdF629589D05E03849846006c37E800D5` |
 
-**部署时间：** 2026-03-10
-**Provider 质押：** 100 0G（`100000000000000000000` neuron）
+**升级历史：**
+
+| 日期 | Impl | 说明 |
+|------|------|------|
+| 2026-06-08 | `0xf870247949B35dC8174212F338DcdE9fCa95d5Bb` | 全新 proxy 重新部署（取代 `0xd7e0CD22…`);per-resource 定价 + TappRegistry trust root |
+| 2026-06-08 | `0xe95DA05Bf17CAF09Cb129A706760bA52B55f14eE` | 新增 `deregisterService` —— 软清除 service,使（写一次的）`appId` 可更换 |
+
+**Provider 质押：** 100 0G（`100000000000000000000` neuron），按节点存在 TappRegistry 里(不在 SandboxServing)。
 
 ```env
-SETTLEMENT_CONTRACT=0xd7e0CD227e602FedBb93c36B1F5bf415398508a4
+SETTLEMENT_CONTRACT=0xA07b0033cA65B06B090535944C121D8677FDC12c
 ```
 
 ---
@@ -74,6 +79,54 @@ cast call <beacon> "implementation()(address)"
 # Beacon 所有者
 cast call <beacon> "owner()(address)"
 ```
+
+---
+
+## 接口
+
+`SandboxServing` 是结算合约:用户把 0G 充值并指定某个 provider;provider 把业务条款
+(URL、价格、createFee)绑定到 TappRegistry 的 `appId`;之后用 TEE 签名的 voucher 在链上
+结算计算费。信任身份(活跃 TEE 签名集合、用户 acknowledgement)存在 **TappRegistry**,
+每次结算都会查询。
+
+**用户(计费)**
+
+| 函数 | 说明 |
+|---|---|
+| `deposit(recipient, provider)` payable | 给 `recipient` 充值,指定 `provider` |
+| `requestRefund(provider, amount)` | 发起退款;经 `LOCK_TIME` 后可提取 |
+| `withdrawRefund(provider)` | 提取已解锁的退款 |
+| `getBalance(user, provider)` → (balance, pendingRefund, refundUnlockAt) | view |
+| `balanceOfBatch(users[], provider)` → uint256[] | view |
+| `getLastNonce(user, provider)` → uint256 | view — 最后结算的 nonce |
+| `isTEEAcknowledged(user, provider)` → bool | view — 委托给 `tapp.isAcknowledged(user, appId)` |
+
+**Provider**
+
+| 函数 | 说明 |
+|---|---|
+| `addOrUpdateService(url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)` | 注册/更新;`appId` 写一次;调用者须是该 appId 的 TappRegistry owner |
+| `deregisterService()` | 软清除自己的 service,使 `appId` 可更换;余额/earnings/nonce 保留 |
+| `withdrawEarnings()` | 提取累计结算收益 |
+| `services(provider)` / `serviceExists(provider)` | view — 业务条款 |
+| `getProviderEarnings(provider)` → uint256 | view |
+
+**结算**
+
+| 函数 | 说明 |
+|---|---|
+| `settleFeesWithTEE(vouchers[])` → statuses[] | 无需权限;provider 由 `v.provider` 标识;按 appId 的活跃 TEE 节点验 EIP-712 签名 |
+| `previewSettlementResults(vouchers[])` → statuses[] | view — 试算结算状态 |
+
+**管理 / 初始化**
+
+| 函数 | 说明 |
+|---|---|
+| `initialize(tappRegistry_)` | 一次性,在 proxy 上 |
+| `owner()` / `transferOwnership(newOwner)` | 合约管理员 |
+| `tappRegistry()` / `domainSeparator()` / `LOCK_TIME()` | view |
+
+**事件:** `Deposited`、`RefundRequested`、`RefundWithdrawn`、`VoucherSettled`、`EarningsWithdrawn`、`ServiceUpdated`、`ServiceDeregistered`、`OwnershipTransferred`。
 
 ---
 
@@ -153,10 +206,10 @@ Provider 的 trust root 存放在 **TappRegistry**：`appId` → composeHash、�
 当前活跃 TEE 节点集合。Provider 先通过 `tapp-cli` 在 TappRegistry 注册 app，再在
 **SandboxServing** 中把 URL / 价格 / createFee 绑定到该 `appId`。
 
-完整 flag 说明见 [`CLI.md`](CLI.md)。
+完整 flag 说明见 [`CLI.md`](../docs/CLI.md)。
 
 ```bash
-# 1. 在 TappRegistry 中启动并注册 app（owner 必须是 provider 私钥）
+# 1. 在 TappRegistry 中启动并注册 app（用 provider 钱包执行,使其成为 app owner）
 tapp-cli -s http://<tapp-server>:50051 start-app \
   --app-id 0g-sandbox-provider \
   -f docker-compose.yml
@@ -167,7 +220,7 @@ tapp-cli authorize-invalidator-onchain \
   --app-id    0g-sandbox-provider \
   --contract  0x<sandbox-serving-proxy>
 
-# 3. 在 SandboxServing 中把商业条款绑定到 appId
+# 3. 在 SandboxServing 中把业务信息绑定到 appId
 PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ register \
   --api            http://<billing-proxy>:8080 \
   --app-id         0g-sandbox-provider \
@@ -186,4 +239,4 @@ PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ register \
 - **Proxy 地址永不变** — 升级只替换 implementation，proxy 地址是对外稳定地址
 - **结算开放** — `settleFeesWithTEE` 任何人可调用，provider 由 voucher 内的 `v.provider` 字段标识，与 `msg.sender` 无关
 - **Trust root 委托** — SandboxServing 只持有商业条款；TEE 签名身份与用户 acknowledgement 都在 TappRegistry 中，每次 voucher 验签都会查询
-- **`appId` 写一次** — 一旦 `addOrUpdateService` 绑定了非空 `appId`，之后只能修改 URL / 价格 / createFee，无法替换 trust root
+- **`appId` 写一次** — 一旦 `addOrUpdateService` 绑定了非空 `appId`，之后只能就地修改 URL / 价格 / createFee，无法替换 trust root。要绑定**不同的** `appId`,需先调 **`deregisterService`**:软清除调用者自己的 service 条目(url/appId/价格/createFee),但保留用户余额、待退款、已结算 nonce 和累计 `providerEarnings`(仍可提取),然后重新 register。触发 `ServiceDeregistered(provider)` 事件。

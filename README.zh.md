@@ -97,7 +97,7 @@ Claude 会引导你完成后续所有步骤。需要填写配置时，关键信�
 
 ## 合约部署
 
-合约架构、部署/升级/验证操作及合约地址见 [`CONTRACTS.zh.md`](CONTRACTS.zh.md)。
+合约架构、部署/升级/验证操作及合约地址见 [`CONTRACTS.zh.md`](contracts/README.zh.md)。
 
 ---
 

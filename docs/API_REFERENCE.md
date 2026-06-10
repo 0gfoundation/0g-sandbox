@@ -1,5 +1,7 @@
 # 0G Sandbox — SDK & API Reference
 
+> 中文版：[API_REFERENCE.zh.md](API_REFERENCE.zh.md)
+
 > Billing proxy that authenticates users via EIP-191 wallet signatures, manages Daytona sandboxes,
 > and settles usage fees on-chain in 0G tokens.
 
@@ -227,13 +229,16 @@ Server configuration and pricing.
 > request that doesn't set `"sealed": true` is rejected with HTTP 400.
 
 #### `GET /api/providers`
-On-chain service data for all known providers.
+On-chain service data for the provider this billing instance serves
+(`PROVIDER_ADDRESS`). Returns an array — currently a single entry — read live
+from `SandboxServing.services`. Returns `[]` if that provider has no active
+service registration (e.g. after `deregisterService`).
 ```json
 [
   {
     "address":                "0x...",
     "url":                    "https://...",
-    "app_id":                 "0g-sandbox-provider",
+    "app_id":                 "0g-sandbox-provider-testnet",
     "price_per_cpu_per_min":  "1000000000000000",
     "price_per_cpu_per_sec":  "16666666666666",
     "price_per_mem_gb_per_min":"500000000000000",
@@ -243,6 +248,13 @@ On-chain service data for all known providers.
 ]
 ```
 All monetary amounts are in **neuron** (1 0G = 10¹⁸ neuron).
+
+> **Multi-provider discovery (marketplace):** the broker exposes its own
+> `GET /api/providers` backed by an on-chain indexer that scans `ServiceUpdated`
+> events and lists **all live providers** — filtered against TappRegistry so a
+> provider only appears while it is still the current owner of its `appId`
+> (deregistered / superseded providers are dropped). Use the broker endpoint
+> for a market view; this billing endpoint only reports its own provider.
 
 ---
 

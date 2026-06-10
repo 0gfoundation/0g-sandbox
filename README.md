@@ -124,7 +124,7 @@ tapp-cli -s http://<server>:50051 get-app-key --app-id 0g-sandbox
 
 ## Contract Deployment
 
-See [`CONTRACTS.md`](CONTRACTS.md) for architecture, deploy/upgrade/verify instructions, and contract addresses.
+See [`CONTRACTS.md`](contracts/README.md) for architecture, deploy/upgrade/verify instructions, and contract addresses.
 
 ---
 
@@ -225,11 +225,18 @@ tapp-cli -s http://<tapp-server>:50051 get-app-info --app-id 0g-sandbox
 
 ## User Operations
 
-Users interact with the system via:
-1. **On-chain**: deposit funds and acknowledge the provider's `appId` in TappRegistry
-2. **HTTP API**: create, list, stop, and delete sandboxes (authenticated via EIP-191 signatures)
+Users interact with the system through one of two surfaces, both backed by the
+same on-chain `(deposit + ack appId)` and EIP-191 sandbox API model:
 
-See [`CLI.md`](CLI.md) for the full `cmd/user` reference and onboarding flow.
+- **Broker web frontend** (`GET /` on the broker, served from `web/user.html`) —
+  recommended path. Connect a web3 wallet, the page reads broker's own `appId`
+  from `GET /api/info` and prompts to `tap.acknowledgeApp(brokerAppId)`, then
+  shows the indexed provider marketplace. Picking a provider and clicking
+  `+ new` triggers `tap.acknowledgeApp(providerAppId)` and the sandbox create
+  flow goes through the broker's `/proxy/:provider/*` reverse proxy. See
+  [Broker: User Entry Portal](#broker-user-entry-portal) below.
+- **`cmd/user` CLI** — same operations from the terminal, useful for scripted
+  / CI flows. Documented in [`CLI.md`](CLI.md).
 
 **Minimum balance to create a sandbox:**
 ```
@@ -266,8 +273,36 @@ caller. Trust is rooted in the TEE hardware, not in operator configuration.
 ### Provider Marketplace
 
 The Broker indexes registered providers from chain events (via `cmd/broker` → `internal/indexer`)
-and exposes them at `GET /api/providers`. The dashboard UI uses this to let users pick a
-provider without knowing any provider URLs directly.
+and exposes them at `GET /api/providers`. Each entry includes the provider's `app_id`
+(the appId bound to its SandboxServing service) so the user frontend can route an ack
+straight to TappRegistry without an extra chain read.
+
+### Web Frontend (`GET /`)
+
+The broker embeds `web/user.html` and serves it at `/`. This is the production
+entry point for end users — no CLI install required.
+
+The full UX flow:
+
+1. Page loads → `GET /api/info` returns `{contract_address, tapp_registry, app_id, chain_id, rpc_url}`.
+   `app_id` is the broker's own tapp app-id (read from `BACKEND_APP_NAME`);
+   `tapp_registry` is the TappRegistry contract address. Both are needed to
+   call `tap.acknowledgeApp` from the browser.
+2. User clicks **Connect Wallet** → broker prompts with the on-chain trust root
+   (composeHash, image hashes, active TEE nodes + their teeUrl, ackVersion)
+   pulled live from `tap.getAppInfo(brokerAppId)` and asks them to sign
+   `tap.acknowledgeApp(brokerAppId)`. The modal includes a `tapp-cli get-evidence`
+   pointer for users who want to remote-attest the TEE before signing.
+3. `GET /api/providers` populates the marketplace; each provider card shows
+   address, app_id, prices, balance, and the user's sandbox list (fetched
+   through `/proxy/:provider/api/sandbox_list?wallet=`).
+4. **+ new** on a provider card runs the same trust-root prompt for that
+   provider's appId, then opens the create modal. Without ack, the create
+   step aborts cleanly — no sandbox is opened until both acks succeed.
+5. All `signedFetch` calls (create, stop, delete, etc.) go through the broker's
+   `/proxy/:providerAddr/*` reverse proxy back to the sandbox provider, so the
+   browser stays on the broker origin (no CORS to manage) and the broker can
+   observe the request stream for balance monitoring.
 
 ### Balance Monitoring & Automatic Top-up
 
@@ -348,4 +383,4 @@ go test ./...
 make test-contracts
 ```
 
-See [`TESTING.md`](TESTING.md) for unit, integration, and E2E test details.
+See [`TESTING.md`](docs/TESTING.md) for unit, integration, and E2E test details.

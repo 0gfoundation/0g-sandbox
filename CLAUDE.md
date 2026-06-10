@@ -205,7 +205,7 @@ go build -tags sealdebug ./...
 go test -tags sealdebug ./...
 ```
 
-See `TESTING.md` for full test documentation.
+See `docs/TESTING.md` for full test documentation.
 
 ---
 
