@@ -31,6 +31,8 @@ services:
       COMPUTE_PRICE_PER_SEC:   ${COMPUTE_PRICE_PER_SEC:-16667}
       CREATE_FEE:              ${CREATE_FEE:-5000000}
       VOUCHER_INTERVAL_SEC:    ${VOUCHER_INTERVAL_SEC:-60}
+      # Provider-wide gate: reject create requests without "sealed": true.
+      SEALED_ONLY:             ${SEALED_ONLY:-false}
       SSH_GATEWAY_HOST:        ${SSH_GATEWAY_HOST:-}
       BROKER_URL:              ${BROKER_URL:-}
       PORT:                    8080
@@ -76,7 +78,11 @@ services:
     image: daytonaio/daytona-api@sha256:c1203729b066b7b4724a03973a1c167625b8bef89cc2172557e06871c1e3a082
     environment:
       - OTEL_ENABLED=false
-      - DEFAULT_SNAPSHOT=daytonaio/sandbox:0.5.0-slim
+      # Snapshot used when a create request doesn't specify one. Per-env: a
+      # sealed-only provider should default to its sealed snapshot. Daytona
+      # protects the default snapshot from deletion, so don't point it at one
+      # you intend to delete.
+      - DEFAULT_SNAPSHOT=${DEFAULT_SNAPSHOT:-daytonaio/sandbox:0.5.0-slim}
       - ENCRYPTION_KEY=${DAYTONA_ENCRYPTION_KEY}
       - ENCRYPTION_SALT=${DAYTONA_ENCRYPTION_SALT}
       - NODE_ENV=production
@@ -124,9 +130,9 @@ services:
       - MAX_AUTO_ARCHIVE_INTERVAL=43200
       - MAINTENANCE_MODE=false
       - PROXY_DOMAIN=${PROXY_DOMAIN:-proxy.localhost:4000}
-      - PROXY_PROTOCOL=http
+      - PROXY_PROTOCOL=${PROXY_PROTOCOL:-http}
       - PROXY_API_KEY=${DAYTONA_PROXY_API_KEY}
-      - PROXY_TEMPLATE_URL=http://{{PORT}}-{{sandboxId}}.${PROXY_DOMAIN:-proxy.localhost:4000}
+      - PROXY_TEMPLATE_URL=${PROXY_PROTOCOL:-http}://{{PORT}}-{{sandboxId}}.${PROXY_DOMAIN:-proxy.localhost:4000}
       - DEFAULT_RUNNER_DOMAIN=runner:3003
       - DEFAULT_RUNNER_API_URL=http://runner:3003
       - DEFAULT_RUNNER_PROXY_URL=http://runner:3003
@@ -223,7 +229,7 @@ services:
       - DAYTONA_API_URL=http://api:3000/api
       - PROXY_PORT=4000
       - PROXY_API_KEY=${DAYTONA_PROXY_API_KEY}
-      - PROXY_PROTOCOL=http
+      - PROXY_PROTOCOL=${PROXY_PROTOCOL:-http}
       - OIDC_CLIENT_ID=daytona
       - OIDC_CLIENT_SECRET=
       - OIDC_DOMAIN=http://dex:5556/dex
