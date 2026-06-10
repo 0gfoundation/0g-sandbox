@@ -1014,6 +1014,9 @@ async function ensureAcked(appId, label, description) {
   await sendTx(`Acknowledge ${label}`, () => tap.acknowledgeApp(appId), {
     onSuccess: () => { success = true; },
   });
+  // Popup ack (create/start flow) must also refresh the provider cards, or the
+  // top-right acknowledge button/badge stays stale. forceChain bypasses _chainCache.
+  if (success) { try { loadProviders(true); } catch (_) {} }
   return success;
 }
 
