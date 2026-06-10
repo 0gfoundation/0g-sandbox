@@ -218,9 +218,11 @@ func main() {
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
+	// Provider home is the operator dashboard. The user-facing market page
+	// (UserHTML) is served by the broker; end users reach providers through it.
 	r.GET("/", func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
-		c.Data(http.StatusOK, "text/html; charset=utf-8", web.UserHTML)
+		c.Data(http.StatusOK, "text/html; charset=utf-8", web.DashboardHTML)
 	})
 	r.GET("/dashboard", func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
