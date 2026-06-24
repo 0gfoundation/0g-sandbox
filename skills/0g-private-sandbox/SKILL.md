@@ -125,14 +125,17 @@ Tell the user to save their private key securely — it will not be shown again.
 
 ### Step 1 — Discover providers
 
-**Direct path** — scan the chain:
+`providers` reads on-chain service registrations directly — there is **no `--api` flag**. It uses the `RPC_URL` and `SETTLEMENT_CONTRACT` you set during session setup (from the broker's `/api/info` on the broker path, or from your answers on the direct path), so the same command works for both paths:
+
 ```bash
 go run ./cmd/user/ providers
 ```
 
-**Broker path** — query provider index via broker (no chain scan):
+To target a different network or contract without changing those env vars, pass the chain flags explicitly:
+
 ```bash
-go run ./cmd/user/ providers --api $API
+go run ./cmd/user/ providers \
+  --rpc "$RPC_URL" --contract "$SETTLEMENT_CONTRACT"
 ```
 
 After picking a provider, update `API` to the selected provider URL (from the export commands printed by the command). From this point on, `API` always points to the provider, not the broker.
