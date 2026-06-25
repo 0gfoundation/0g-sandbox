@@ -56,7 +56,6 @@ import (
 const (
 	defaultRPC      = "https://evmrpc-testnet.0g.ai"
 	defaultChainID  = int64(16602)
-	defaultContract = "0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3"
 )
 
 func main() {
@@ -106,7 +105,7 @@ func runRegister(args []string) {
 	fs := flag.NewFlagSet("register", flag.ExitOnError)
 	rpc            := fs.String("rpc",           defaultRPC,              "RPC endpoint")
 	chainID        := fs.Int64("chain-id",        defaultChainID,          "Chain ID")
-	contractHex    := fs.String("contract",       defaultContract,         "Settlement contract address")
+	contractHex    := fs.String("contract",       envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
 	keyHex         := fs.String("key",            "",                      "Provider private key (hex); or set PROVIDER_KEY env")
 	appId          := fs.String("app-id",         "",                      "TappRegistry appId to bind (required; must already be registered in tapp)")
 	serviceURL     := fs.String("url",            "",                      "Provider service URL (required)")
@@ -165,7 +164,7 @@ func runDeregister(args []string) {
 	fs := flag.NewFlagSet("deregister", flag.ExitOnError)
 	rpc         := fs.String("rpc",      defaultRPC,      "RPC endpoint")
 	chainID     := fs.Int64("chain-id",  defaultChainID,  "Chain ID")
-	contractHex := fs.String("contract", defaultContract, "Settlement contract address")
+	contractHex := fs.String("contract", envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
 	keyHex      := fs.String("key",      "",              "Provider private key (hex); or set PROVIDER_KEY env")
 	_ = fs.Parse(args)
 
@@ -204,7 +203,7 @@ func runDeregister(args []string) {
 func runStatus(args []string) {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 	rpc         := fs.String("rpc",      defaultRPC,      "RPC endpoint")
-	contractHex := fs.String("contract", defaultContract, "Settlement contract address")
+	contractHex := fs.String("contract", envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
 	keyHex      := fs.String("key",      "",              "Provider private key; or set PROVIDER_KEY env")
 	addrHex     := fs.String("address",  "",              "Provider address (alternative to --key)")
 	_ = fs.Parse(args)
@@ -264,7 +263,7 @@ func runWithdraw(args []string) {
 	fs := flag.NewFlagSet("withdraw", flag.ExitOnError)
 	rpc         := fs.String("rpc",      defaultRPC,      "RPC endpoint")
 	chainID     := fs.Int64("chain-id",  defaultChainID,  "Chain ID")
-	contractHex := fs.String("contract", defaultContract, "Settlement contract address")
+	contractHex := fs.String("contract", envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
 	keyHex      := fs.String("key",      "",              "Provider private key; or set PROVIDER_KEY env")
 	_ = fs.Parse(args)
 
@@ -668,6 +667,13 @@ func signRequest(privKey *ecdsa.PrivateKey, action, resourceID string, payload j
 	return base64.StdEncoding.EncodeToString(msgBytes), "0x" + hex.EncodeToString(sigBytes), addr.Hex()
 }
 
+func envOrDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
 func resolveEnv(flagVal, envVar, label string) string {
 	if flagVal != "" {
 		return flagVal
@@ -703,6 +709,9 @@ func parseBigInt(s, name string) *big.Int {
 }
 
 func dialContract(ctx context.Context, rpcURL, contractHex string) (*ethclient.Client, *chain.SandboxServing) {
+	if contractHex == "" {
+		fatalf("settlement contract is required: set --contract or SETTLEMENT_CONTRACT env var (e.g. from broker GET /api/info)")
+	}
 	eth, err := ethclient.Dial(rpcURL)
 	if err != nil {
 		fatalf("dial rpc: %v", err)
