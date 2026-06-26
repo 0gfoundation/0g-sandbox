@@ -649,6 +649,7 @@ body.v-market .view-market{display:block}
 <div class="modal-bg" id="createModal">
   <div class="modal">
     <div class="modal-title">Create Sandbox</div>
+    <div id="createSealedNote" class="hint" style="display:none;background:rgba(120,60,200,0.10);border:1px solid rgba(180,140,255,0.30);color:#cba8ff;padding:8px 10px;border-radius:6px;margin-bottom:12px"></div>
     <div class="field">
       <label>Name (optional)</label>
       <input id="sandboxName" type="text" placeholder="my-sandbox" maxlength="60">
@@ -1104,15 +1105,32 @@ async function loadProviders(forceChain=false) {
       return;
     }
 
-    // Health check — no auth needed
+    // Health check + per-provider /api/info (for sealed_only) — no auth needed.
+    // We piggyback the info fetch on the health probe so a slow provider
+    // doesn't double the wait.
     const healthByProvider = {};
+    const sealedOnlyByProvider = {};
     await Promise.all(providers.map(async p => {
       const key = p.address.toLowerCase();
-      const res = await Promise.race([
-        fetch(`/proxy/${p.address}/healthz`),
-        new Promise((_,r)=>setTimeout(()=>r(new Error('timeout')),3000))
-      ]).catch(()=>null);
-      healthByProvider[key] = res?.ok === true;
+      const [healthRes, infoRes] = await Promise.all([
+        Promise.race([
+          fetch(`/proxy/${p.address}/healthz`),
+          new Promise((_,r)=>setTimeout(()=>r(new Error('timeout')),3000))
+        ]).catch(()=>null),
+        Promise.race([
+          fetch(`/proxy/${p.address}/api/info`),
+          new Promise((_,r)=>setTimeout(()=>r(new Error('timeout')),3000))
+        ]).catch(()=>null),
+      ]);
+      healthByProvider[key] = healthRes?.ok === true;
+      sealedOnlyByProvider[key] = false;
+      if (infoRes?.ok) {
+        try {
+          const info = await infoRes.json();
+          sealedOnlyByProvider[key] = !!info?.sealed_only;
+          p.sealed_only = sealedOnlyByProvider[key]; // make it available via _providerMap later
+        } catch(_) {}
+      }
     }));
 
     // On-chain + sandbox data — only if wallet connected
@@ -1216,6 +1234,7 @@ async function loadProviders(forceChain=false) {
               <span class="pv-addr" title="${p.address}">${shortAddr(p.address)}</span>
               <span class="tag ${isUp ? 'running' : 'error'}"><span class="tag-dot"></span>${isUp ? 'online' : 'offline'}</span>
               ${isAcked ? '<span class="badge green">acknowledged</span>' : ''}
+              ${p.sealed_only ? `<span class="badge" style="background:rgba(120,60,200,0.18);color:#cba8ff;border:1px solid rgba(180,140,255,0.35)">sealed-only<span class="tip"><span class="tip-icon">?</span><span class="tip-box">This provider only runs hardware-sealed sandboxes. Every workload boots inside a TDX enclave whose contents (your code, files, exec output) the provider operator cannot inspect; SSH and the toolbox API are blocked for the sandbox lifetime. The "sealed": true flag is added automatically when you click + new.</span></span></span>` : ''}
             </div>
             <div class="pv-pricing-chips">
               <span class="pv-chip">cpu <span>${fmtNeuron(p.price_per_cpu_per_min)}/min</span></span>
@@ -1386,7 +1405,11 @@ async function doCreate() {
   setErr('createErr',''); setLoading('createErr','');
   const btn=document.getElementById('createBtn'); btn.disabled=true; btn.textContent='creating… (~60s)';
   const prevIds=await fetchSandboxIds();
+  // sealed-only providers reject any create without "sealed": true with HTTP 400.
+  // The badge in the provider card head + this auto-injection keep that gate
+  // invisible to the user — they just click + new and get the right thing.
   const body={}; if(name) body.name=name; if(snapshot) body.snapshot=snapshot;
+  if (selectedProvider.sealed_only) body.sealed = true;
   try {
     const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),180000);
     const resp=await signedFetch('POST','/api/sandbox',body,ctrl.signal); clearTimeout(timer);
@@ -1496,7 +1519,23 @@ async function signedFetch(method, path, body=null, signal=null) {
 }
 
 // ── Modals ────────────────────────────────────────────────────────────────────
-function openModal(id)  { document.getElementById(id).classList.add('open'); if(id==='createModal') loadSnapshots(); }
+function openModal(id)  {
+  document.getElementById(id).classList.add('open');
+  if (id==='createModal') {
+    loadSnapshots();
+    // Reflect the picked provider's sealed_only into the modal so users know
+    // upfront that this sandbox will be hardware-sealed (no SSH/toolbox).
+    const note = document.getElementById('createSealedNote');
+    if (note) {
+      if (selectedProvider?.sealed_only) {
+        note.textContent = 'This provider is sealed-only — the sandbox boots inside a TDX enclave. SSH and the toolbox API are blocked for its lifetime; only the agent-fronting proxy port is reachable. The "sealed": true flag is set automatically.';
+        note.style.display = 'block';
+      } else {
+        note.style.display = 'none';
+      }
+    }
+  }
+}
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) m.classList.remove('open'); }));
 
