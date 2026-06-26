@@ -130,7 +130,7 @@ func addChainFlags(fs *flag.FlagSet) *chainFlags {
 	cf := &chainFlags{}
 	fs.StringVar(&cf.rpc,      "rpc",      envOrDefault("RPC_URL", "https://evmrpc-testnet.0g.ai"),                       "RPC endpoint")
 	fs.Int64Var(&cf.chainID,   "chain-id", 16602,                                                                          "Chain ID")
-	fs.StringVar(&cf.contract, "contract", envOrDefault("SETTLEMENT_CONTRACT", "0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3"), "Settlement contract address")
+	fs.StringVar(&cf.contract, "contract", envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: set --contract or SETTLEMENT_CONTRACT env)")
 	fs.StringVar(&cf.tapp,     "tapp",     envOrDefault("TAPP_REGISTRY", ""),                                              "TappRegistry contract address (required for ack)")
 	return cf
 }
@@ -1037,6 +1037,9 @@ func mustLoadKey(keyHex string) *ecdsa.PrivateKey {
 
 // mustDialContract dials the RPC and binds the SandboxServing contract.
 func mustDialContract(ctx context.Context, rpcURL, contractHex string) (*ethclient.Client, *chain.SandboxServing) {
+	if contractHex == "" {
+		fatalf("settlement contract is required: set --contract or SETTLEMENT_CONTRACT env var (e.g. from broker GET /api/info)")
+	}
 	eth, err := ethclient.Dial(rpcURL)
 	if err != nil {
 		fatalf("dial rpc: %v", err)
