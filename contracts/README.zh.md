@@ -124,9 +124,10 @@ cast call <beacon> "owner()(address)"
 |---|---|
 | `initialize(tappRegistry_)` | 一次性,在 proxy 上 |
 | `owner()` / `transferOwnership(newOwner)` | 合约管理员 |
+| `setTappRegistry(newRegistry)` | TappRegistry 重新部署后用来切换指向;ack 状态从新 registry 读 |
 | `tappRegistry()` / `domainSeparator()` / `LOCK_TIME()` | view |
 
-**事件:** `Deposited`、`RefundRequested`、`RefundWithdrawn`、`VoucherSettled`、`EarningsWithdrawn`、`ServiceUpdated`、`ServiceDeregistered`、`OwnershipTransferred`。
+**事件:** `Deposited`、`RefundRequested`、`RefundWithdrawn`、`VoucherSettled`、`EarningsWithdrawn`、`ServiceUpdated`、`ServiceDeregistered`、`OwnershipTransferred`、`TappRegistryUpdated`。
 
 ---
 
