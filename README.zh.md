@@ -85,13 +85,13 @@ claude
 
 ---
 
-Claude 会引导你完成后续所有步骤。需要填写配置时，关键信息如下：
+Claude 会引导你完成后续所有步骤。需要填写配置时，你唯一需要提供的就是托管的测试网 Broker：
 
 | 项目 | 值 |
 |------|-----|
-| **测试网合约** | `0xd7e0CD227e602FedBb93c36B1F5bf415398508a4` |
-| **RPC** | `https://evmrpc-testnet.0g.ai` |
-| **Chain ID** | `16602` |
+| **测试网 Broker** | `https://private-sandbox-testnet.0g.ai` |
+
+Claude（或 CLI）会从 Broker 的 `GET /api/info` 读取其余信息：`contract_address`、`rpc_url`（`https://evmrpc-testnet.0g.ai`）和 `chain_id`（`16602`），因此无需手动填写其他内容。
 
 ---
 
