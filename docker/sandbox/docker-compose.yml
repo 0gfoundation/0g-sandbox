@@ -205,6 +205,12 @@ services:
       # Image default is true (baked into Dockerfile); must explicitly set
       # to false to enable Docker CFS/memory cgroup limits on sandbox containers.
       - RESOURCE_LIMITS_DISABLED=false
+      # NOTE: `INTER_SANDBOX_NETWORK_ENABLED=false` is the upstream-supported
+      # way to disable cross-sandbox traffic — but it landed in daytona-runner
+      # only ~v0.179+ (May 2026). Our pinned image (sha256:a1de89138d...,
+      # Feb 2026) predates it; setting it here is a no-op on that image.
+      # Until we upgrade the runner image, cross-sandbox isolation is
+      # enforced by the `runner-firewall` sidecar service below.
       - AWS_ENDPOINT_URL=http://minio:9000
       - AWS_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
@@ -219,6 +225,46 @@ services:
     depends_on:
       - minio
     privileged: true
+    restart: always
+
+  # SECURITY: cross-sandbox network isolation enforcer.
+  # Shares the runner container's network namespace and inserts an
+  # iptables rule in the DOCKER-USER chain that drops any packet
+  # forwarded between two containers on docker0 (the runner's internal
+  # bridge where all sandboxes live). Reconciles every 60s so the rule
+  # is restored after runner / dockerd restarts.
+  #
+  # docker0 -> docker0 forwarding is exactly cross-sandbox traffic.
+  # sandbox -> external (egress via eth0) and sandbox -> gateway (INPUT
+  # to the runner, not FORWARD) are unaffected.
+  #
+  # daytona-runner's own iptables persistence loop manages a separate
+  # set of chains (per-sandbox egress rules); it does not touch
+  # DOCKER-USER, so this sidecar and daytona-runner coexist cleanly.
+  #
+  # Once we upgrade the runner image to v0.179+ this sidecar can be
+  # replaced by setting `INTER_SANDBOX_NETWORK_ENABLED=false` on the
+  # runner service.
+  runner-firewall:
+    image: alpine:3.22
+    network_mode: "service:runner"
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      runner:
+        condition: service_started
+    command:
+      - sh
+      - -c
+      - |
+        apk add --no-cache iptables >/dev/null 2>&1
+        echo "runner-firewall: enforcing cross-sandbox network isolation on DOCKER-USER"
+        while true; do
+          iptables -C DOCKER-USER -i docker0 -o docker0 -j DROP 2>/dev/null \
+            || ( iptables -I DOCKER-USER 1 -i docker0 -o docker0 -j DROP \
+                 && echo "$(date -u +%FT%TZ) inserted DOCKER-USER docker0->docker0 DROP rule" )
+          sleep 60
+        done
     restart: always
 
   proxy:
