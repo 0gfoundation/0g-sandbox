@@ -81,17 +81,50 @@ func (c *Client) GetSandbox(ctx context.Context, id string) (*Sandbox, error) {
 	return &s, json.NewDecoder(resp.Body).Decode(&s)
 }
 
+// ListSandboxes returns every sandbox visible to the admin key. v0.189+
+// paginates the response as {items, nextCursor}; older versions returned a
+// flat array. Handle both shapes and walk the cursor when present.
 func (c *Client) ListSandboxes(ctx context.Context) ([]Sandbox, error) {
-	resp, err := c.do(ctx, http.MethodGet, "/api/sandbox", nil)
-	if err != nil {
-		return nil, err
+	var all []Sandbox
+	cursor := ""
+	for {
+		// v0.189 caps limit at 200; larger values return 400. Pre-v0.189 ignores.
+		path := "/api/sandbox?limit=200"
+		if cursor != "" {
+			path += "&cursor=" + cursor
+		}
+		resp, err := c.do(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, err
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("daytona ListSandboxes: status %d", resp.StatusCode)
+		}
+		// v0.189+ envelope.
+		var paged struct {
+			Items      []Sandbox `json:"items"`
+			NextCursor string    `json:"nextCursor"`
+		}
+		if err := json.Unmarshal(body, &paged); err == nil && paged.Items != nil {
+			all = append(all, paged.Items...)
+			if paged.NextCursor == "" {
+				return all, nil
+			}
+			cursor = paged.NextCursor
+			continue
+		}
+		// Legacy flat array.
+		var flat []Sandbox
+		if err := json.Unmarshal(body, &flat); err != nil {
+			return nil, fmt.Errorf("daytona ListSandboxes: decode: %w", err)
+		}
+		return flat, nil
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("daytona ListSandboxes: status %d", resp.StatusCode)
-	}
-	var list []Sandbox
-	return list, json.NewDecoder(resp.Body).Decode(&list)
 }
 
 func (c *Client) StopSandbox(ctx context.Context, id string) error {
