@@ -197,6 +197,14 @@ services:
 
   runner:
     image: daytonaio/daytona-runner:v0.189.0-amd64
+    # Sysbox at the outer boundary: host dockerd starts the runner via
+    # sysbox-runc so the runner (and its DinD + user sandboxes) live in a
+    # user namespace. Container uid 0 maps to a non-root uid on host, so
+    # even a privileged user sandbox escaping to the runner is not host
+    # root. Preserves the DinD + internal-registry topology unchanged;
+    # only the outer runtime shifts. Requires sysbox-runc registered on
+    # the host dockerd (see 0g-tapp gcp-cvm build-gcp-tapp.sh ENABLE_SYSBOX).
+    runtime: sysbox-runc
     environment:
       - ENVIRONMENT=production
       - API_PORT=3003
