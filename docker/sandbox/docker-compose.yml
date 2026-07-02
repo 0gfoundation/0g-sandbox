@@ -75,7 +75,7 @@ services:
   # Port 3000 is intentionally NOT published. All external API access must go
   # through the sandbox proxy on port 8080.
   api:
-    image: daytonaio/daytona-api@sha256:c1203729b066b7b4724a03973a1c167625b8bef89cc2172557e06871c1e3a082
+    image: daytonaio/daytona-api:v0.189.0-amd64
     environment:
       - OTEL_ENABLED=false
       # Snapshot used when a create request doesn't specify one. Per-env: a
@@ -196,7 +196,15 @@ services:
     privileged: true
 
   runner:
-    image: daytonaio/daytona-runner@sha256:a1de89138d9f549f3313f6896748b36f30d0bead4a0a84ddf79f56a1fbe036b0
+    image: daytonaio/daytona-runner:v0.189.0-amd64
+    # Sysbox at the outer boundary: host dockerd starts the runner via
+    # sysbox-runc so the runner (and its DinD + user sandboxes) live in a
+    # user namespace. Container uid 0 maps to a non-root uid on host, so
+    # even a privileged user sandbox escaping to the runner is not host
+    # root. Preserves the DinD + internal-registry topology unchanged;
+    # only the outer runtime shifts. Requires sysbox-runc registered on
+    # the host dockerd (see 0g-tapp gcp-cvm build-gcp-tapp.sh ENABLE_SYSBOX).
+    runtime: sysbox-runc
     environment:
       - ENVIRONMENT=production
       - API_PORT=3003
@@ -205,12 +213,13 @@ services:
       # Image default is true (baked into Dockerfile); must explicitly set
       # to false to enable Docker CFS/memory cgroup limits on sandbox containers.
       - RESOURCE_LIMITS_DISABLED=false
-      # NOTE: `INTER_SANDBOX_NETWORK_ENABLED=false` is the upstream-supported
-      # way to disable cross-sandbox traffic — but it landed in daytona-runner
-      # only ~v0.179+ (May 2026). Our pinned image (sha256:a1de89138d...,
-      # Feb 2026) predates it; setting it here is a no-op on that image.
-      # Until we upgrade the runner image, cross-sandbox isolation is
-      # enforced by the `runner-firewall` sidecar service below.
+      # Native cross-sandbox network isolation (v0.179+). Runner spawns user
+      # containers on a dedicated bridge with icc disabled; direct L3 between
+      # sandbox IPs is dropped by dockerd. Verified end-to-end on wei-tapp2:
+      # docker0 → 172.20.0.0/16 bridge, curl/TCP between sandboxes times out.
+      # Supersedes the previous `runner-firewall` sidecar that relied on the
+      # host having br_netfilter loaded (unavailable on default GCP Ubuntu).
+      - INTER_SANDBOX_NETWORK_ENABLED=false
       - AWS_ENDPOINT_URL=http://minio:9000
       - AWS_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
@@ -227,48 +236,8 @@ services:
     privileged: true
     restart: always
 
-  # SECURITY: cross-sandbox network isolation enforcer.
-  # Shares the runner container's network namespace and inserts an
-  # iptables rule in the DOCKER-USER chain that drops any packet
-  # forwarded between two containers on docker0 (the runner's internal
-  # bridge where all sandboxes live). Reconciles every 60s so the rule
-  # is restored after runner / dockerd restarts.
-  #
-  # docker0 -> docker0 forwarding is exactly cross-sandbox traffic.
-  # sandbox -> external (egress via eth0) and sandbox -> gateway (INPUT
-  # to the runner, not FORWARD) are unaffected.
-  #
-  # daytona-runner's own iptables persistence loop manages a separate
-  # set of chains (per-sandbox egress rules); it does not touch
-  # DOCKER-USER, so this sidecar and daytona-runner coexist cleanly.
-  #
-  # Once we upgrade the runner image to v0.179+ this sidecar can be
-  # replaced by setting `INTER_SANDBOX_NETWORK_ENABLED=false` on the
-  # runner service.
-  runner-firewall:
-    image: alpine:3.22
-    network_mode: "service:runner"
-    cap_add:
-      - NET_ADMIN
-    depends_on:
-      runner:
-        condition: service_started
-    command:
-      - sh
-      - -c
-      - |
-        apk add --no-cache iptables >/dev/null 2>&1
-        echo "runner-firewall: enforcing cross-sandbox network isolation on DOCKER-USER"
-        while true; do
-          iptables -C DOCKER-USER -i docker0 -o docker0 -j DROP 2>/dev/null \
-            || ( iptables -I DOCKER-USER 1 -i docker0 -o docker0 -j DROP \
-                 && echo "$(date -u +%FT%TZ) inserted DOCKER-USER docker0->docker0 DROP rule" )
-          sleep 60
-        done
-    restart: always
-
   proxy:
-    image: daytonaio/daytona-proxy@sha256:2a4ce1cf1fb1d8f21ac6f49cea17e7ed5c7c591bb4af06b3ba001b7e5446d209
+    image: daytonaio/daytona-proxy:v0.189.0-amd64
     ports:
       - "4000:4000"
     environment:
@@ -290,7 +259,7 @@ services:
     restart: always
 
   ssh-gateway:
-    image: daytonaio/daytona-ssh-gateway@sha256:870b20ea3fdcceb9bc52cf74269fea7f516af1af025034a84bc1a6bf298fd31d
+    image: daytonaio/daytona-ssh-gateway:v0.189.0-amd64
     ports:
       - "2222:2222"
     environment:
@@ -335,6 +304,38 @@ services:
     networks:
       - app-net
     restart: unless-stopped
+
+  # v0.189 initialises the admin api_key with an empty permissions array,
+  # which returns 403 on every write op (stop/start/create). Grant the full
+  # v0.189 permission enum once the api has finished migrations. Idempotent:
+  # the WHERE clause skips the row after the first successful update.
+  grant-admin-perms:
+    image: postgres:16-alpine
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${DAYTONA_DB_PASSWORD}
+    command:
+      - psql
+      - -h
+      - db
+      - -U
+      - ${DAYTONA_DB_USER}
+      - -d
+      - ${DAYTONA_DB_NAME}
+      - -v
+      - ON_ERROR_STOP=1
+      - -c
+      - |
+        UPDATE api_key
+           SET permissions = '{write:registries,delete:registries,write:snapshots,delete:snapshots,write:sandboxes,delete:sandboxes,read:volumes,write:volumes,delete:volumes,write:regions,delete:regions,read:runners,write:runners,delete:runners,read:audit_logs}'
+         WHERE name = 'daytona-admin' AND permissions = '{}';
+    networks:
+      - app-net
+    restart: on-failure:5
 
   daytona-redis:
     image: redis@sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065
