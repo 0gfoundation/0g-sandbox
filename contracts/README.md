@@ -125,9 +125,10 @@ Trust identity — the active TEE signer set and user acknowledgements — lives
 |---|---|
 | `initialize(tappRegistry_)` | One-time, on the proxy |
 | `owner()` / `transferOwnership(newOwner)` | Contract admin |
+| `setTappRegistry(newRegistry)` | Repoint TappRegistry; ack state then reads from the new registry |
 | `tappRegistry()` / `domainSeparator()` / `LOCK_TIME()` | view |
 
-**Events:** `Deposited`, `RefundRequested`, `RefundWithdrawn`, `VoucherSettled`, `EarningsWithdrawn`, `ServiceUpdated`, `ServiceDeregistered`, `OwnershipTransferred`.
+**Events:** `Deposited`, `RefundRequested`, `RefundWithdrawn`, `VoucherSettled`, `EarningsWithdrawn`, `ServiceUpdated`, `ServiceDeregistered`, `OwnershipTransferred`, `TappRegistryUpdated`.
 
 ---
 

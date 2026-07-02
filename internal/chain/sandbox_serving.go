@@ -41,7 +41,7 @@ type SandboxServingSandboxVoucher struct {
 
 // SandboxServingMetaData contains all meta data concerning the SandboxServing contract.
 var SandboxServingMetaData = &bind.MetaData{
-	ABI: "[{\"type\":\"constructor\",\"inputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"LOCK_TIME\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"addOrUpdateService\",\"inputs\":[{\"name\":\"url\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"appId\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"pricePerCPUPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"createFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pricePerMemGBPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"balanceOfBatch\",\"inputs\":[{\"name\":\"users\",\"type\":\"address[]\",\"internalType\":\"address[]\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"balances\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"deposit\",\"inputs\":[{\"name\":\"recipient\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"payable\"},{\"type\":\"function\",\"name\":\"deregisterService\",\"inputs\":[],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"domainSeparator\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getBalance\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"balance\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pendingRefund\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"refundUnlockAt\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getLastNonce\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getProviderEarnings\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"initialize\",\"inputs\":[{\"name\":\"tappRegistry_\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"isTEEAcknowledged\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"owner\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"previewSettlementResults\",\"inputs\":[{\"name\":\"vouchers\",\"type\":\"tuple[]\",\"internalType\":\"structSandboxServing.SandboxVoucher[]\",\"components\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"signature\",\"type\":\"bytes\",\"internalType\":\"bytes\"}]}],\"outputs\":[{\"name\":\"statuses\",\"type\":\"uint8[]\",\"internalType\":\"enumSandboxServing.SettlementStatus[]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"providerEarnings\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"requestRefund\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"serviceExists\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"services\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"url\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"appId\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"pricePerCPUPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pricePerMemGBPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"createFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"settleFeesWithTEE\",\"inputs\":[{\"name\":\"vouchers\",\"type\":\"tuple[]\",\"internalType\":\"structSandboxServing.SandboxVoucher[]\",\"components\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"signature\",\"type\":\"bytes\",\"internalType\":\"bytes\"}]}],\"outputs\":[{\"name\":\"statuses\",\"type\":\"uint8[]\",\"internalType\":\"enumSandboxServing.SettlementStatus[]\"}],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"tappRegistry\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"contractITappRegistry\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"transferOwnership\",\"inputs\":[{\"name\":\"newOwner\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"withdrawEarnings\",\"inputs\":[],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"withdrawRefund\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"event\",\"name\":\"Deposited\",\"inputs\":[{\"name\":\"recipient\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"EarningsWithdrawn\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"OwnershipTransferred\",\"inputs\":[{\"name\":\"previousOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"newOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RefundRequested\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"unlockAt\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RefundWithdrawn\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ServiceDeregistered\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ServiceUpdated\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"appId\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"},{\"name\":\"url\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"VoucherSettled\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"indexed\":false,\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"status\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumSandboxServing.SettlementStatus\"}],\"anonymous\":false}]",
+	ABI: "[{\"type\":\"constructor\",\"inputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"LOCK_TIME\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"addOrUpdateService\",\"inputs\":[{\"name\":\"url\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"appId\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"pricePerCPUPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"createFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pricePerMemGBPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"balanceOfBatch\",\"inputs\":[{\"name\":\"users\",\"type\":\"address[]\",\"internalType\":\"address[]\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"balances\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"deposit\",\"inputs\":[{\"name\":\"recipient\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"payable\"},{\"type\":\"function\",\"name\":\"deregisterService\",\"inputs\":[],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"domainSeparator\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getBalance\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"balance\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pendingRefund\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"refundUnlockAt\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getLastNonce\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getProviderEarnings\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"initialize\",\"inputs\":[{\"name\":\"tappRegistry_\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"isTEEAcknowledged\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"owner\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"previewSettlementResults\",\"inputs\":[{\"name\":\"vouchers\",\"type\":\"tuple[]\",\"internalType\":\"structSandboxServing.SandboxVoucher[]\",\"components\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"signature\",\"type\":\"bytes\",\"internalType\":\"bytes\"}]}],\"outputs\":[{\"name\":\"statuses\",\"type\":\"uint8[]\",\"internalType\":\"enumSandboxServing.SettlementStatus[]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"providerEarnings\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"requestRefund\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"serviceExists\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"services\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"url\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"appId\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"pricePerCPUPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pricePerMemGBPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"createFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"setTappRegistry\",\"inputs\":[{\"name\":\"newRegistry\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"settleFeesWithTEE\",\"inputs\":[{\"name\":\"vouchers\",\"type\":\"tuple[]\",\"internalType\":\"structSandboxServing.SandboxVoucher[]\",\"components\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"signature\",\"type\":\"bytes\",\"internalType\":\"bytes\"}]}],\"outputs\":[{\"name\":\"statuses\",\"type\":\"uint8[]\",\"internalType\":\"enumSandboxServing.SettlementStatus[]\"}],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"tappRegistry\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"contractITappRegistry\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"transferOwnership\",\"inputs\":[{\"name\":\"newOwner\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"withdrawEarnings\",\"inputs\":[],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"withdrawRefund\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"event\",\"name\":\"Deposited\",\"inputs\":[{\"name\":\"recipient\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"EarningsWithdrawn\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"OwnershipTransferred\",\"inputs\":[{\"name\":\"previousOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"newOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RefundRequested\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"unlockAt\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RefundWithdrawn\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ServiceDeregistered\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ServiceUpdated\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"appId\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"},{\"name\":\"url\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"TappRegistryUpdated\",\"inputs\":[{\"name\":\"previousRegistry\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"newRegistry\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"VoucherSettled\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"indexed\":false,\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"status\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumSandboxServing.SettlementStatus\"}],\"anonymous\":false}]",
 }
 
 // SandboxServingABI is the input ABI used to generate the binding from.
@@ -744,6 +744,27 @@ func (_SandboxServing *SandboxServingSession) RequestRefund(provider common.Addr
 // Solidity: function requestRefund(address provider, uint256 amount) returns()
 func (_SandboxServing *SandboxServingTransactorSession) RequestRefund(provider common.Address, amount *big.Int) (*types.Transaction, error) {
 	return _SandboxServing.Contract.RequestRefund(&_SandboxServing.TransactOpts, provider, amount)
+}
+
+// SetTappRegistry is a paid mutator transaction binding the contract method 0x57f6e4fc.
+//
+// Solidity: function setTappRegistry(address newRegistry) returns()
+func (_SandboxServing *SandboxServingTransactor) SetTappRegistry(opts *bind.TransactOpts, newRegistry common.Address) (*types.Transaction, error) {
+	return _SandboxServing.contract.Transact(opts, "setTappRegistry", newRegistry)
+}
+
+// SetTappRegistry is a paid mutator transaction binding the contract method 0x57f6e4fc.
+//
+// Solidity: function setTappRegistry(address newRegistry) returns()
+func (_SandboxServing *SandboxServingSession) SetTappRegistry(newRegistry common.Address) (*types.Transaction, error) {
+	return _SandboxServing.Contract.SetTappRegistry(&_SandboxServing.TransactOpts, newRegistry)
+}
+
+// SetTappRegistry is a paid mutator transaction binding the contract method 0x57f6e4fc.
+//
+// Solidity: function setTappRegistry(address newRegistry) returns()
+func (_SandboxServing *SandboxServingTransactorSession) SetTappRegistry(newRegistry common.Address) (*types.Transaction, error) {
+	return _SandboxServing.Contract.SetTappRegistry(&_SandboxServing.TransactOpts, newRegistry)
 }
 
 // SettleFeesWithTEE is a paid mutator transaction binding the contract method 0x8be74119.
@@ -1884,6 +1905,159 @@ func (_SandboxServing *SandboxServingFilterer) WatchServiceUpdated(opts *bind.Wa
 func (_SandboxServing *SandboxServingFilterer) ParseServiceUpdated(log types.Log) (*SandboxServingServiceUpdated, error) {
 	event := new(SandboxServingServiceUpdated)
 	if err := _SandboxServing.contract.UnpackLog(event, "ServiceUpdated", log); err != nil {
+		return nil, err
+	}
+	event.Raw = log
+	return event, nil
+}
+
+// SandboxServingTappRegistryUpdatedIterator is returned from FilterTappRegistryUpdated and is used to iterate over the raw logs and unpacked data for TappRegistryUpdated events raised by the SandboxServing contract.
+type SandboxServingTappRegistryUpdatedIterator struct {
+	Event *SandboxServingTappRegistryUpdated // Event containing the contract specifics and raw log
+
+	contract *bind.BoundContract // Generic contract to use for unpacking event data
+	event    string              // Event name to use for unpacking event data
+
+	logs chan types.Log        // Log channel receiving the found contract events
+	sub  ethereum.Subscription // Subscription for errors, completion and termination
+	done bool                  // Whether the subscription completed delivering logs
+	fail error                 // Occurred error to stop iteration
+}
+
+// Next advances the iterator to the subsequent event, returning whether there
+// are any more events found. In case of a retrieval or parsing error, false is
+// returned and Error() can be queried for the exact failure.
+func (it *SandboxServingTappRegistryUpdatedIterator) Next() bool {
+	// If the iterator failed, stop iterating
+	if it.fail != nil {
+		return false
+	}
+	// If the iterator completed, deliver directly whatever's available
+	if it.done {
+		select {
+		case log := <-it.logs:
+			it.Event = new(SandboxServingTappRegistryUpdated)
+			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+				it.fail = err
+				return false
+			}
+			it.Event.Raw = log
+			return true
+
+		default:
+			return false
+		}
+	}
+	// Iterator still in progress, wait for either a data or an error event
+	select {
+	case log := <-it.logs:
+		it.Event = new(SandboxServingTappRegistryUpdated)
+		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+			it.fail = err
+			return false
+		}
+		it.Event.Raw = log
+		return true
+
+	case err := <-it.sub.Err():
+		it.done = true
+		it.fail = err
+		return it.Next()
+	}
+}
+
+// Error returns any retrieval or parsing error occurred during filtering.
+func (it *SandboxServingTappRegistryUpdatedIterator) Error() error {
+	return it.fail
+}
+
+// Close terminates the iteration process, releasing any pending underlying
+// resources.
+func (it *SandboxServingTappRegistryUpdatedIterator) Close() error {
+	it.sub.Unsubscribe()
+	return nil
+}
+
+// SandboxServingTappRegistryUpdated represents a TappRegistryUpdated event raised by the SandboxServing contract.
+type SandboxServingTappRegistryUpdated struct {
+	PreviousRegistry common.Address
+	NewRegistry      common.Address
+	Raw              types.Log // Blockchain specific contextual infos
+}
+
+// FilterTappRegistryUpdated is a free log retrieval operation binding the contract event 0x9744b6dce6059ef0baea905c01bd9bf5cb05a96d9edbc6319c070802f5487489.
+//
+// Solidity: event TappRegistryUpdated(address indexed previousRegistry, address indexed newRegistry)
+func (_SandboxServing *SandboxServingFilterer) FilterTappRegistryUpdated(opts *bind.FilterOpts, previousRegistry []common.Address, newRegistry []common.Address) (*SandboxServingTappRegistryUpdatedIterator, error) {
+
+	var previousRegistryRule []interface{}
+	for _, previousRegistryItem := range previousRegistry {
+		previousRegistryRule = append(previousRegistryRule, previousRegistryItem)
+	}
+	var newRegistryRule []interface{}
+	for _, newRegistryItem := range newRegistry {
+		newRegistryRule = append(newRegistryRule, newRegistryItem)
+	}
+
+	logs, sub, err := _SandboxServing.contract.FilterLogs(opts, "TappRegistryUpdated", previousRegistryRule, newRegistryRule)
+	if err != nil {
+		return nil, err
+	}
+	return &SandboxServingTappRegistryUpdatedIterator{contract: _SandboxServing.contract, event: "TappRegistryUpdated", logs: logs, sub: sub}, nil
+}
+
+// WatchTappRegistryUpdated is a free log subscription operation binding the contract event 0x9744b6dce6059ef0baea905c01bd9bf5cb05a96d9edbc6319c070802f5487489.
+//
+// Solidity: event TappRegistryUpdated(address indexed previousRegistry, address indexed newRegistry)
+func (_SandboxServing *SandboxServingFilterer) WatchTappRegistryUpdated(opts *bind.WatchOpts, sink chan<- *SandboxServingTappRegistryUpdated, previousRegistry []common.Address, newRegistry []common.Address) (event.Subscription, error) {
+
+	var previousRegistryRule []interface{}
+	for _, previousRegistryItem := range previousRegistry {
+		previousRegistryRule = append(previousRegistryRule, previousRegistryItem)
+	}
+	var newRegistryRule []interface{}
+	for _, newRegistryItem := range newRegistry {
+		newRegistryRule = append(newRegistryRule, newRegistryItem)
+	}
+
+	logs, sub, err := _SandboxServing.contract.WatchLogs(opts, "TappRegistryUpdated", previousRegistryRule, newRegistryRule)
+	if err != nil {
+		return nil, err
+	}
+	return event.NewSubscription(func(quit <-chan struct{}) error {
+		defer sub.Unsubscribe()
+		for {
+			select {
+			case log := <-logs:
+				// New log arrived, parse the event and forward to the user
+				event := new(SandboxServingTappRegistryUpdated)
+				if err := _SandboxServing.contract.UnpackLog(event, "TappRegistryUpdated", log); err != nil {
+					return err
+				}
+				event.Raw = log
+
+				select {
+				case sink <- event:
+				case err := <-sub.Err():
+					return err
+				case <-quit:
+					return nil
+				}
+			case err := <-sub.Err():
+				return err
+			case <-quit:
+				return nil
+			}
+		}
+	}), nil
+}
+
+// ParseTappRegistryUpdated is a log parse operation binding the contract event 0x9744b6dce6059ef0baea905c01bd9bf5cb05a96d9edbc6319c070802f5487489.
+//
+// Solidity: event TappRegistryUpdated(address indexed previousRegistry, address indexed newRegistry)
+func (_SandboxServing *SandboxServingFilterer) ParseTappRegistryUpdated(log types.Log) (*SandboxServingTappRegistryUpdated, error) {
+	event := new(SandboxServingTappRegistryUpdated)
+	if err := _SandboxServing.contract.UnpackLog(event, "TappRegistryUpdated", log); err != nil {
 		return nil, err
 	}
 	event.Raw = log

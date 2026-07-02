@@ -106,8 +106,8 @@ contract SandboxServing {
     address public  owner;
 
     /// @notice TappRegistry that holds signer identity, ack state, and stake.
-    ///         Set in initialize(); for testnet rebuilds the proxy is fresh
-    ///         each cycle so a setter isn't needed.
+    ///         Set in initialize(); owner can repoint via setTappRegistry when
+    ///         TappRegistry is itself redeployed.
     ITappRegistry public tappRegistry;
 
     // Reserved for future upgrades.
@@ -130,6 +130,7 @@ contract SandboxServing {
     event ServiceUpdated(address indexed provider, string appId, string url);
     event ServiceDeregistered(address indexed provider);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event TappRegistryUpdated(address indexed previousRegistry, address indexed newRegistry);
 
     // ─── Modifiers ────────────────────────────────────────────────────────────
 
@@ -351,6 +352,15 @@ contract SandboxServing {
         require(newOwner != address(0), "zero address");
         emit OwnershipTransferred(owner, newOwner);
         owner = newOwner;
+    }
+
+    /// @notice Repoint TappRegistry. Use when TappRegistry itself is redeployed.
+    ///         Existing services keep their appId binding; ack state is read
+    ///         from the new registry from this point on.
+    function setTappRegistry(address newRegistry) external onlyOwner {
+        require(newRegistry != address(0), "zero tappRegistry");
+        emit TappRegistryUpdated(address(tappRegistry), newRegistry);
+        tappRegistry = ITappRegistry(newRegistry);
     }
 
     // ─── Provider Management ──────────────────────────────────────────────────
