@@ -153,6 +153,66 @@ func TestListSandboxes_SetsAuthHeader(t *testing.T) {
 	}
 }
 
+// ── ListSnapshots ─────────────────────────────────────────────────────────────
+
+func TestListSnapshots_WalksAllPages(t *testing.T) {
+	var gotPages []string
+	srv := mockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPages = append(gotPages, r.URL.Query().Get("page"))
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("page") {
+		case "1":
+			w.Write([]byte(`{"items":[{"id":"s1"},{"id":"s2"}],"total":3,"page":1,"totalPages":2}`))
+		case "2":
+			w.Write([]byte(`{"items":[{"id":"s3"}],"total":3,"page":2,"totalPages":2}`))
+		default:
+			t.Errorf("unexpected page request: %q", r.URL.Query().Get("page"))
+		}
+	})
+
+	c := NewClient(srv.URL, "key")
+	got, err := c.ListSnapshots(context.Background())
+	if err != nil {
+		t.Fatalf("ListSnapshots: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("length: got %d want 3 (pagination truncated?)", len(got))
+	}
+	if got[0].ID != "s1" || got[2].ID != "s3" {
+		t.Errorf("snapshot IDs: got %v", got)
+	}
+	if len(gotPages) != 2 || gotPages[0] != "1" || gotPages[1] != "2" {
+		t.Errorf("expected page requests [1 2], got %v", gotPages)
+	}
+}
+
+func TestListSnapshots_SinglePage(t *testing.T) {
+	srv := mockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"items":[{"id":"only"}],"total":1,"page":1,"totalPages":1}`))
+	})
+
+	c := NewClient(srv.URL, "key")
+	got, err := c.ListSnapshots(context.Background())
+	if err != nil {
+		t.Fatalf("ListSnapshots: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "only" {
+		t.Errorf("got %v want single snapshot 'only'", got)
+	}
+}
+
+func TestListSnapshots_NonOK_ReturnsError(t *testing.T) {
+	srv := mockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	})
+
+	c := NewClient(srv.URL, "key")
+	if _, err := c.ListSnapshots(context.Background()); err == nil {
+		t.Fatal("expected error for non-200, got nil")
+	}
+}
+
 // ── StopSandbox ───────────────────────────────────────────────────────────────
 
 func TestStopSandbox_OK(t *testing.T) {

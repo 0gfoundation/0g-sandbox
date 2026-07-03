@@ -213,24 +213,38 @@ func (c *Client) GetSnapshot(ctx context.Context, id string) (*Snapshot, error) 
 	return &s, json.NewDecoder(resp.Body).Decode(&s)
 }
 
-// ListSnapshots returns all Daytona snapshots.
+// ListSnapshots returns all Daytona snapshots. v0.189 paginates GET /api/snapshots
+// as {items, total, page, totalPages} with a default page size of 100, so walk every
+// page rather than returning only the first — otherwise the list silently truncates
+// once the registry holds more than one page of snapshots.
 func (c *Client) ListSnapshots(ctx context.Context) ([]Snapshot, error) {
-	resp, err := c.do(ctx, http.MethodGet, "/api/snapshots", nil)
-	if err != nil {
-		return nil, err
+	var all []Snapshot
+	for page := 1; ; page++ {
+		path := fmt.Sprintf("/api/snapshots?limit=100&page=%d", page)
+		resp, err := c.do(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, err
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("daytona list snapshots: %s", body)
+		}
+		var paged struct {
+			Items      []Snapshot `json:"items"`
+			TotalPages int        `json:"totalPages"`
+		}
+		if err := json.Unmarshal(body, &paged); err != nil {
+			return nil, fmt.Errorf("decode snapshots: %w", err)
+		}
+		all = append(all, paged.Items...)
+		if len(paged.Items) == 0 || page >= paged.TotalPages {
+			return all, nil
+		}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("daytona list snapshots: %s", b)
-	}
-	var page struct {
-		Items []Snapshot `json:"items"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
-		return nil, fmt.Errorf("decode snapshots: %w", err)
-	}
-	return page.Items, nil
 }
 
 // BaseURL returns the configured base URL (used by reverse proxy).
