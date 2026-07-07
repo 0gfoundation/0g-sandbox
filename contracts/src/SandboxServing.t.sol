@@ -339,8 +339,8 @@ contract SandboxServingTest is Test {
 
     function test_AddService_RejectsNonAppOwner() public {
         address impostor = makeAddr("impostor");
-        // impostor does NOT own APP_ID in tap
-        vm.expectRevert("not app owner");
+        // impostor does NOT own APP_ID in tap, and was never authorized as a delegate
+        vm.expectRevert("not app owner or authorized provider");
         vm.prank(impostor);
         serving.addOrUpdateService("u", APP_ID, 1, 1, 1);
     }
@@ -378,6 +378,89 @@ contract SandboxServingTest is Test {
         vm.prank(provider);
         serving.addOrUpdateService("new-url", APP_ID, 1000, 5000, 500); // only URL changed
         assertEq(tap.invalidateCount(), before, "URL change must not invalidate acks");
+    }
+
+    // ── Delegated providers ──────────────────────────────────────────────────
+
+    function test_AuthorizeProvider_AllowsDelegateToRegisterOwnService() public {
+        address delegate = makeAddr("delegate");
+
+        vm.prank(provider);
+        serving.authorizeProvider(APP_ID, delegate);
+        assertTrue(serving.authorizedProviders(APP_ID, delegate));
+
+        vm.prank(delegate);
+        serving.addOrUpdateService("https://delegate.example.com", APP_ID, 2000, 6000, 700);
+
+        assertTrue(serving.serviceExists(delegate));
+        (, string memory delegateAppId,,,) = serving.services(delegate);
+        assertEq(delegateAppId, APP_ID);
+
+        // Delegate's balance/nonce/earnings are independent of the app owner's.
+        vm.prank(user);
+        serving.deposit{value: 1 ether}(user, delegate);
+        tap.setAck(user, APP_ID, true);
+
+        vm.prank(delegate);
+        SandboxServing.SandboxVoucher[] memory vs = new SandboxServing.SandboxVoucher[](1);
+        vs[0] = _makeVoucher(user, delegate, 1000, keccak256("delegate-usage"), 1);
+        SandboxServing.SettlementStatus[] memory statuses = serving.settleFeesWithTEE(vs);
+        assertEq(uint8(statuses[0]), uint8(SandboxServing.SettlementStatus.SUCCESS));
+
+        assertEq(serving.getProviderEarnings(delegate), 1000);
+        assertEq(serving.getProviderEarnings(provider), 0); // app owner's own earnings untouched
+        (uint256 delegateBal,,) = serving.getBalance(user, delegate);
+        (uint256 providerBal,,) = serving.getBalance(user, provider);
+        assertEq(delegateBal, 1 ether - 1000);
+        assertEq(providerBal, 0); // no shared pool — user never deposited to `provider`
+    }
+
+    function test_AuthorizeProvider_RejectsNonAppOwnerCaller() public {
+        address impostor = makeAddr("impostor");
+        address delegate = makeAddr("delegate");
+        vm.expectRevert("not app owner");
+        vm.prank(impostor);
+        serving.authorizeProvider(APP_ID, delegate);
+    }
+
+    function test_AuthorizeProvider_RejectsZeroAddress() public {
+        vm.expectRevert("zero provider");
+        vm.prank(provider);
+        serving.authorizeProvider(APP_ID, address(0));
+    }
+
+    function test_RevokeProvider_BlocksFurtherRegisterButKeepsExistingService() public {
+        address delegate = makeAddr("delegate");
+        vm.prank(provider);
+        serving.authorizeProvider(APP_ID, delegate);
+        vm.prank(delegate);
+        serving.addOrUpdateService("https://delegate.example.com", APP_ID, 2000, 6000, 700);
+
+        vm.prank(provider);
+        serving.revokeProvider(APP_ID, delegate);
+        assertFalse(serving.authorizedProviders(APP_ID, delegate));
+
+        vm.expectRevert("not app owner or authorized provider");
+        vm.prank(delegate);
+        serving.addOrUpdateService("https://delegate.example.com", APP_ID, 3000, 6000, 700);
+
+        // Existing service keeps settling — revocation is administrative only.
+        vm.prank(user);
+        serving.deposit{value: 1 ether}(user, delegate);
+        tap.setAck(user, APP_ID, true);
+        vm.prank(delegate);
+        SandboxServing.SandboxVoucher[] memory vs = new SandboxServing.SandboxVoucher[](1);
+        vs[0] = _makeVoucher(user, delegate, 500, keccak256("post-revoke-usage"), 1);
+        SandboxServing.SettlementStatus[] memory statuses = serving.settleFeesWithTEE(vs);
+        assertEq(uint8(statuses[0]), uint8(SandboxServing.SettlementStatus.SUCCESS));
+    }
+
+    function test_RevokeProvider_RejectsNonAppOwnerCaller() public {
+        address impostor = makeAddr("impostor");
+        address delegate = makeAddr("delegate");
+        vm.expectRevert("not app owner");
+        vm.prank(impostor);
+        serving.revokeProvider(APP_ID, delegate);
     }
 
     function test_IsTEEAcknowledged_Shim() public {

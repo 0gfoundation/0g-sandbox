@@ -110,8 +110,14 @@ contract SandboxServing {
     ///         TappRegistry is itself redeployed.
     ITappRegistry public tappRegistry;
 
+    /// @notice appId => delegate provider address => authorized. Lets an appId's
+    ///         TappRegistry owner delegate commercial service management
+    ///         (pricing/URL/balance/earnings) to another wallet without making
+    ///         that wallet the TappRegistry owner. See addOrUpdateService.
+    mapping(string => mapping(address => bool)) public authorizedProviders;
+
     // Reserved for future upgrades.
-    uint256[50] private __gap;
+    uint256[49] private __gap;
 
     // ─── Events ───────────────────────────────────────────────────────────────
 
@@ -129,6 +135,8 @@ contract SandboxServing {
     event EarningsWithdrawn(address indexed provider, uint256 amount);
     event ServiceUpdated(address indexed provider, string appId, string url);
     event ServiceDeregistered(address indexed provider);
+    event ProviderAuthorized(string appId, address indexed provider, address indexed appOwner);
+    event ProviderRevoked(string appId, address indexed provider, address indexed appOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event TappRegistryUpdated(address indexed previousRegistry, address indexed newRegistry);
 
@@ -365,8 +373,9 @@ contract SandboxServing {
 
     // ─── Provider Management ──────────────────────────────────────────────────
 
-    /// @notice Register or update a provider service. Caller must already own
-    ///         the appId in TappRegistry, and must have authorized this contract
+    /// @notice Register or update a provider service. Caller must either own
+    ///         the appId in TappRegistry, or have been delegated via
+    ///         authorizeProvider, and must have authorized this contract
     ///         as an invalidator (see ITappRegistry.authorizeInvalidator).
     /// @dev appId is set-once on first call; later updates must pass the same
     ///      appId or revert. Stake is collected by TappRegistry (per node);
@@ -383,7 +392,11 @@ contract SandboxServing {
         uint256 createFee,
         uint256 pricePerMemGBPerMin
     ) external {
-        require(tappRegistry.getAppInfo(appId).owner == msg.sender, "not app owner");
+        address appOwner_ = tappRegistry.getAppInfo(appId).owner;
+        require(
+            msg.sender == appOwner_ || authorizedProviders[appId][msg.sender],
+            "not app owner or authorized provider"
+        );
         require(
             tappRegistry.isAuthorizedInvalidator(appId, address(this)),
             "sandbox not authorized as invalidator"
@@ -432,6 +445,32 @@ contract SandboxServing {
         delete services[msg.sender];
         serviceExists[msg.sender] = false;
         emit ServiceDeregistered(msg.sender);
+    }
+
+    /// @notice Delegate commercial service management for appId to another
+    ///         wallet. Callable only by the appId's current TappRegistry owner.
+    /// @dev Purely administrative: it only gates future addOrUpdateService
+    ///      calls. It does not affect voucher settlement, which validates
+    ///      signatures against TappRegistry's live node list regardless of
+    ///      who manages the commercial listing.
+    function authorizeProvider(string calldata appId, address provider) external {
+        require(tappRegistry.getAppInfo(appId).owner == msg.sender, "not app owner");
+        require(provider != address(0), "zero provider");
+        authorizedProviders[appId][provider] = true;
+        emit ProviderAuthorized(appId, provider, msg.sender);
+    }
+
+    /// @notice Revoke a previously delegated provider's authorization for appId.
+    /// @dev Soft revoke: blocks further addOrUpdateService calls from `provider`
+    ///      for this appId, but does not touch its existing service entry,
+    ///      balance, nonce, or earnings — those keep working. To fully cut off
+    ///      a bad actor's ability to sign vouchers, remove them as a TappRegistry
+    ///      node instead (remove-node-onchain); that is the real security
+    ///      boundary for settlement.
+    function revokeProvider(string calldata appId, address provider) external {
+        require(tappRegistry.getAppInfo(appId).owner == msg.sender, "not app owner");
+        authorizedProviders[appId][provider] = false;
+        emit ProviderRevoked(appId, provider, msg.sender);
     }
 
     // ─── View Functions ───────────────────────────────────────────────────────
