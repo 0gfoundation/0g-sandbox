@@ -2,7 +2,10 @@ services:
 
   # ── Sandbox proxy (this repo) ──────────────────────────────────────────────
   sandbox:
-    image: eliza-registry-vpc.ap-southeast-1.cr.aliyuncs.com/eliza/0g-sandbox:sandbox
+    # Registry-agnostic: set SANDBOX_IMAGE in .env to a registry the host can reach
+    # (e.g. GCP Artifact Registry for GCP CVMs; the aliyun VPC registry is only
+    # reachable from inside that VPC). Falls back to the aliyun ref if unset.
+    image: ${SANDBOX_IMAGE:-eliza-registry-vpc.ap-southeast-1.cr.aliyuncs.com/eliza/0g-sandbox:sandbox}
     pull_policy: always
     ports:
       - "${PORT:-8080}:8080"
