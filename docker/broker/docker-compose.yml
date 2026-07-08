@@ -2,7 +2,7 @@ services:
 
   # ── Broker ────────────────────────────────────────────────────────────────────
   broker:
-    image: eliza-registry-vpc.ap-southeast-1.cr.aliyuncs.com/eliza/0g-sandbox:broker
+    image: ${BROKER_IMAGE:-eliza-registry-vpc.ap-southeast-1.cr.aliyuncs.com/eliza/0g-sandbox:broker}
     pull_policy: always
     ports:
       - "${BROKER_PORT:-8082}:8081"

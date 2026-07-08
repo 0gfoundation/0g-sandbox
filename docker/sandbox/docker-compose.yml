@@ -210,7 +210,9 @@ services:
     # root. Preserves the DinD + internal-registry topology unchanged;
     # only the outer runtime shifts. Requires sysbox-runc registered on
     # the host dockerd (see 0g-tapp gcp-cvm build-gcp-tapp.sh ENABLE_SYSBOX).
-    runtime: sysbox-runc
+    # Set RUNNER_RUNTIME=sysbox-runc to enable (needs host kernel >=5.12 for
+    # shiftfs/idmapped-mounts; on 5.10 sysbox can't write resolv.conf). Default runc.
+    runtime: ${RUNNER_RUNTIME:-runc}
     environment:
       - ENVIRONMENT=production
       - API_PORT=3003
