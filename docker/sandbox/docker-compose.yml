@@ -78,7 +78,10 @@ services:
   # Port 3000 is intentionally NOT published. All external API access must go
   # through the sandbox proxy on port 8080.
   api:
-    image: daytonaio/daytona-api:v0.189.0-amd64
+    # publicPorts (per-port public preview) needs the 0g-daytona fork images;
+    # the official image silently drops the field and the billing proxy then
+    # rejects publicPorts creates with 502.
+    image: ${DAYTONA_API_IMAGE:-daytonaio/daytona-api:v0.189.0-amd64}
     environment:
       - OTEL_ENABLED=false
       # Snapshot used when a create request doesn't specify one. Per-env: a
@@ -240,7 +243,7 @@ services:
     restart: always
 
   proxy:
-    image: daytonaio/daytona-proxy:v0.189.0-amd64
+    image: ${DAYTONA_PROXY_IMAGE:-daytonaio/daytona-proxy:v0.189.0-amd64}
     ports:
       - "4000:4000"
     environment:
