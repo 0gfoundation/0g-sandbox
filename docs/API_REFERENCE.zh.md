@@ -263,8 +263,9 @@ service 注册(例如调用 `deregisterService` 之后),返回 `[]`。
 **Body:**
 ```json
 {
-  "image":   "ubuntu:22.04",
-  "sealed":  false
+  "image":       "ubuntu:22.04",
+  "sealed":      false,
+  "publicPorts": [8080, 3000]
 }
 ```
 所有字段可选。
@@ -273,6 +274,14 @@ service 注册(例如调用 `deregisterService` 之后),返回 `[]`。
 |------|------|------|
 | `image` | string | 要用的 Docker 镜像或 snapshot 名 |
 | `sealed` | bool | `true` 则创建 sealed 沙箱(见下) |
+| `publicPorts` | int[] | 公开端口白名单:只有名单内端口可经预览代理公开访问,其余端口回落到预览认证(owner 的 token 仍可用)。不传 = 全端口公开。最多 16 个,范围 1-65535,系统端口 22222/2280/33333 拒绝,创建后不可改。sealed 沙箱必须包含 8080 |
+
+**端口级公开预览**(`"publicPorts": [...]`):
+- 要求 provider 运行 0g-daytona fork 镜像;对官方 Daytona 该请求返回 **502**
+  (`publicPorts is not supported by this provider's Daytona backend`),且不会留下运行中的沙箱
+- `200` 响应会回显 `publicPorts` 并附上
+  `preview_urls: {"8080": "http://8080-<id>.<PROXY_DOMAIN>"}`
+- 名单外端口返回 **307 跳转**到 provider 的 OIDC 端点(对公众等于被拦)
 
 **Sealed 沙箱**(`"sealed": true`):
 - 通过内部 registry 把镜像解析为 content digest(无法解析则硬失败)

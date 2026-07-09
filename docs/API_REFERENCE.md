@@ -267,8 +267,9 @@ All monetary amounts are in **neuron** (1 0G = 10¹⁸ neuron).
 **Body:**
 ```json
 {
-  "image":   "ubuntu:22.04",
-  "sealed":  false
+  "image":       "ubuntu:22.04",
+  "sealed":      false,
+  "publicPorts": [8080, 3000]
 }
 ```
 All fields are optional.
@@ -277,6 +278,16 @@ All fields are optional.
 |-------|------|-------------|
 | `image` | string | Docker image or snapshot name to use |
 | `sealed` | bool | If `true`, creates a sealed sandbox (see below) |
+| `publicPorts` | int[] | Public port allowlist: only these ports are publicly reachable via the preview proxy; all others fall back to preview auth (owner tokens still work). Omit = all ports public. Max 16 entries, range 1-65535, system ports 22222/2280/33333 rejected, immutable after create. Sealed sandboxes must include 8080 |
+
+**Per-port public preview** (`"publicPorts": [...]`):
+- Requires the provider to run the 0g-daytona fork images; against stock
+  Daytona the request fails with **502** (`publicPorts is not supported by
+  this provider's Daytona backend`) and no sandbox is left running
+- The `200` response echoes `publicPorts` and adds
+  `preview_urls: {"8080": "http://8080-<id>.<PROXY_DOMAIN>"}`
+- Non-listed ports answer with a **307 redirect** to the provider's OIDC
+  endpoint (effectively blocked for public callers)
 
 **Sealed sandboxes** (`"sealed": true`):
 - Resolves the image to its content digest via the internal registry (hard failure if unresolvable)
