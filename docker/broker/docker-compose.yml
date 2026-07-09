@@ -41,7 +41,7 @@ services:
 
   # ── Broker Redis ───────────────────────────────────────────────────────────────
   broker-redis:
-    image: redis@sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065
+    image: ${REGISTRY_PREFIX:-us-central1-docker.pkg.dev/g-devops/zg-sandbox}/redis@sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065
     volumes:
       - broker_redis_data:/data
     command: >

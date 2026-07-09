@@ -60,7 +60,7 @@ services:
     restart: unless-stopped
 
   sandbox-redis:
-    image: redis@sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065
+    image: ${REGISTRY_PREFIX:-us-central1-docker.pkg.dev/g-devops/zg-sandbox}/redis@sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065
     volumes:
       - ${SANDBOX_REDIS_DATA:-sandbox_redis_data}:/data
     command: >
@@ -78,10 +78,12 @@ services:
   # Port 3000 is intentionally NOT published. All external API access must go
   # through the sandbox proxy on port 8080.
   api:
-    # publicPorts (per-port public preview) needs the 0g-daytona fork images;
-    # the official image silently drops the field and the billing proxy then
-    # rejects publicPorts creates with 502.
-    image: ${DAYTONA_API_IMAGE:-daytonaio/daytona-api:v0.189.0-amd64}
+    # 0g-daytona fork image (v0.189.0 + publicPorts). All third-party images
+    # are self-hosted under REGISTRY_PREFIX — upstream Daytona went closed
+    # source, so Docker Hub availability is not guaranteed. Mirrors preserve
+    # upstream digests (crane copy). Set REGISTRY_PREFIX per environment
+    # (GCP AR default; aliyun hosts use the eliza VPC registry mirror).
+    image: ${REGISTRY_PREFIX:-us-central1-docker.pkg.dev/g-devops/zg-sandbox}/daytona-api:v0.189.0-0g.1
     environment:
       - OTEL_ENABLED=false
       # Snapshot used when a create request doesn't specify one. Per-env: a
@@ -202,7 +204,7 @@ services:
     privileged: true
 
   runner:
-    image: daytonaio/daytona-runner:v0.189.0-amd64
+    image: ${REGISTRY_PREFIX:-us-central1-docker.pkg.dev/g-devops/zg-sandbox}/daytona-runner:v0.189.0-amd64
     # Sysbox at the outer boundary: host dockerd starts the runner via
     # sysbox-runc so the runner (and its DinD + user sandboxes) live in a
     # user namespace. Container uid 0 maps to a non-root uid on host, so
@@ -245,7 +247,7 @@ services:
     restart: always
 
   proxy:
-    image: ${DAYTONA_PROXY_IMAGE:-daytonaio/daytona-proxy:v0.189.0-amd64}
+    image: ${REGISTRY_PREFIX:-us-central1-docker.pkg.dev/g-devops/zg-sandbox}/daytona-proxy:v0.189.0-0g.1
     ports:
       - "4000:4000"
     environment:
@@ -267,7 +269,7 @@ services:
     restart: always
 
   ssh-gateway:
-    image: daytonaio/daytona-ssh-gateway:v0.189.0-amd64
+    image: ${REGISTRY_PREFIX:-us-central1-docker.pkg.dev/g-devops/zg-sandbox}/daytona-ssh-gateway:v0.189.0-amd64
     ports:
       - "2222:2222"
     environment:
@@ -281,7 +283,7 @@ services:
     restart: always
 
   dex:
-    image: dexidp/dex@sha256:1b4a6eee8550240b0faedad04d984ca939513650e1d9bd423502c67355e3822f
+    image: ${REGISTRY_PREFIX:-us-central1-docker.pkg.dev/g-devops/zg-sandbox}/dex@sha256:1b4a6eee8550240b0faedad04d984ca939513650e1d9bd423502c67355e3822f
     volumes:
       - ./config/dex/config.yaml:/etc/dex/config.yaml
       - ${DEX_DB_DATA:-dex_db}:/var/dex
@@ -296,7 +298,7 @@ services:
     restart: unless-stopped
 
   db:
-    image: postgres@sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f
+    image: ${REGISTRY_PREFIX:-us-central1-docker.pkg.dev/g-devops/zg-sandbox}/postgres@sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f
     environment:
       - POSTGRES_PASSWORD=${DAYTONA_DB_PASSWORD}
       - POSTGRES_USER=${DAYTONA_DB_USER}
@@ -318,7 +320,7 @@ services:
   # v0.189 permission enum once the api has finished migrations. Idempotent:
   # the WHERE clause skips the row after the first successful update.
   grant-admin-perms:
-    image: postgres:16-alpine
+    image: ${REGISTRY_PREFIX:-us-central1-docker.pkg.dev/g-devops/zg-sandbox}/postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
     depends_on:
       db:
         condition: service_healthy
@@ -346,7 +348,7 @@ services:
     restart: on-failure:5
 
   daytona-redis:
-    image: redis@sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065
+    image: ${REGISTRY_PREFIX:-us-central1-docker.pkg.dev/g-devops/zg-sandbox}/redis@sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065
     volumes:
       - ${DAYTONA_REDIS_DATA:-daytona_redis_data}:/data
     healthcheck:
@@ -359,7 +361,7 @@ services:
     restart: unless-stopped
 
   minio:
-    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    image: ${REGISTRY_PREFIX:-us-central1-docker.pkg.dev/g-devops/zg-sandbox}/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     environment:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
@@ -376,7 +378,7 @@ services:
     restart: unless-stopped
 
   registry:
-    image: registry@sha256:bcece5dd3d4b6189e13e7ac71b2ccbc2aae649365f0c589852d687efeba6b290
+    image: ${REGISTRY_PREFIX:-us-central1-docker.pkg.dev/g-devops/zg-sandbox}/registry@sha256:bcece5dd3d4b6189e13e7ac71b2ccbc2aae649365f0c589852d687efeba6b290
     environment:
       REGISTRY_HTTP_ADDR: registry:6000
       REGISTRY_STORAGE_DELETE_ENABLED: 'true'
