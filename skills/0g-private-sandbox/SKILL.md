@@ -40,7 +40,7 @@ export PATH=$PATH:/usr/local/go/bin
 
 A broker aggregates provider discovery and exposes chain config — you don't need to know the network details manually.
 
-- `yes` — provide the broker URL (e.g. `https://broker.example.com`)
+- `yes` — provide the broker URL (hosted testnet broker: `https://private-sandbox-testnet.0g.ai`)
 - `no` — I'll configure network and contract manually
 
 **If yes → broker path:**

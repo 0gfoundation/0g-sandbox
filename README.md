@@ -92,14 +92,15 @@ Then just describe what you want in plain language, for example:
 
 ---
 
-Claude will walk you through the rest. When asked for configuration details, the key piece
-of information you need is:
+Claude will walk you through the rest. When asked for configuration details, the only piece
+of information you need is the hosted testnet broker:
 
 | Item | Value |
 |------|-------|
-| **Testnet contract** | `0xd7e0CD227e602FedBb93c36B1F5bf415398508a4` |
-| **RPC** | `https://evmrpc-testnet.0g.ai` |
-| **Chain ID** | `16602` |
+| **Testnet broker** | `https://private-sandbox-testnet.0g.ai` |
+
+Claude (or the CLI) reads the rest — `contract_address`, `rpc_url` (`https://evmrpc-testnet.0g.ai`),
+and `chain_id` (`16602`) — from the broker's `GET /api/info`, so there's nothing else to copy by hand.
 
 Claude will handle onboarding, wallet setup, deposit, sandbox creation, and OpenClaw
 configuration automatically.
