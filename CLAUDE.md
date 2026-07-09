@@ -160,6 +160,16 @@ remain protected by Daytona regardless of this flag.
 
 **Proxy URL format:** `http://<port>-<sandboxId>.<PROXY_DOMAIN>/<path>`
 
+**`publicPorts` (per-port public preview)** — a create request may include
+`"publicPorts": [8080, 3000]`: only listed ports are publicly reachable; all other
+ports fall back to Daytona's private-sandbox auth (owner preview tokens still work).
+Omit for the default all-ports-public behavior. Requires the 0g-daytona fork images
+(compose defaults to them via `REGISTRY_PREFIX`); against stock Daytona images
+the billing proxy rejects such creates with 502 instead of silently ignoring the
+restriction. Rules: max 16 ports, system ports (22222/2280/33333) rejected, immutable
+after create, sealed sandboxes must include 8080. Successful creates return
+`preview_urls: {"8080": "http://8080-<id>.<PROXY_DOMAIN>"}`.
+
 The `PROXY_DOMAIN` env var controls the URL format. Examples:
 - nip.io (no real domain): `PROXY_DOMAIN=<your-ip>.nip.io:4000`
   → `http://8080-<sandboxId>.<your-ip>.nip.io:4000/result`

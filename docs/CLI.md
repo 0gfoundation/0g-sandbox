@@ -546,6 +546,7 @@ go run ./cmd/user/ create \
 | `--memory` | — | Memory in GB (overrides `--class`) |
 | `--disk` | — | Disk in GB (overrides `--class`) |
 | `--sealed` | `false` | Create a sealed sandbox: injects TEE attestation, blocks SSH and toolbox access |
+| `--ports` | — | Comma-separated public port allowlist (e.g. `8080,3000`). Only these ports are publicly reachable; all others require preview auth. Empty = all ports public. Max 16; system ports 22222/2280/33333 rejected; immutable after create; sealed sandboxes must include 8080 |
 
 **Example**
 
@@ -555,6 +556,21 @@ USER_KEY=0x<hex> go run ./cmd/user/ create --api http://<provider>:8080
 
 # Sealed sandbox (SSH/toolbox blocked; TEE attestation injected)
 USER_KEY=0x<hex> go run ./cmd/user/ create --api http://<provider>:8080 --sealed
+
+# Only port 8080 publicly reachable; 9090 etc. fall back to preview auth
+USER_KEY=0x<hex> go run ./cmd/user/ create --api http://<provider>:8080 --ports 8080
+```
+
+With `--ports`, the create response echoes `publicPorts` (confirmation the
+provider's Daytona supports it — providers on stock Daytona reject such
+creates with 502) and includes ready-to-use URLs:
+
+```json
+{
+  "id": "54a4c0ee-…",
+  "publicPorts": [8080],
+  "preview_urls": { "8080": "http://8080-54a4c0ee-….<PROXY_DOMAIN>" }
+}
 ```
 
 ---

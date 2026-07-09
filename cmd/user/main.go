@@ -51,6 +51,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -488,6 +489,7 @@ func runCreate(args []string) {
 	disk     := fs.Int("disk",        0,                      "Disk in GB (optional, overrides class)")
 	sealed   := fs.Bool("sealed",     false,                  "Create a sealed sandbox (blocks SSH and toolbox access)")
 	sealID   := fs.String("seal-id",  "",                     "Optional caller-chosen seal_id (64 hex chars); random if unset")
+	ports    := fs.String("ports",    "",                     "Comma-separated ports to expose publicly (e.g. 8080,3000); others require auth. Empty = all ports public")
 	var envArgs multiString
 	fs.Var(&envArgs, "env",                                   "Env var KEY=VAL injected into container; repeatable")
 	_ = fs.Parse(args)
@@ -522,6 +524,17 @@ func runCreate(args []string) {
 	}
 	if *sealID != "" {
 		body["seal_id"] = *sealID
+	}
+	if *ports != "" {
+		var portList []int
+		for _, p := range strings.Split(*ports, ",") {
+			n, err := strconv.Atoi(strings.TrimSpace(p))
+			if err != nil {
+				fatalf("--ports must be comma-separated integers, got %q", p)
+			}
+			portList = append(portList, n)
+		}
+		body["publicPorts"] = portList
 	}
 	if len(envArgs) > 0 {
 		env := map[string]string{}
