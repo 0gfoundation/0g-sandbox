@@ -660,6 +660,11 @@ body.v-market .view-market{display:block}
       <select id="snapshotSelect"><option value="">— Default image —</option></select>
       <div class="hint">Select a pre-built environment.</div>
     </div>
+    <div class="field">
+      <label>Public ports (optional)</label>
+      <input id="publicPorts" type="text" placeholder="8080, 3000" maxlength="120">
+      <div class="hint">Comma-separated. Only these ports are publicly reachable; all others require auth. Leave blank to keep every port public.</div>
+    </div>
     <div id="createErr"></div>
     <div class="modal-btns">
       <button class="btn btn-ghost" onclick="closeModal('createModal')">Cancel</button>
@@ -1289,6 +1294,7 @@ function renderSandboxRows(sandboxes, providerAddr) {
         <span style="font-size:10px;color:var(--muted);font-family:var(--mono);display:flex;gap:8px">
           ${s.cpu?`<span>${s.cpu}C / ${s.memory??'?'}GB</span>`:''}
           ${s.snapshot?`<span title="${s.snapshot}" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.snapshot}</span>`:''}
+          ${Array.isArray(s.publicPorts)&&s.publicPorts.length?`<span title="Only these ports are publicly reachable; all others require auth" style="color:#cba8ff">ports: ${s.publicPorts.join(',')}</span>`:''}
         </span>
       </span>
       ${stateTag(s.state)}
@@ -1410,6 +1416,14 @@ async function doCreate() {
   // invisible to the user — they just click + new and get the right thing.
   const body={}; if(name) body.name=name; if(snapshot) body.snapshot=snapshot;
   if (selectedProvider.sealed_only) body.sealed = true;
+  const portsRaw=document.getElementById('publicPorts').value.trim();
+  if (portsRaw) {
+    const ports=portsRaw.split(',').map(s=>s.trim()).filter(Boolean).map(Number);
+    if (ports.some(p=>!Number.isInteger(p)||p<1||p>65535)) { setErr('createErr','public ports must be integers 1-65535'); btn.disabled=false; btn.textContent='Create & Start'; return; }
+    // sealed sandboxes must keep the agent-fronting port reachable
+    if (body.sealed && !ports.includes(8080)) ports.push(8080);
+    body.publicPorts=ports;
+  }
   try {
     const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),180000);
     const resp=await signedFetch('POST','/api/sandbox',body,ctrl.signal); clearTimeout(timer);
@@ -1420,15 +1434,15 @@ async function doCreate() {
       setLoading('createErr','checking if sandbox was created…');
       await new Promise(r=>setTimeout(r,3000));
       const created=[...(await fetchSandboxIds())].find(id=>!prevIds.has(id));
-      if (created) { try{await signedFetch('POST',`/api/sandbox/${created}/ensure-billing`);}catch(_){} toast('sandbox created','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await reloadProviderSandboxes(selectedProvider?.address); return; }
+      if (created) { try{await signedFetch('POST',`/api/sandbox/${created}/ensure-billing`);}catch(_){} toast('sandbox created','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; document.getElementById('publicPorts').value=''; await reloadProviderSandboxes(selectedProvider?.address); return; }
       setErr('createErr',data.error||`HTTP ${resp.status}`); return;
     }
-    toast('sandbox created','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await reloadProviderSandboxes(selectedProvider?.address);
+    toast('sandbox created','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; document.getElementById('publicPorts').value=''; await reloadProviderSandboxes(selectedProvider?.address);
   } catch(e) {
     if (e.name==='AbortError') {
       setLoading('createErr','checking if sandbox was created…'); await new Promise(r=>setTimeout(r,3000));
       const created=[...(await fetchSandboxIds())].find(id=>!prevIds.has(id));
-      if (created) { try{await signedFetch('POST',`/api/sandbox/${created}/ensure-billing`);}catch(_){} toast('sandbox created','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await reloadProviderSandboxes(selectedProvider?.address); return; }
+      if (created) { try{await signedFetch('POST',`/api/sandbox/${created}/ensure-billing`);}catch(_){} toast('sandbox created','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; document.getElementById('publicPorts').value=''; await reloadProviderSandboxes(selectedProvider?.address); return; }
       setErr('createErr','request timed out');
     } else { setErr('createErr',e.message); }
   } finally { btn.disabled=false; btn.textContent='Create & Start'; }

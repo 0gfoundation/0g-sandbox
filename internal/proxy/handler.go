@@ -293,6 +293,10 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	// Sealed containers: resolve image hash and inject TEE attestation + keypair
 	// before forwarding to Daytona.
 	sealed := extractSealed(body)
+	if err := ValidatePublicPorts(body, sealed); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	if !sealed && h.SealedOnly {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "this provider only accepts sealed sandboxes; set \"sealed\": true in the create request",
@@ -364,6 +368,33 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	if sealed && result.StatusCode >= 200 && result.StatusCode < 300 {
 		if stripped, err := stripSealKey(respBytes); err == nil {
 			respBytes = stripped
+		}
+	}
+
+	// publicPorts round-trip check: a stock Daytona API silently strips the
+	// field (whitelist validation), which would hand the user an unrestricted
+	// sandbox while they believe ports are locked down. Fail the create loudly
+	// instead, and stop the orphan so it doesn't run unbilled.
+	if _, requestedPorts, _ := parsePublicPorts(body); requestedPorts && result.StatusCode >= 200 && result.StatusCode < 300 {
+		decorated, supported, derr := decoratePublicPorts(respBytes)
+		if derr == nil && !supported {
+			id := extractID(respBytes)
+			if id != "" {
+				go func() {
+					ctx := context.WithoutCancel(c.Request.Context())
+					if serr := h.dtona.StopSandbox(ctx, id); serr != nil {
+						h.log.Error("stop sandbox after unsupported publicPorts", zap.String("id", id), zap.Error(serr))
+					}
+				}()
+			}
+			h.log.Error("publicPorts requested but Daytona backend dropped the field — fork images not deployed?", zap.String("id", id))
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error": "publicPorts is not supported by this provider's Daytona backend; the sandbox was not started",
+			})
+			return
+		}
+		if derr == nil {
+			respBytes = decorated
 		}
 	}
 	for k, vs := range result.Header {

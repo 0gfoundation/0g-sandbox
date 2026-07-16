@@ -2,7 +2,7 @@ services:
 
   # ── Broker ────────────────────────────────────────────────────────────────────
   broker:
-    image: eliza-registry-vpc.ap-southeast-1.cr.aliyuncs.com/eliza/0g-sandbox:broker
+    image: ${BROKER_IMAGE:-eliza-registry-vpc.ap-southeast-1.cr.aliyuncs.com/eliza/0g-sandbox:broker}
     pull_policy: always
     ports:
       - "${BROKER_PORT:-8082}:8081"
@@ -41,7 +41,7 @@ services:
 
   # ── Broker Redis ───────────────────────────────────────────────────────────────
   broker-redis:
-    image: redis@sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065
+    image: ${REGISTRY_PREFIX:-us-central1-docker.pkg.dev/g-devops/zg-sandbox}/redis@sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065
     volumes:
       - broker_redis_data:/data
     command: >
