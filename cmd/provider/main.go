@@ -2,7 +2,9 @@
 //
 // Subcommands:
 //
-//	register       Bind URL, prices, and createFee to an appId in SandboxServing
+//	register         Bind URL, prices, and createFee to an appId in SandboxServing
+//	authorize-provider  Delegate commercial service management for an appId to another wallet
+//	revoke-provider     Revoke a previously delegated provider's authorization
 //	status         Show provider registration and earnings
 //	withdraw       Withdraw accumulated earnings
 //	push-image     Load a local Docker image into the internal registry via the runner
@@ -61,7 +63,7 @@ const (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: provider <subcommand> [flags]")
-		fmt.Fprintln(os.Stderr, "  subcommands: register | deregister | status | withdraw | push-image | snapshot | snapshots | delete-snapshot | gc-images")
+		fmt.Fprintln(os.Stderr, "  subcommands: register | deregister | authorize-provider | revoke-provider | status | withdraw | push-image | snapshot | snapshots | delete-snapshot | gc-images")
 		os.Exit(1)
 	}
 
@@ -70,6 +72,10 @@ func main() {
 		runRegister(os.Args[2:])
 	case "deregister":
 		runDeregister(os.Args[2:])
+	case "authorize-provider":
+		runAuthorizeProvider(os.Args[2:])
+	case "revoke-provider":
+		runRevokeProvider(os.Args[2:])
 	case "status":
 		runStatus(os.Args[2:])
 	case "withdraw":
@@ -86,7 +92,7 @@ func main() {
 		runGCImages(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
-		fmt.Fprintln(os.Stderr, "  subcommands: register | deregister | status | withdraw | push-image | snapshot | snapshots | delete-snapshot | gc-images")
+		fmt.Fprintln(os.Stderr, "  subcommands: register | deregister | authorize-provider | revoke-provider | status | withdraw | push-image | snapshot | snapshots | delete-snapshot | gc-images")
 		os.Exit(1)
 	}
 }
@@ -198,6 +204,104 @@ func runDeregister(args []string) {
 	fmt.Printf("\nDone. Service cleared. Re-run `register` with the new appId.\n")
 }
 
+// ── authorize-provider ───────────────────────────────────────────────────────
+
+// runAuthorizeProvider delegates commercial service management for appId to
+// another wallet. --key/PROVIDER_KEY here must be the appId's TappRegistry
+// owner key, NOT the delegate's — the contract checks msg.sender against
+// tappRegistry.getAppInfo(appId).owner.
+func runAuthorizeProvider(args []string) {
+	fs := flag.NewFlagSet("authorize-provider", flag.ExitOnError)
+	rpc         := fs.String("rpc",      defaultRPC,      "RPC endpoint")
+	chainID     := fs.Int64("chain-id",  defaultChainID,  "Chain ID")
+	contractHex := fs.String("contract", envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
+	keyHex      := fs.String("key",      "",              "App owner private key (hex); or set PROVIDER_KEY env — must be the appId's TappRegistry owner")
+	appId       := fs.String("app-id",   "",              "TappRegistry appId to delegate (required)")
+	providerHex := fs.String("provider", "",              "Wallet to authorize as a delegate provider (required)")
+	_ = fs.Parse(args)
+
+	if *appId == "" {
+		fatalf("--app-id is required")
+	}
+	if *providerHex == "" {
+		fatalf("--provider is required")
+	}
+	privKey := resolveKey(*keyHex, "PROVIDER_KEY")
+	appOwnerAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	providerAddr := common.HexToAddress(*providerHex)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	eth, contract := dialContract(ctx, *rpc, *contractHex)
+	defer eth.Close()
+
+	fmt.Printf("App owner: %s\n", appOwnerAddr.Hex())
+	fmt.Printf("AppId:     %s\n", *appId)
+	fmt.Printf("Delegate:  %s\n", providerAddr.Hex())
+
+	auth := buildAuth(ctx, privKey, *chainID)
+	fmt.Println("\n[1/1] AuthorizeProvider...")
+	tx, err := contract.AuthorizeProvider(auth, *appId, providerAddr)
+	if err != nil {
+		fatalf("AuthorizeProvider: %v\n\nReminder: --key must be the appId's TappRegistry owner, not the delegate.", err)
+	}
+	fmt.Printf("      tx: %s\n", tx.Hash().Hex())
+	if _, err := bind.WaitMined(ctx, eth, tx); err != nil {
+		fatalf("wait mined: %v", err)
+	}
+	fmt.Println("      confirmed ✓")
+	fmt.Printf("\nDone. %s can now run `register --app-id %s ...` with its own key.\n", providerAddr.Hex(), *appId)
+}
+
+// ── revoke-provider ───────────────────────────────────────────────────────────
+
+// runRevokeProvider revokes a delegate's authorization for appId. Soft revoke:
+// blocks further `register` calls from the delegate, but its existing service,
+// balance, nonce, and earnings are untouched. To cut off voucher-signing
+// ability, remove the delegate as a TappRegistry node instead.
+func runRevokeProvider(args []string) {
+	fs := flag.NewFlagSet("revoke-provider", flag.ExitOnError)
+	rpc         := fs.String("rpc",      defaultRPC,      "RPC endpoint")
+	chainID     := fs.Int64("chain-id",  defaultChainID,  "Chain ID")
+	contractHex := fs.String("contract", envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
+	keyHex      := fs.String("key",      "",              "App owner private key (hex); or set PROVIDER_KEY env — must be the appId's TappRegistry owner")
+	appId       := fs.String("app-id",   "",              "TappRegistry appId (required)")
+	providerHex := fs.String("provider", "",              "Delegate wallet to revoke (required)")
+	_ = fs.Parse(args)
+
+	if *appId == "" {
+		fatalf("--app-id is required")
+	}
+	if *providerHex == "" {
+		fatalf("--provider is required")
+	}
+	privKey := resolveKey(*keyHex, "PROVIDER_KEY")
+	appOwnerAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	providerAddr := common.HexToAddress(*providerHex)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	eth, contract := dialContract(ctx, *rpc, *contractHex)
+	defer eth.Close()
+
+	fmt.Printf("App owner: %s\n", appOwnerAddr.Hex())
+	fmt.Printf("AppId:     %s\n", *appId)
+	fmt.Printf("Delegate:  %s\n", providerAddr.Hex())
+
+	auth := buildAuth(ctx, privKey, *chainID)
+	fmt.Println("\n[1/1] RevokeProvider...")
+	tx, err := contract.RevokeProvider(auth, *appId, providerAddr)
+	if err != nil {
+		fatalf("RevokeProvider: %v", err)
+	}
+	fmt.Printf("      tx: %s\n", tx.Hash().Hex())
+	if _, err := bind.WaitMined(ctx, eth, tx); err != nil {
+		fatalf("wait mined: %v", err)
+	}
+	fmt.Println("      confirmed ✓")
+	fmt.Printf("\nDone. %s can no longer update pricing for %s (its existing service keeps settling).\n", providerAddr.Hex(), *appId)
+}
+
 // ── status ────────────────────────────────────────────────────────────────────
 
 func runStatus(args []string) {
@@ -206,6 +310,7 @@ func runStatus(args []string) {
 	contractHex := fs.String("contract", envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
 	keyHex      := fs.String("key",      "",              "Provider private key; or set PROVIDER_KEY env")
 	addrHex     := fs.String("address",  "",              "Provider address (alternative to --key)")
+	tappHex     := fs.String("tapp",     envOrDefault("TAPP_REGISTRY", ""), "TappRegistry address (optional; shows whether this address is the appId owner or a delegate)")
 	_ = fs.Parse(args)
 
 	var providerAddr common.Address
@@ -254,6 +359,22 @@ func runStatus(args []string) {
 		fmt.Printf("  Create fee:       %s neuron\n", svc.CreateFee.String())
 		fmt.Printf("  Earnings:         %s neuron\n", earnings.String())
 		fmt.Println("  (TEE signers + ack state now live in TappRegistry; query that contract for cluster info.)")
+
+		if *tappHex != "" && svc.AppId != "" {
+			tapp, err := chain.NewTappRegistry(common.HexToAddress(*tappHex), eth)
+			if err != nil {
+				fatalf("bind tappRegistry: %v", err)
+			}
+			appInfo, err := tapp.GetAppInfo(opts, svc.AppId)
+			if err != nil {
+				fatalf("tapp.getAppInfo: %v", err)
+			}
+			if appInfo.Owner == providerAddr {
+				fmt.Println("  Role:             app owner (self-registered)")
+			} else {
+				fmt.Printf("  Role:             delegate provider (app owner: %s)\n", appInfo.Owner.Hex())
+			}
+		}
 	}
 }
 
