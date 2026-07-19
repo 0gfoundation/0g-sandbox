@@ -71,9 +71,9 @@ it, subsequent calls must pass the same value or revert. To bind a different
 appId, `remove-service` first. Each node (signer) gets its own fully isolated
 service entry: separate URL/prices, user balances, voucher nonces, earnings.
 
-> **After calling `register`**: set `OWNER_ADDRESS` in the node's `.env`
-> (owner wallet — admin + display only), then (re)deploy the billing service.
-> The service derives its provider identity from the TEE key automatically.
+> **After calling `register`**: just (re)deploy the billing service — it
+> derives its provider identity from the TEE key and resolves the app owner
+> from `getAppInfo(BACKEND_APP_NAME).owner` automatically; nothing to configure.
 
 ---
 

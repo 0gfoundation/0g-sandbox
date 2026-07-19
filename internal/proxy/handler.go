@@ -85,6 +85,13 @@ type Handler struct {
 	// config (env SEALED_ONLY=true). Off by default — providers serve both
 	// sealed and unsealed workloads unless explicitly opted in.
 	SealedOnly bool
+
+	// AppOwner resolves the appId's current TappRegistry owner (lowercased
+	// hex). Set by cmd/billing as a TTL-cached chain lookup on
+	// getAppInfo(BACKEND_APP_NAME).owner. The owner is ALWAYS an admin on
+	// top of adminAddresses — resolved live so it can never drift from the
+	// on-chain truth. nil (tests, mock setups) = static admin list only.
+	AppOwner func(ctx context.Context) (string, error)
 }
 
 func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec *big.Int, providerAddress string, adminAddresses []string, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, teeKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
@@ -125,7 +132,9 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, ackCheck: ackCheck, eventFetcher: eventFetcher, createFee: createFee, pricePerCPUPerSec: pricePerCPUPerSec, pricePerMemGBPerSec: pricePerMemGBPerSec, voucherIntervalSec: voucherIntervalSec, computePricePerSec: computePricePerSec, providerAddress: providerAddress, adminAddresses: admins, sshGatewayHost: sshGatewayHost, rdb: rdb, teeKey: teeKey, broker: broker, log: log}
 }
 
-// isAdmin reports whether wallet is configured as an admin (case-insensitive).
+// isAdmin reports whether wallet may call operator-only endpoints: either in
+// the configured ADMIN_ADDRESSES list, or the appId's current TappRegistry
+// owner (resolved live via AppOwner, case-insensitive).
 func (h *Handler) isAdmin(wallet string) bool {
 	if wallet == "" {
 		return false
@@ -134,6 +143,15 @@ func (h *Handler) isAdmin(wallet string) bool {
 	for _, a := range h.adminAddresses {
 		if a == target {
 			return true
+		}
+	}
+	if h.AppOwner != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if owner, err := h.AppOwner(ctx); err == nil && owner == target {
+			return true
+		} else if err != nil {
+			h.log.Warn("isAdmin: app owner lookup failed; falling back to static admin list", zap.Error(err))
 		}
 	}
 	return false

@@ -82,7 +82,8 @@ contracts/
 - The **provider address** (services key, voucher payee, `(user, provider)`
   balance bucket, earnings ledger) is the node's TEE signer address, derived
   from the TEE key at runtime. There is no separate provider wallet.
-- The **owner** (`OWNER_ADDRESS`, the appId's TappRegistry owner) does all
+- The **owner** (the appId's TappRegistry owner — resolved on-chain from
+  `getAppInfo(BACKEND_APP_NAME).owner`, never configured) does all
   management: `register --signer`, `remove-service`, `withdraw`, `rotate`.
   Owner is always an admin; `ADMIN_ADDRESSES` adds extra operator wallets.
 - Settlement requires the voucher to be signed **by its own payee**
@@ -244,7 +245,6 @@ DAYTONA_API_URL=http://localhost:3000 \
 DAYTONA_ADMIN_KEY=<key> \
 SETTLEMENT_CONTRACT=0x<proxy-addr> \
 TAPP_REGISTRY=0x<tapp-registry-addr> \
-OWNER_ADDRESS=0x<appid-owner-eoa> \
 BACKEND_APP_NAME=<tapp-app-id> \
 RPC_URL=https://evmrpc-testnet.0g.ai \
 CHAIN_ID=16602 \
@@ -254,9 +254,9 @@ go run ./cmd/billing/
 
 `TAPP_REGISTRY` and `BACKEND_APP_NAME` are required — at startup the billing
 server derives its provider identity from the TEE key (**provider IS the TEE
-signer** — there is no provider wallet), reads `services[<teeAddr>].appId` from
-SandboxServing, and queries TappRegistry for node + ack state on every voucher.
-`OWNER_ADDRESS` is the appId's TappRegistry owner: admin + display only.
+signer** — there is no provider wallet), resolves the app owner from
+`getAppInfo(BACKEND_APP_NAME).owner` (standing admin, surfaced in /api/info),
+and queries TappRegistry for node + ack state on every voucher.
 
 `PROXY_DOMAIN` controls the URL format for accessing user-defined service ports inside the
 sandbox. Format: `http://<port>-<sandboxId>.<PROXY_DOMAIN>/<path>`. The Daytona proxy listens
@@ -315,9 +315,11 @@ violating the workload-privacy guarantee.
 The two `/force*` paths predate `withOwnerOrAdmin` and remain as explicit
 operator-intent endpoints so log/audit grep is unambiguous.
 
-`OWNER_ADDRESS` is **always** an admin; `ADMIN_ADDRESSES` is an additive
-comma-separated list of extra operator wallets. The on-chain settlement identity
-(the provider address) is the TEE signer and never appears in admin config.
+The appId's TappRegistry owner is **always** an admin — resolved live from
+the chain (`getAppInfo(BACKEND_APP_NAME).owner`), never configured;
+`ADMIN_ADDRESSES` is an additive list of extra operator wallets. The on-chain
+settlement identity (the provider address) is the TEE signer and never
+appears in admin config.
 
 ### Dashboard
 
@@ -412,7 +414,7 @@ tapp-cli -s $TAPP_SERVER docker-login \
 
 ```bash
 # 1. Prepare env (must be named .env for docker compose to pick it up).
-#    Required: SETTLEMENT_CONTRACT, TAPP_REGISTRY, OWNER_ADDRESS,
+#    Required: SETTLEMENT_CONTRACT, TAPP_REGISTRY,
 #              BACKEND_APP_NAME (= $APP_ID).
 cp .env.testnet .env
 

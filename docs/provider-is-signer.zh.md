@@ -48,9 +48,12 @@
   - **新增暂停逻辑**:自己的 signer 不在 TappRegistry 在册节点时,不提交结算、
     只攒队列(现有 IsActiveNode 检查+告警之上加一个闸),堵住
     "服务已起、add-node 未上链"窗口的 DLQ 损失。
-- `internal/config` / `auth`:`OWNER_ADDRESS` 取代 `PROVIDER_ADDRESS`;
-  **owner 恒为 admin**,`ADMIN_ADDRESSES` 是追加而非替换。
-- `/api/info` 暴露 `provider`(=当前 signer)和 `owner`。
+- `internal/config` / `auth`:`PROVIDER_ADDRESS` 删除,且 **owner 也不配置**——
+  运行时从链上解析 `getAppInfo(BACKEND_APP_NAME).owner`(1 分钟 TTL 缓存,
+  RPC 失败时用上次的值,不会把 owner 锁在门外);
+  **owner 恒为 admin**,`ADMIN_ADDRESSES` 只是追加的额外运维钱包。
+- 启动校验:`services[signer].appId == BACKEND_APP_NAME`,不一致报错日志。
+- `/api/info` 暴露 `provider_address`(=当前 signer)、`owner_address`(链上解析)、`app_id`。
 
 ## CLI
 

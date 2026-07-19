@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -73,13 +74,60 @@ func main() {
 
 	// Provider identity = the TEE signer's own address (v2: provider IS the
 	// TEE signer). It keys the voucher payee, the settler queue, and every
-	// provider-bound lookup below. OWNER_ADDRESS is the appId owner — admin
-	// + display only, never a ledger key.
+	// provider-bound lookup below.
 	providerAddr := onchain.ProviderAddress()
 	providerHex := providerAddr.Hex()
-	log.Info("provider identity derived from TEE key",
-		zap.String("provider", providerHex),
-		zap.String("owner", cfg.Chain.OwnerAddress))
+
+	// The appId owner is resolved from the chain, never configured:
+	// getAppInfo(BACKEND_APP_NAME).owner. It is the standing admin for
+	// operator endpoints and is surfaced through /api/info. TTL-cached; on
+	// lookup failure the last known value is served so a flaky RPC can't
+	// lock the owner out mid-session.
+	backendAppName := os.Getenv("BACKEND_APP_NAME")
+	if backendAppName == "" {
+		log.Warn("BACKEND_APP_NAME not set — app owner cannot be resolved; only ADMIN_ADDRESSES wallets are admins")
+	}
+	var ownerMu sync.Mutex
+	var ownerCached string
+	var ownerCachedAt time.Time
+	appOwnerFn := func(ctx context.Context) (string, error) {
+		ownerMu.Lock()
+		defer ownerMu.Unlock()
+		if ownerCached != "" && time.Since(ownerCachedAt) < time.Minute {
+			return ownerCached, nil
+		}
+		if backendAppName == "" {
+			return "", fmt.Errorf("BACKEND_APP_NAME not set")
+		}
+		owner, err := onchain.GetAppOwner(ctx, backendAppName)
+		if err != nil {
+			if ownerCached != "" {
+				return ownerCached, nil // serve stale over failing closed
+			}
+			return "", err
+		}
+		if owner == (common.Address{}) {
+			return "", fmt.Errorf("app %q not registered in TappRegistry", backendAppName)
+		}
+		ownerCached = strings.ToLower(owner.Hex())
+		ownerCachedAt = time.Now()
+		return ownerCached, nil
+	}
+	if owner, err := appOwnerFn(ctx); err != nil {
+		log.Warn("app owner not resolvable yet", zap.String("app_id", backendAppName), zap.Error(err))
+	} else {
+		log.Info("provider identity derived from TEE key",
+			zap.String("provider", providerHex),
+			zap.String("app_id", backendAppName),
+			zap.String("owner", owner))
+	}
+	// Drift check: the service this signer is registered under must be bound
+	// to the same appId we fetch our TEE key for. A mismatch means the key
+	// and the on-chain registration point at different apps.
+	if svcAppId, err := onchain.GetServiceAppId(ctx, providerAddr); err == nil && svcAppId != "" && backendAppName != "" && svcAppId != backendAppName {
+		log.Error("appId drift: on-chain service appId != BACKEND_APP_NAME",
+			zap.String("on_chain", svcAppId), zap.String("configured", backendAppName))
+	}
 
 	// ── Pricing: on-chain service registration is the source of truth ────────
 	// Read per-resource prices and createFee from the contract so users can
@@ -277,6 +325,16 @@ func main() {
 		c.JSON(http.StatusOK, providers)
 	})
 
+	// ownerForInfo returns the resolved app owner or "" — /api/info is
+	// best-effort display, not an auth surface.
+	ownerForInfo := func(ctx context.Context) string {
+		owner, err := appOwnerFn(ctx)
+		if err != nil {
+			return ""
+		}
+		return owner
+	}
+
 	rpcOrigin := cfg.Chain.RPCURL
 	if u, err := url.Parse(cfg.Chain.RPCURL); err == nil {
 		rpcOrigin = u.Scheme + "://" + u.Host
@@ -330,7 +388,8 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{
 			"contract_address":      cfg.Chain.ContractAddress,
 			"provider_address":      providerHex,
-			"owner_address":         cfg.Chain.OwnerAddress,
+			"owner_address":         ownerForInfo(c.Request.Context()),
+			"app_id":                backendAppName,
 			"chain_id":              cfg.Chain.ChainID,
 			"rpc_url":               rpcOrigin,
 			"compute_price_per_sec": computePricePerSec.String(),
@@ -435,6 +494,7 @@ func main() {
 	api := r.Group("/api", auth.Middleware(rdb))
 	proxyHandler := proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec, providerHex, cfg.Chain.AdminList(), cfg.Server.SSHGatewayHost, rdb, log, cfg.Server.BrokerURL, onchain.PrivateKey(), cfg.Billing.VoucherIntervalSec)
 	proxyHandler.SealedOnly = cfg.Server.SealedOnly
+	proxyHandler.AppOwner = appOwnerFn
 	proxyHandler.RegisterPublic(apiPublic)
 	proxyHandler.Register(api)
 	go runStopHandler(ctx, stopCh, dtona, rdb, log, proxyHandler.BrokerDeregister)
