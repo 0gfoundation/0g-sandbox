@@ -105,9 +105,12 @@ cast call <beacon> "owner()(address)"
 
 | 函数 | 说明 |
 |---|---|
-| `addOrUpdateService(url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)` | 注册/更新;`appId` 写一次;调用者须是该 appId 的 TappRegistry owner |
+| `addOrUpdateService(url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)` | 注册/更新;`appId` 写一次;调用者须是该 appId 的 TappRegistry owner **或被授权的委托 provider** |
 | `deregisterService()` | 软清除自己的 service,使 `appId` 可更换;余额/earnings/nonce 保留 |
 | `withdrawEarnings()` | 提取累计结算收益 |
+| `authorizeProvider(appId, provider)` | 仅 app owner — 把该 appId 的商业服务管理委托给另一个钱包;委托方注册自己完全独立的 service 条目(余额/nonce/earnings 互相隔离) |
+| `revokeProvider(appId, provider)` | 仅 app owner — 软撤销:只挡住该委托方后续的 `addOrUpdateService`,已有 service 和结算照常;要切断签 voucher 的能力去 TappRegistry 摘节点(`remove-node-onchain`) |
+| `authorizedProviders(appId, provider)` → bool | view — 委托状态 |
 | `services(provider)` / `serviceExists(provider)` | view — 业务条款 |
 | `getProviderEarnings(provider)` → uint256 | view |
 
@@ -127,7 +130,7 @@ cast call <beacon> "owner()(address)"
 | `setTappRegistry(newRegistry)` | TappRegistry 重新部署后用来切换指向;ack 状态从新 registry 读 |
 | `tappRegistry()` / `domainSeparator()` / `LOCK_TIME()` | view |
 
-**事件:** `Deposited`、`RefundRequested`、`RefundWithdrawn`、`VoucherSettled`、`EarningsWithdrawn`、`ServiceUpdated`、`ServiceDeregistered`、`OwnershipTransferred`、`TappRegistryUpdated`。
+**事件:** `Deposited`、`RefundRequested`、`RefundWithdrawn`、`VoucherSettled`、`EarningsWithdrawn`、`ServiceUpdated`、`ServiceDeregistered`、`ProviderAuthorized`、`ProviderRevoked`、`OwnershipTransferred`、`TappRegistryUpdated`。
 
 ---
 
@@ -241,3 +244,4 @@ PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ register \
 - **结算开放** — `settleFeesWithTEE` 任何人可调用，provider 由 voucher 内的 `v.provider` 字段标识，与 `msg.sender` 无关
 - **Trust root 委托** — SandboxServing 只持有商业条款；TEE 签名身份与用户 acknowledgement 都在 TappRegistry 中，每次 voucher 验签都会查询
 - **`appId` 写一次** — 一旦 `addOrUpdateService` 绑定了非空 `appId`，之后只能就地修改 URL / 价格 / createFee，无法替换 trust root。要绑定**不同的** `appId`,需先调 **`deregisterService`**:软清除调用者自己的 service 条目(url/appId/价格/createFee),但保留用户余额、待退款、已结算 nonce 和累计 `providerEarnings`(仍可提取),然后重新 register。触发 `ServiceDeregistered(provider)` 事件。
+- **Provider 委托** — 一个 appId 可以由多个钱包分别运营:app owner 调 `authorizeProvider(appId, wallet)` 授权,每个委托方注册自己的 service 条目,余额、nonce、earnings 完全隔离(与自注册 provider 同构)。余额**刻意不共享**:各自独立部署的 billing proxy 用各自的 Redis 做预留准入,互相看不见对方的在途预留,共享链上余额会导致超卖。注意结算边界是 appId 级而非委托方级:该 appId 的任何在册 TappRegistry 节点都能给任何委托方的 voucher 签名,实践中靠代码指纹(attested compose/镜像哈希)保证节点只给自己的 `PROVIDER_ADDRESS` 出账。

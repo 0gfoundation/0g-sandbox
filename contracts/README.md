@@ -106,9 +106,12 @@ Trust identity — the active TEE signer set and user acknowledgements — lives
 
 | Function | Notes |
 |---|---|
-| `addOrUpdateService(url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)` | Register/update; `appId` set-once; caller must be the appId's TappRegistry owner |
+| `addOrUpdateService(url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)` | Register/update; `appId` set-once; caller must be the appId's TappRegistry owner **or an authorized delegate** |
 | `deregisterService()` | Soft-clear the caller's service so `appId` can change; balances/earnings/nonces preserved |
 | `withdrawEarnings()` | Withdraw accrued settlement earnings |
+| `authorizeProvider(appId, provider)` | App owner only — delegate service management for `appId` to another wallet. The delegate registers its own fully isolated service entry (separate balances/nonces/earnings) |
+| `revokeProvider(appId, provider)` | App owner only — soft revoke: blocks further `addOrUpdateService` from the delegate; its existing service and settlement keep working. Cutting off voucher signing is TappRegistry's job (`remove-node-onchain`) |
+| `authorizedProviders(appId, provider)` → bool | view — delegation state |
 | `services(provider)` / `serviceExists(provider)` | view — commercial terms |
 | `getProviderEarnings(provider)` → uint256 | view |
 
@@ -128,7 +131,7 @@ Trust identity — the active TEE signer set and user acknowledgements — lives
 | `setTappRegistry(newRegistry)` | Repoint TappRegistry; ack state then reads from the new registry |
 | `tappRegistry()` / `domainSeparator()` / `LOCK_TIME()` | view |
 
-**Events:** `Deposited`, `RefundRequested`, `RefundWithdrawn`, `VoucherSettled`, `EarningsWithdrawn`, `ServiceUpdated`, `ServiceDeregistered`, `OwnershipTransferred`, `TappRegistryUpdated`.
+**Events:** `Deposited`, `RefundRequested`, `RefundWithdrawn`, `VoucherSettled`, `EarningsWithdrawn`, `ServiceUpdated`, `ServiceDeregistered`, `ProviderAuthorized`, `ProviderRevoked`, `OwnershipTransferred`, `TappRegistryUpdated`.
 
 ---
 
@@ -243,3 +246,4 @@ wallet holds enough 0G to pay gas for settlement.
 - **Open settlement** — `settleFeesWithTEE` can be called by anyone; the provider is identified by `v.provider` in the voucher, not `msg.sender`
 - **Trust root delegation** — SandboxServing holds only commercial terms; TEE signer identity and user acknowledgement live in TappRegistry and are queried on every voucher verification
 - **`appId` is set-once** — once `addOrUpdateService` has bound a non-empty `appId`, subsequent calls must pass the same value (a provider can only update URL / prices / createFee in place, not the trust root). To bind a *different* `appId`, call **`deregisterService`** first: a soft clear of the caller's service entry (url/appId/prices/createFee) that preserves user balances, pending refunds, settled nonces, and accrued `providerEarnings` — all still withdrawable — then re-register. Emits `ServiceDeregistered(provider)`.
+- **Provider delegation** — one appId can be commercially operated by multiple wallets: the app owner calls `authorizeProvider(appId, wallet)`, and each delegate registers its own service entry with fully isolated balances, nonces, and earnings (identical to a self-registered provider). Balances are deliberately **not** shared across delegates — independently deployed billing proxies each run their own reservation admission control and cannot see each other's pending reservations, so a shared on-chain balance would allow overcommit. Note the settlement boundary is per-appId, not per-delegate: any active TappRegistry node of the appId can sign vouchers for any of its delegates; the code identity (attested compose/image hashes) is what prevents cross-signing in practice.

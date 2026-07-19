@@ -51,7 +51,9 @@ PROVIDER_KEY=0x<hex> go run ./cmd/provider/ register \
 | `--chain-id` | `16602` | Chain ID |
 | `--contract` | deployed testnet addr | Settlement contract (BeaconProxy) address |
 
-The contract verifies on call: `tap.getAppInfo(appId).owner == msg.sender` and
+The contract verifies on call: `tap.getAppInfo(appId).owner == msg.sender`
+**or** `authorizedProviders[appId][msg.sender] == true` (see
+[`authorize-provider`](#authorize-provider--revoke-provider)), and
 `tap.isAuthorizedInvalidator(appId, address(this)) == true`. Stake is not
 collected here — TappRegistry holds per-node stake.
 
@@ -93,6 +95,54 @@ Done. Provider address: 0xea69...1837
 ```
 
 > **After calling `register`**: set `PROVIDER_ADDRESS` in your `.env`, then redeploy the billing service.
+
+---
+
+### `authorize-provider` / `revoke-provider`
+
+Delegate commercial service management for an appId to another wallet, or
+revoke a previous delegation. Both are signed by the **app owner's** key (the
+appId's TappRegistry owner) — not the delegate's.
+
+A delegated wallet can then call [`register`](#register--init-service) with the
+same `--app-id` and gets its **own fully isolated** service entry: separate
+URL/pricing, separate user balances, separate voucher nonces, separate
+earnings. This lets one appId (one attested app) be operated by multiple
+provider wallets — e.g. one wallet per machine — without sharing the app
+owner's key.
+
+```bash
+# Delegate (app owner signs):
+PROVIDER_KEY=0x<app-owner-hex> go run ./cmd/provider/ authorize-provider \
+  --app-id   <tapp-app-id> \
+  --provider 0x<delegate-wallet> \
+  [--rpc <rpc-url>] [--chain-id <chain-id>] [--contract <proxy-address>]
+
+# Revoke:
+PROVIDER_KEY=0x<app-owner-hex> go run ./cmd/provider/ revoke-provider \
+  --app-id   <tapp-app-id> \
+  --provider 0x<delegate-wallet>
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--key` | `PROVIDER_KEY` env | **App owner** private key — must be `tap.getAppInfo(appId).owner` |
+| `--app-id` | (required) | TappRegistry appId to delegate |
+| `--provider` | (required) | Delegate wallet address |
+| `--contract` | `SETTLEMENT_CONTRACT` env | Settlement contract (BeaconProxy) address |
+
+Semantics to be aware of:
+
+- **Revocation is soft**: it only blocks further `register` calls from the
+  delegate. Its existing service entry, user balances, nonces, earnings, and
+  settlement keep working. To cut off a delegate's ability to *sign vouchers*,
+  remove its machine as a TappRegistry node (`tapp-cli remove-node-onchain`) —
+  that is the real settlement security boundary.
+- Any delegate changing prices/createFee via `register` bumps
+  `ackVersion(appId)` in TappRegistry — **all** users of the appId (including
+  users of other delegates) must re-acknowledge before further vouchers settle.
+- Delegation state is on-chain and public: `authorizedProviders(appId, wallet)`
+  on the settlement contract; `ProviderAuthorized`/`ProviderRevoked` events.
 
 ---
 

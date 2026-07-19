@@ -45,7 +45,7 @@ cmd/
   deploy/     deploy beacon-proxy stack (3 steps: impl → beacon → proxy)
   upgrade/    upgrade via beacon.upgradeTo(newImpl)
   verify/     verify contracts on block explorer
-  provider/   provider CLI: register (binds appId), status, withdraw, snapshot management
+  provider/   provider CLI: register (binds appId), authorize/revoke-provider (delegation), status, withdraw, snapshot management
   user/       user CLI: create/stop/delete sandbox, exec, balance
   checkbal/   quick balance/nonce/earnings check for a private key
 internal/
