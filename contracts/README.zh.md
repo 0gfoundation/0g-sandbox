@@ -14,8 +14,8 @@
 
 | 组件 | 地址 |
 |------|------|
-| **Proxy**（稳定地址）| `0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3` |
-| Beacon | `0xaa77C82Dc6b4243Ff272d88619BD4f23455CCB6E` |
+| **Proxy**（稳定地址）| `0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c` |
+| Beacon | `0xBF04734BC87E12aB81E21bb4018b9bFa4c118721` |
 
 **升级历史：**
 
@@ -23,9 +23,10 @@
 |------|------|---------|
 | 初始 | — | 首次部署：per-provider 余额隔离，owner 模型 |
 | 2026-03-10 | `0x9a3D6C66e3e6E020D8D40d851Db76D76EBfa93f2` | 移除 `settleFeesWithTEE` 中 `msg.sender == provider` 限制，TEE key 直接签结算 tx，无需 `PROVIDER_PRIVATE_KEY` |
+| 2026-07-19 | `0x47a8E809Cd81b94eD19874da73C0E3F82DD90E5C` | **v2 重新部署(新 proxy/beacon)**:provider 即 TEE signer;注册/注销/提现归 owner;结算要求收款人本人签名。绑定 TappRegistry `0x2Ce80374318B1d7Fb3345724457a182E0ad165c9`。旧 dev proxy `0x2024eB0C…E9b3` 退役(仅退款) |
 
 ```env
-SETTLEMENT_CONTRACT=0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3
+SETTLEMENT_CONTRACT=0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c
 ```
 
 ---

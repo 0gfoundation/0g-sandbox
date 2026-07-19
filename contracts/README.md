@@ -14,8 +14,8 @@ Deployer/Owner: `0xB831371eb2703305f1d9F8542163633D0675CEd7`
 
 | Component | Address |
 |-----------|---------|
-| **Proxy** (stable) | `0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3` |
-| Beacon | `0xaa77C82Dc6b4243Ff272d88619BD4f23455CCB6E` |
+| **Proxy** (stable) | `0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c` |
+| Beacon | `0xBF04734BC87E12aB81E21bb4018b9bFa4c118721` |
 
 **Upgrade history:**
 
@@ -23,9 +23,10 @@ Deployer/Owner: `0xB831371eb2703305f1d9F8542163633D0675CEd7`
 |------|------|-------|
 | initial | — | Initial deploy: per-provider balance isolation, owner model |
 | 2026-03-10 | `0x9a3D6C66e3e6E020D8D40d851Db76D76EBfa93f2` | Removed `msg.sender == provider` check in `settleFeesWithTEE`; TEE key signs settlement txs directly, no `PROVIDER_PRIVATE_KEY` needed |
+| 2026-07-19 | `0x47a8E809Cd81b94eD19874da73C0E3F82DD90E5C` | **v2 redeploy (new proxy/beacon)**: provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement. Bound to TappRegistry `0x2Ce80374318B1d7Fb3345724457a182E0ad165c9`. Previous dev proxy `0x2024eB0C…E9b3` retired (refund-only) |
 
 ```env
-SETTLEMENT_CONTRACT=0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3
+SETTLEMENT_CONTRACT=0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c
 ```
 
 ---
