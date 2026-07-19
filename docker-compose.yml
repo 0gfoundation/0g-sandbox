@@ -17,7 +17,7 @@ services:
       SETTLEMENT_CONTRACT:     ${SETTLEMENT_CONTRACT}
       CHAIN_ID:                ${CHAIN_ID:-16602}
       RPC_URL:                 ${RPC_URL:-https://evmrpc-testnet.0g.ai}
-      PROVIDER_ADDRESS:        ${PROVIDER_ADDRESS:-}
+      OWNER_ADDRESS:           ${OWNER_ADDRESS:-}
       # Billing parameters (neuron; 1 0G = 10^18 neuron)
       COMPUTE_PRICE_PER_SEC:   ${COMPUTE_PRICE_PER_SEC:-16667}
       CREATE_FEE:              ${CREATE_FEE:-5000000}

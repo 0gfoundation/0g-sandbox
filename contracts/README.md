@@ -106,17 +106,17 @@ Trust identity — the active TEE signer set and user acknowledgements — lives
 
 | Function | Notes |
 |---|---|
-| `addOrUpdateService(url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)` | Register/update; `appId` set-once; caller must be the appId's TappRegistry owner |
-| `deregisterService()` | Soft-clear the caller's service so `appId` can change; balances/earnings/nonces preserved |
-| `withdrawEarnings()` | Withdraw accrued settlement earnings |
-| `services(provider)` / `serviceExists(provider)` | view — commercial terms |
+| `addOrUpdateService(signer, url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)` | App owner registers/updates a node's service; `signer` (= the provider address) must be an active TappRegistry node of the appId; `appId` set-once per signer |
+| `removeService(signer)` | App owner removes a node's service (e.g. after a machine rebuild); sweeps pending earnings to the owner in the same tx; user balances stay refundable, nonce watermarks stay put |
+| `withdrawEarnings(signer)` | App owner withdraws a node's accrued earnings to the owner's wallet |
+| `services(provider)` / `serviceExists(provider)` | view — commercial terms (provider = the node's TEE signer address) |
 | `getProviderEarnings(provider)` → uint256 | view |
 
 **Settlement**
 
 | Function | Notes |
 |---|---|
-| `settleFeesWithTEE(vouchers[])` → statuses[] | Permissionless; provider identified by `v.provider`; verifies the EIP-712 signature against the appId's active TEE node in TappRegistry |
+| `settleFeesWithTEE(vouchers[])` → statuses[] | Permissionless; a voucher is valid only if signed BY its own payee (`recovered == v.provider`) and that address is an active TappRegistry node of the appId — one node can never settle vouchers naming another node |
 | `previewSettlementResults(vouchers[])` → statuses[] | view — dry-run statuses |
 
 **Admin / setup**
@@ -128,7 +128,7 @@ Trust identity — the active TEE signer set and user acknowledgements — lives
 | `setTappRegistry(newRegistry)` | Repoint TappRegistry; ack state then reads from the new registry |
 | `tappRegistry()` / `domainSeparator()` / `LOCK_TIME()` | view |
 
-**Events:** `Deposited`, `RefundRequested`, `RefundWithdrawn`, `VoucherSettled`, `EarningsWithdrawn`, `ServiceUpdated`, `ServiceDeregistered`, `OwnershipTransferred`, `TappRegistryUpdated`.
+**Events:** `Deposited`, `RefundRequested`, `RefundWithdrawn`, `VoucherSettled`, `EarningsWithdrawn(provider, to, amount)`, `ServiceUpdated`, `ServiceRemoved(provider, appOwner)`, `OwnershipTransferred`, `TappRegistryUpdated`.
 
 ---
 
@@ -242,4 +242,6 @@ wallet holds enough 0G to pay gas for settlement.
 - **Proxy address never changes** — upgrading only replaces the implementation; the proxy address is the stable external-facing address
 - **Open settlement** — `settleFeesWithTEE` can be called by anyone; the provider is identified by `v.provider` in the voucher, not `msg.sender`
 - **Trust root delegation** — SandboxServing holds only commercial terms; TEE signer identity and user acknowledgement live in TappRegistry and are queried on every voucher verification
-- **`appId` is set-once** — once `addOrUpdateService` has bound a non-empty `appId`, subsequent calls must pass the same value (a provider can only update URL / prices / createFee in place, not the trust root). To bind a *different* `appId`, call **`deregisterService`** first: a soft clear of the caller's service entry (url/appId/prices/createFee) that preserves user balances, pending refunds, settled nonces, and accrued `providerEarnings` — all still withdrawable — then re-register. Emits `ServiceDeregistered(provider)`.
+- **Provider IS the TEE signer (v2)** — every provider address (services key, voucher payee, balance bucket, earnings ledger) is the TEE signer address of one TappRegistry node. The signer key never leaves the enclave and dies with the machine, so all management (register/remove/withdraw) belongs to the appId's TappRegistry owner. One appId, many nodes: each signer has a fully isolated ledger — balances are deliberately NOT shared across nodes (independently-deployed billing proxies each run their own Redis reservation admission control and can't see each other's in-flight reservations; a shared balance would overcommit).
+- **Rotation** — a machine rebuild produces a new signer. Runbook: add the new node in TappRegistry (old + new coexist), drain the old signer's voucher queue, `rotate` the service entry (cmd/provider), remove the old node. Users move balances off the dead signer via the normal refund flow; `removeService` sweeps its earnings to the owner.
+- **`appId` is set-once per signer** — once `addOrUpdateService` has bound a non-empty `appId` to a signer, subsequent calls must pass the same value. To bind a *different* `appId`, `removeService` first (user balances, pending refunds, and settled nonces are preserved — nonces stay put so old vouchers can't be replayed after a re-register).

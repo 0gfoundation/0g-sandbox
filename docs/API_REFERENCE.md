@@ -211,6 +211,7 @@ Server configuration and pricing.
 {
   "contract_address":     "0x...",
   "provider_address":     "0x...",
+  "owner_address":        "0x...",
   "chain_id":             16602,
   "rpc_url":              "https://evmrpc-testnet.0g.ai",
   "create_fee":           "60000000000000000",
