@@ -37,15 +37,12 @@ func (m *mockChain) GetServiceInfo(_ context.Context, provider common.Address) (
 	return svc, nil
 }
 
-// GetAppOwner maps appId → the provider whose service declares it, so each
-// indexed provider is treated as the live owner of its own appId.
-func (m *mockChain) GetAppOwner(_ context.Context, appId string) (common.Address, error) {
-	for hexAddr, svc := range m.services {
-		if svc.AppId == appId {
-			return common.HexToAddress(hexAddr), nil
-		}
-	}
-	return common.Address{}, nil
+// IsActiveNode treats every provider whose service declares the appId as an
+// active node of it (v2: provider = the node's TEE signer), so indexed
+// providers stay live unless a test removes their service.
+func (m *mockChain) IsActiveNode(_ context.Context, appId string, signer common.Address) (bool, error) {
+	svc, ok := m.services[signer.Hex()]
+	return ok && svc.AppId == appId, nil
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -232,8 +229,8 @@ func (m *mockChainCapture) GetServiceUpdatedEvents(_ context.Context, fromBlock 
 func (m *mockChainCapture) GetServiceInfo(_ context.Context, _ common.Address) (*chain.ServiceInfo, error) {
 	return nil, nil
 }
-func (m *mockChainCapture) GetAppOwner(_ context.Context, _ string) (common.Address, error) {
-	return common.Address{}, nil
+func (m *mockChainCapture) IsActiveNode(_ context.Context, _ string, _ common.Address) (bool, error) {
+	return false, nil
 }
 
 func TestSync_deduplicatesEvents(t *testing.T) {
