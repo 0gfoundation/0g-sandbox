@@ -306,10 +306,17 @@ func runAcknowledge(args []string) {
 	if appInfo.Owner == (common.Address{}) {
 		fatalf("app %q is not registered in TappRegistry (or was unregistered)", svc.AppId)
 	}
-	// Sanity check: sandbox service's provider must be the app owner.
-	if appInfo.Owner != providerAddr {
-		fatalf("trust mismatch: sandbox provider %s ≠ tap app owner %s — refuse to ack",
-			providerAddr.Hex(), appInfo.Owner.Hex())
+	// Sanity check (v2: provider IS the TEE signer): the provider address must
+	// be an active node of the appId — that is the machine whose vouchers will
+	// charge this deposit bucket. A provider that isn't a registered node can
+	// never settle, so an ack against it would be meaningless.
+	provNode, err := tapp.GetNode(opts, svc.AppId, providerAddr)
+	if err != nil {
+		fatalf("tapp.getNode: %v", err)
+	}
+	if provNode.AddedAt.Sign() == 0 {
+		fatalf("trust mismatch: provider %s is not an active TappRegistry node of app %q — refuse to ack",
+			providerAddr.Hex(), svc.AppId)
 	}
 	nodes, err := tapp.GetNodeList(opts, svc.AppId)
 	if err != nil {
@@ -335,7 +342,8 @@ func runAcknowledge(args []string) {
 	fmt.Printf("  Mem price:     %s neuron/GB/min\n", svc.PricePerMemGBPerMin.String())
 	fmt.Println()
 	fmt.Printf("== Trust root (TappRegistry %s) ==\n", cf.tapp)
-	fmt.Printf("  App owner:     %s   (matches provider ✓)\n", appInfo.Owner.Hex())
+	fmt.Printf("  App owner:     %s\n", appInfo.Owner.Hex())
+	fmt.Printf("  Provider node: %s   (active node of this app ✓)\n", providerAddr.Hex())
 	fmt.Printf("  Registered:    %s\n", time.Unix(appInfo.RegisteredAt.Int64(), 0).UTC().Format(time.RFC3339))
 	fmt.Printf("  Ack version:   %s\n", ackVersion.String())
 	fmt.Printf("  Compose hash:  0x%s\n", hex.EncodeToString(appInfo.ComposeHash))

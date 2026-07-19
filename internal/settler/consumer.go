@@ -22,16 +22,51 @@ const maxBatchSize = 50
 // alerter receives operator alerts on tx failures and bug-class settle outcomes;
 // pass alert.Nop{} to disable.
 func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain ChainClient, nonceSigner NonceSigner, stopCh chan<- StopSignal, alerter alert.Alerter, log *zap.Logger) {
-	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, cfg.Chain.ProviderAddress)
+	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, onchain.ProviderAddress().Hex())
 	// lockTime/2 as BLPOP timeout (half the lock window for responsiveness)
 	blpopTimeout := time.Duration(cfg.Billing.VoucherIntervalSec) * time.Second / 2
 
 	log.Info("settler started", zap.String("queue", queueKey))
 
+	// Rotation gate state: throttle the on-chain node check and the warn log
+	// so a long not-yet-registered window doesn't spam RPC or logs.
+	var lastNodeCheck time.Time
+	var nodeActive bool
+
 	for {
 		if ctx.Err() != nil {
 			log.Info("settler stopped")
 			return
+		}
+
+		// Rotation gate: while our signer is not a registered TappRegistry
+		// node (fresh machine, add-node-onchain not run yet), hold the queue
+		// instead of submitting — every voucher would settle
+		// INVALID_SIGNATURE and dead-letter real revenue. Fail open on RPC
+		// errors: a flaky RPC must not stall settlement.
+		if time.Since(lastNodeCheck) > 30*time.Second {
+			firstCheck := lastNodeCheck.IsZero()
+			active, err := onchain.IsLocalTEEActiveNode(ctx)
+			if err != nil {
+				log.Warn("settler: node-membership check failed; assuming active", zap.Error(err))
+				active = true
+			}
+			if !active && (firstCheck || nodeActive) {
+				log.Warn("settler: local TEE signer is not an active TappRegistry node — holding voucher queue until add-node-onchain lands")
+			}
+			if active && !nodeActive && !firstCheck {
+				log.Info("settler: local TEE signer registered on-chain — resuming settlement")
+			}
+			nodeActive = active
+			lastNodeCheck = time.Now()
+		}
+		if !nodeActive {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
+			continue
 		}
 
 		// BLPOP blocks until an item appears or timeout

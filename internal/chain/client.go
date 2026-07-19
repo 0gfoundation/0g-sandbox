@@ -58,7 +58,7 @@ type Client struct {
 	tappAddr     common.Address
 	chainID      *big.Int
 	teeKey       *ecdsa.PrivateKey // signs vouchers (EIP-712, off-chain) and settlement txs
-	providerAddr common.Address    // registered provider address (from PROVIDER_ADDRESS)
+	providerAddr common.Address    // = TEE key address: provider IS the TEE signer (v2)
 
 	blockTimeMu  sync.Mutex
 	blockTimeSec float64    // cached avg block time in seconds
@@ -76,14 +76,12 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		return nil, fmt.Errorf("parse tee private key: %w", err)
 	}
 
-	// Provider address identifies which on-chain provider this client represents
-	// — the value goes into voucher.provider (EIP-712), the settler queue key,
-	// and provider-bound lookups (IsLocalTEEActiveNode, IsAcknowledged(user)).
-	// Required for the billing/sandbox provider; optional for clients that only
-	// inspect chain state across all providers (broker, indexer, dashboards).
-	// Methods that rely on it will receive the zero address and surface a
-	// clear runtime error to the caller if invoked without it being set.
-	providerAddr := common.HexToAddress(cfg.Chain.ProviderAddress)
+	// Provider identity is DERIVED from the TEE key: the provider address —
+	// voucher payee (EIP-712), settler queue key, services key, balance
+	// bucket — is the TEE signer's own address. There is no separately
+	// configured provider wallet; the ledger identity rotates with the
+	// machine's TEE key and management belongs to the appId owner.
+	providerAddr := crypto.PubkeyToAddress(teeKey.PublicKey)
 
 	addr := common.HexToAddress(cfg.Chain.ContractAddress)
 	contract, err := NewSandboxServing(addr, eth)
@@ -135,6 +133,11 @@ func (c *Client) SettlerAddress() common.Address {
 	return crypto.PubkeyToAddress(c.teeKey.PublicKey)
 }
 
+// ProviderAddress returns this deployment's on-chain provider identity: the
+// TEE signer's own address (provider IS the TEE signer). It keys the voucher
+// payee field, the settler queue, and all provider-bound chain lookups.
+func (c *Client) ProviderAddress() common.Address { return c.providerAddr }
+
 // BalanceAt returns the latest balance for addr. Wraps eth.BalanceAt(nil)
 // so monitor code doesn't need direct access to the embedded ethclient.
 func (c *Client) BalanceAt(ctx context.Context, addr common.Address) (*big.Int, error) {
@@ -159,10 +162,9 @@ func (c *Client) GetServiceAppId(ctx context.Context, provider common.Address) (
 }
 
 // GetAppOwner returns the current owner of appId in TappRegistry, or the zero
-// address if the app is not registered. TappRegistry is the source of truth for
-// who currently owns an app: SandboxServing has no removeService, so a stale
-// service entry (e.g. left behind after an owner transfer) is detected by
-// comparing its provider address against this owner.
+// address if the app is not registered. TappRegistry is the source of truth
+// for who currently owns an app; the owner is the only wallet that can
+// register/remove services and withdraw earnings in SandboxServing.
 func (c *Client) GetAppOwner(ctx context.Context, appId string) (common.Address, error) {
 	opts := &bind.CallOpts{Context: ctx}
 	info, err := c.tapp.GetAppInfo(opts, appId)

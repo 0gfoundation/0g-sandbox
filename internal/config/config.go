@@ -50,36 +50,36 @@ type ChainConfig struct {
 	ContractAddress string `mapstructure:"contract_address"`
 	TappRegistry    string `mapstructure:"tapp_registry"`
 	TEEPrivateKey   string `mapstructure:"tee_private_key"`
-	ProviderAddress string `mapstructure:"provider_address"`
-	// AdminAddresses is the comma-separated list of wallet addresses that may
-	// invoke operator-only endpoints (snapshot/registry management,
-	// archive-all, force-delete, sessions). When empty, falls back to
-	// [ProviderAddress] for backward compatibility with single-key
-	// deployments. Distinct from ProviderAddress (the on-chain settlement
-	// identity) so multiple operators can manage infrastructure without
-	// holding the provider's settlement key.
+	// OwnerAddress is the appId's TappRegistry owner wallet. It has no role
+	// in billing (the provider/settlement identity is derived from the TEE
+	// key at runtime — provider IS the TEE signer); it is the standing admin
+	// for operator endpoints and is surfaced through /api/info so users know
+	// who operates this deployment.
+	OwnerAddress string `mapstructure:"owner_address"`
+	// AdminAddresses is an ADDITIVE comma-separated list of extra wallet
+	// addresses that may invoke operator-only endpoints (snapshot/registry
+	// management, archive-all, force-delete, sessions). OwnerAddress is
+	// always an admin regardless of this list — the owner can never lock
+	// itself out by setting ADMIN_ADDRESSES.
 	AdminAddresses string `mapstructure:"admin_addresses"`
 	ChainID        int64  `mapstructure:"chain_id"`
 }
 
 // AdminList returns the parsed admin wallet addresses (lowercased hex).
-// When ADMIN_ADDRESSES is unset, defaults to [ProviderAddress] so existing
-// single-key deployments keep working.
+// OwnerAddress is always included; ADMIN_ADDRESSES appends extra operators.
 func (c *ChainConfig) AdminList() []string {
-	raw := strings.TrimSpace(c.AdminAddresses)
-	if raw == "" {
-		if c.ProviderAddress == "" {
-			return nil
+	var out []string
+	seen := map[string]bool{}
+	add := func(addr string) {
+		addr = strings.ToLower(strings.TrimSpace(addr))
+		if addr != "" && !seen[addr] {
+			seen[addr] = true
+			out = append(out, addr)
 		}
-		return []string{strings.ToLower(c.ProviderAddress)}
 	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, strings.ToLower(p))
-		}
+	add(c.OwnerAddress)
+	for _, p := range strings.Split(c.AdminAddresses, ",") {
+		add(p)
 	}
 	return out
 }
@@ -159,7 +159,7 @@ func Load() (*Config, error) {
 		"chain.rpc_url":                "RPC_URL",
 		"chain.contract_address":       "SETTLEMENT_CONTRACT",
 		"chain.tapp_registry":          "TAPP_REGISTRY",
-		"chain.provider_address":       "PROVIDER_ADDRESS",
+		"chain.owner_address":          "OWNER_ADDRESS",
 		"chain.admin_addresses":        "ADMIN_ADDRESSES",
 		"chain.chain_id":               "CHAIN_ID",
 		"server.port":                  "PORT",
@@ -262,7 +262,7 @@ func (c *Config) validate() error {
 		{c.Daytona.AdminKey, "DAYTONA_ADMIN_KEY"},
 		{c.Chain.RPCURL, "RPC_URL"},
 		{c.Chain.ContractAddress, "SETTLEMENT_CONTRACT"},
-		{c.Chain.ProviderAddress, "PROVIDER_ADDRESS"},
+		{c.Chain.OwnerAddress, "OWNER_ADDRESS"},
 	} {
 		if r.val == "" {
 			return fmt.Errorf("required config missing: %s", r.name)
