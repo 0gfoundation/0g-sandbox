@@ -17,7 +17,7 @@ func main() {
 	eth, _ := ethclient.Dial("https://evmrpc-testnet.0g.ai")
 	privKey, _ := crypto.HexToECDSA("859c3bd1baf85767059b81448d0902d2bb649d137f0df460eb576915d15d58eb")
 	addr := crypto.PubkeyToAddress(privKey.PublicKey)
-	c, _ := chain.NewSandboxServing(common.HexToAddress("0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3"), eth)
+	c, _ := chain.NewSandboxServing(common.HexToAddress("0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c"), eth)
 	opts := &bind.CallOpts{Context: context.Background()}
 
 	bal, _ := c.GetBalance(opts, addr, addr)
@@ -46,7 +46,7 @@ func main() {
 	fmt.Println()
 	fmt.Println("=== Recent VoucherSettled events (last 5000 blocks) ===")
 	ctx := context.Background()
-	chainClient := &chainReader{eth: eth, c: c, addr: common.HexToAddress("0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3")}
+	chainClient := &chainReader{eth: eth, c: c, addr: common.HexToAddress("0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c")}
 	_ = chainClient
 	_ = ctx
 }

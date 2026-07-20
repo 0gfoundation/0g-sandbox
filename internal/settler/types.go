@@ -3,6 +3,8 @@ package settler
 import (
 	"context"
 
+	"github.com/ethereum/go-ethereum/common"
+
 	"github.com/0gfoundation/0g-sandbox/internal/chain"
 	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
@@ -18,6 +20,16 @@ type StopSignal struct {
 // without a live RPC connection.
 type ChainClient interface {
 	SettleFeesWithTEE(ctx context.Context, vouchers []voucher.SandboxVoucher) ([]chain.SettlementStatus, error)
+	// ProviderAddress is this deployment's provider identity (= the TEE
+	// signer address); it keys the voucher queue the settler drains.
+	ProviderAddress() common.Address
+	// IsLocalTEEActiveNode reports whether our signer is currently a
+	// registered node of the app in TappRegistry. While false, the settler
+	// holds the queue instead of submitting: after a machine rebuild the
+	// new signer's vouchers would all settle INVALID_SIGNATURE until the
+	// operator runs add-node-onchain — holding them avoids burning gas and
+	// dead-lettering real revenue during that window.
+	IsLocalTEEActiveNode(ctx context.Context) (bool, error)
 }
 
 // NonceSigner assigns a monotone nonce and cryptographically signs a voucher

@@ -41,7 +41,7 @@ type SandboxServingSandboxVoucher struct {
 
 // SandboxServingMetaData contains all meta data concerning the SandboxServing contract.
 var SandboxServingMetaData = &bind.MetaData{
-	ABI: "[{\"type\":\"constructor\",\"inputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"LOCK_TIME\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"addOrUpdateService\",\"inputs\":[{\"name\":\"url\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"appId\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"pricePerCPUPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"createFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pricePerMemGBPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"authorizeProvider\",\"inputs\":[{\"name\":\"appId\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"authorizedProviders\",\"inputs\":[{\"name\":\"\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"balanceOfBatch\",\"inputs\":[{\"name\":\"users\",\"type\":\"address[]\",\"internalType\":\"address[]\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"balances\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"deposit\",\"inputs\":[{\"name\":\"recipient\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"payable\"},{\"type\":\"function\",\"name\":\"deregisterService\",\"inputs\":[],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"domainSeparator\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getBalance\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"balance\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pendingRefund\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"refundUnlockAt\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getLastNonce\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getProviderEarnings\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"initialize\",\"inputs\":[{\"name\":\"tappRegistry_\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"isTEEAcknowledged\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"owner\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"previewSettlementResults\",\"inputs\":[{\"name\":\"vouchers\",\"type\":\"tuple[]\",\"internalType\":\"structSandboxServing.SandboxVoucher[]\",\"components\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"signature\",\"type\":\"bytes\",\"internalType\":\"bytes\"}]}],\"outputs\":[{\"name\":\"statuses\",\"type\":\"uint8[]\",\"internalType\":\"enumSandboxServing.SettlementStatus[]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"providerEarnings\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"requestRefund\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"revokeProvider\",\"inputs\":[{\"name\":\"appId\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"serviceExists\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"services\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"url\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"appId\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"pricePerCPUPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pricePerMemGBPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"createFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"setTappRegistry\",\"inputs\":[{\"name\":\"newRegistry\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"settleFeesWithTEE\",\"inputs\":[{\"name\":\"vouchers\",\"type\":\"tuple[]\",\"internalType\":\"structSandboxServing.SandboxVoucher[]\",\"components\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"signature\",\"type\":\"bytes\",\"internalType\":\"bytes\"}]}],\"outputs\":[{\"name\":\"statuses\",\"type\":\"uint8[]\",\"internalType\":\"enumSandboxServing.SettlementStatus[]\"}],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"tappRegistry\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"contractITappRegistry\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"transferOwnership\",\"inputs\":[{\"name\":\"newOwner\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"withdrawEarnings\",\"inputs\":[],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"withdrawRefund\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"event\",\"name\":\"Deposited\",\"inputs\":[{\"name\":\"recipient\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"EarningsWithdrawn\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"OwnershipTransferred\",\"inputs\":[{\"name\":\"previousOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"newOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ProviderAuthorized\",\"inputs\":[{\"name\":\"appId\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"appOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ProviderRevoked\",\"inputs\":[{\"name\":\"appId\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"appOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RefundRequested\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"unlockAt\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RefundWithdrawn\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ServiceDeregistered\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ServiceUpdated\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"appId\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"},{\"name\":\"url\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"TappRegistryUpdated\",\"inputs\":[{\"name\":\"previousRegistry\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"newRegistry\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"VoucherSettled\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"indexed\":false,\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"status\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumSandboxServing.SettlementStatus\"}],\"anonymous\":false}]",
+	ABI: "[{\"type\":\"constructor\",\"inputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"LOCK_TIME\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"addOrUpdateService\",\"inputs\":[{\"name\":\"signer\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"url\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"appId\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"pricePerCPUPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"createFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pricePerMemGBPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"balanceOfBatch\",\"inputs\":[{\"name\":\"users\",\"type\":\"address[]\",\"internalType\":\"address[]\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"balances\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"deposit\",\"inputs\":[{\"name\":\"recipient\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"payable\"},{\"type\":\"function\",\"name\":\"domainSeparator\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getBalance\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"balance\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pendingRefund\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"refundUnlockAt\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getLastNonce\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getProviderEarnings\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"initialize\",\"inputs\":[{\"name\":\"tappRegistry_\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"isTEEAcknowledged\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"owner\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"previewSettlementResults\",\"inputs\":[{\"name\":\"vouchers\",\"type\":\"tuple[]\",\"internalType\":\"structSandboxServing.SandboxVoucher[]\",\"components\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"signature\",\"type\":\"bytes\",\"internalType\":\"bytes\"}]}],\"outputs\":[{\"name\":\"statuses\",\"type\":\"uint8[]\",\"internalType\":\"enumSandboxServing.SettlementStatus[]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"providerEarnings\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"removeService\",\"inputs\":[{\"name\":\"signer\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"requestRefund\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"serviceExists\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"services\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"url\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"appId\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"pricePerCPUPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pricePerMemGBPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"createFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"setTappRegistry\",\"inputs\":[{\"name\":\"newRegistry\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"settleFeesWithTEE\",\"inputs\":[{\"name\":\"vouchers\",\"type\":\"tuple[]\",\"internalType\":\"structSandboxServing.SandboxVoucher[]\",\"components\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"signature\",\"type\":\"bytes\",\"internalType\":\"bytes\"}]}],\"outputs\":[{\"name\":\"statuses\",\"type\":\"uint8[]\",\"internalType\":\"enumSandboxServing.SettlementStatus[]\"}],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"tappRegistry\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"contractITappRegistry\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"transferOwnership\",\"inputs\":[{\"name\":\"newOwner\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"withdrawEarnings\",\"inputs\":[{\"name\":\"signer\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"withdrawRefund\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"event\",\"name\":\"Deposited\",\"inputs\":[{\"name\":\"recipient\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"EarningsWithdrawn\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"to\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"OwnershipTransferred\",\"inputs\":[{\"name\":\"previousOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"newOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RefundRequested\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"unlockAt\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RefundWithdrawn\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ServiceRemoved\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"appOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ServiceUpdated\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"appId\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"},{\"name\":\"url\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"TappRegistryUpdated\",\"inputs\":[{\"name\":\"previousRegistry\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"newRegistry\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"VoucherSettled\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"indexed\":false,\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"status\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumSandboxServing.SettlementStatus\"}],\"anonymous\":false}]",
 }
 
 // SandboxServingABI is the input ABI used to generate the binding from.
@@ -219,37 +219,6 @@ func (_SandboxServing *SandboxServingSession) LOCKTIME() (*big.Int, error) {
 // Solidity: function LOCK_TIME() view returns(uint256)
 func (_SandboxServing *SandboxServingCallerSession) LOCKTIME() (*big.Int, error) {
 	return _SandboxServing.Contract.LOCKTIME(&_SandboxServing.CallOpts)
-}
-
-// AuthorizedProviders is a free data retrieval call binding the contract method 0x6004711a.
-//
-// Solidity: function authorizedProviders(string , address ) view returns(bool)
-func (_SandboxServing *SandboxServingCaller) AuthorizedProviders(opts *bind.CallOpts, arg0 string, arg1 common.Address) (bool, error) {
-	var out []interface{}
-	err := _SandboxServing.contract.Call(opts, &out, "authorizedProviders", arg0, arg1)
-
-	if err != nil {
-		return *new(bool), err
-	}
-
-	out0 := *abi.ConvertType(out[0], new(bool)).(*bool)
-
-	return out0, err
-
-}
-
-// AuthorizedProviders is a free data retrieval call binding the contract method 0x6004711a.
-//
-// Solidity: function authorizedProviders(string , address ) view returns(bool)
-func (_SandboxServing *SandboxServingSession) AuthorizedProviders(arg0 string, arg1 common.Address) (bool, error) {
-	return _SandboxServing.Contract.AuthorizedProviders(&_SandboxServing.CallOpts, arg0, arg1)
-}
-
-// AuthorizedProviders is a free data retrieval call binding the contract method 0x6004711a.
-//
-// Solidity: function authorizedProviders(string , address ) view returns(bool)
-func (_SandboxServing *SandboxServingCallerSession) AuthorizedProviders(arg0 string, arg1 common.Address) (bool, error) {
-	return _SandboxServing.Contract.AuthorizedProviders(&_SandboxServing.CallOpts, arg0, arg1)
 }
 
 // BalanceOfBatch is a free data retrieval call binding the contract method 0x8a921690.
@@ -672,46 +641,25 @@ func (_SandboxServing *SandboxServingCallerSession) TappRegistry() (common.Addre
 	return _SandboxServing.Contract.TappRegistry(&_SandboxServing.CallOpts)
 }
 
-// AddOrUpdateService is a paid mutator transaction binding the contract method 0x35fc37a4.
+// AddOrUpdateService is a paid mutator transaction binding the contract method 0x1b5da3c4.
 //
-// Solidity: function addOrUpdateService(string url, string appId, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin) returns()
-func (_SandboxServing *SandboxServingTransactor) AddOrUpdateService(opts *bind.TransactOpts, url string, appId string, pricePerCPUPerMin *big.Int, createFee *big.Int, pricePerMemGBPerMin *big.Int) (*types.Transaction, error) {
-	return _SandboxServing.contract.Transact(opts, "addOrUpdateService", url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)
+// Solidity: function addOrUpdateService(address signer, string url, string appId, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin) returns()
+func (_SandboxServing *SandboxServingTransactor) AddOrUpdateService(opts *bind.TransactOpts, signer common.Address, url string, appId string, pricePerCPUPerMin *big.Int, createFee *big.Int, pricePerMemGBPerMin *big.Int) (*types.Transaction, error) {
+	return _SandboxServing.contract.Transact(opts, "addOrUpdateService", signer, url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)
 }
 
-// AddOrUpdateService is a paid mutator transaction binding the contract method 0x35fc37a4.
+// AddOrUpdateService is a paid mutator transaction binding the contract method 0x1b5da3c4.
 //
-// Solidity: function addOrUpdateService(string url, string appId, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin) returns()
-func (_SandboxServing *SandboxServingSession) AddOrUpdateService(url string, appId string, pricePerCPUPerMin *big.Int, createFee *big.Int, pricePerMemGBPerMin *big.Int) (*types.Transaction, error) {
-	return _SandboxServing.Contract.AddOrUpdateService(&_SandboxServing.TransactOpts, url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)
+// Solidity: function addOrUpdateService(address signer, string url, string appId, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin) returns()
+func (_SandboxServing *SandboxServingSession) AddOrUpdateService(signer common.Address, url string, appId string, pricePerCPUPerMin *big.Int, createFee *big.Int, pricePerMemGBPerMin *big.Int) (*types.Transaction, error) {
+	return _SandboxServing.Contract.AddOrUpdateService(&_SandboxServing.TransactOpts, signer, url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)
 }
 
-// AddOrUpdateService is a paid mutator transaction binding the contract method 0x35fc37a4.
+// AddOrUpdateService is a paid mutator transaction binding the contract method 0x1b5da3c4.
 //
-// Solidity: function addOrUpdateService(string url, string appId, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin) returns()
-func (_SandboxServing *SandboxServingTransactorSession) AddOrUpdateService(url string, appId string, pricePerCPUPerMin *big.Int, createFee *big.Int, pricePerMemGBPerMin *big.Int) (*types.Transaction, error) {
-	return _SandboxServing.Contract.AddOrUpdateService(&_SandboxServing.TransactOpts, url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)
-}
-
-// AuthorizeProvider is a paid mutator transaction binding the contract method 0x2458af06.
-//
-// Solidity: function authorizeProvider(string appId, address provider) returns()
-func (_SandboxServing *SandboxServingTransactor) AuthorizeProvider(opts *bind.TransactOpts, appId string, provider common.Address) (*types.Transaction, error) {
-	return _SandboxServing.contract.Transact(opts, "authorizeProvider", appId, provider)
-}
-
-// AuthorizeProvider is a paid mutator transaction binding the contract method 0x2458af06.
-//
-// Solidity: function authorizeProvider(string appId, address provider) returns()
-func (_SandboxServing *SandboxServingSession) AuthorizeProvider(appId string, provider common.Address) (*types.Transaction, error) {
-	return _SandboxServing.Contract.AuthorizeProvider(&_SandboxServing.TransactOpts, appId, provider)
-}
-
-// AuthorizeProvider is a paid mutator transaction binding the contract method 0x2458af06.
-//
-// Solidity: function authorizeProvider(string appId, address provider) returns()
-func (_SandboxServing *SandboxServingTransactorSession) AuthorizeProvider(appId string, provider common.Address) (*types.Transaction, error) {
-	return _SandboxServing.Contract.AuthorizeProvider(&_SandboxServing.TransactOpts, appId, provider)
+// Solidity: function addOrUpdateService(address signer, string url, string appId, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin) returns()
+func (_SandboxServing *SandboxServingTransactorSession) AddOrUpdateService(signer common.Address, url string, appId string, pricePerCPUPerMin *big.Int, createFee *big.Int, pricePerMemGBPerMin *big.Int) (*types.Transaction, error) {
+	return _SandboxServing.Contract.AddOrUpdateService(&_SandboxServing.TransactOpts, signer, url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)
 }
 
 // Deposit is a paid mutator transaction binding the contract method 0xf9609f08.
@@ -735,27 +683,6 @@ func (_SandboxServing *SandboxServingTransactorSession) Deposit(recipient common
 	return _SandboxServing.Contract.Deposit(&_SandboxServing.TransactOpts, recipient, provider)
 }
 
-// DeregisterService is a paid mutator transaction binding the contract method 0xaa4ac7ad.
-//
-// Solidity: function deregisterService() returns()
-func (_SandboxServing *SandboxServingTransactor) DeregisterService(opts *bind.TransactOpts) (*types.Transaction, error) {
-	return _SandboxServing.contract.Transact(opts, "deregisterService")
-}
-
-// DeregisterService is a paid mutator transaction binding the contract method 0xaa4ac7ad.
-//
-// Solidity: function deregisterService() returns()
-func (_SandboxServing *SandboxServingSession) DeregisterService() (*types.Transaction, error) {
-	return _SandboxServing.Contract.DeregisterService(&_SandboxServing.TransactOpts)
-}
-
-// DeregisterService is a paid mutator transaction binding the contract method 0xaa4ac7ad.
-//
-// Solidity: function deregisterService() returns()
-func (_SandboxServing *SandboxServingTransactorSession) DeregisterService() (*types.Transaction, error) {
-	return _SandboxServing.Contract.DeregisterService(&_SandboxServing.TransactOpts)
-}
-
 // Initialize is a paid mutator transaction binding the contract method 0xc4d66de8.
 //
 // Solidity: function initialize(address tappRegistry_) returns()
@@ -777,6 +704,27 @@ func (_SandboxServing *SandboxServingTransactorSession) Initialize(tappRegistry_
 	return _SandboxServing.Contract.Initialize(&_SandboxServing.TransactOpts, tappRegistry_)
 }
 
+// RemoveService is a paid mutator transaction binding the contract method 0x1b305173.
+//
+// Solidity: function removeService(address signer) returns()
+func (_SandboxServing *SandboxServingTransactor) RemoveService(opts *bind.TransactOpts, signer common.Address) (*types.Transaction, error) {
+	return _SandboxServing.contract.Transact(opts, "removeService", signer)
+}
+
+// RemoveService is a paid mutator transaction binding the contract method 0x1b305173.
+//
+// Solidity: function removeService(address signer) returns()
+func (_SandboxServing *SandboxServingSession) RemoveService(signer common.Address) (*types.Transaction, error) {
+	return _SandboxServing.Contract.RemoveService(&_SandboxServing.TransactOpts, signer)
+}
+
+// RemoveService is a paid mutator transaction binding the contract method 0x1b305173.
+//
+// Solidity: function removeService(address signer) returns()
+func (_SandboxServing *SandboxServingTransactorSession) RemoveService(signer common.Address) (*types.Transaction, error) {
+	return _SandboxServing.Contract.RemoveService(&_SandboxServing.TransactOpts, signer)
+}
+
 // RequestRefund is a paid mutator transaction binding the contract method 0x99652de7.
 //
 // Solidity: function requestRefund(address provider, uint256 amount) returns()
@@ -796,27 +744,6 @@ func (_SandboxServing *SandboxServingSession) RequestRefund(provider common.Addr
 // Solidity: function requestRefund(address provider, uint256 amount) returns()
 func (_SandboxServing *SandboxServingTransactorSession) RequestRefund(provider common.Address, amount *big.Int) (*types.Transaction, error) {
 	return _SandboxServing.Contract.RequestRefund(&_SandboxServing.TransactOpts, provider, amount)
-}
-
-// RevokeProvider is a paid mutator transaction binding the contract method 0x53ded3f8.
-//
-// Solidity: function revokeProvider(string appId, address provider) returns()
-func (_SandboxServing *SandboxServingTransactor) RevokeProvider(opts *bind.TransactOpts, appId string, provider common.Address) (*types.Transaction, error) {
-	return _SandboxServing.contract.Transact(opts, "revokeProvider", appId, provider)
-}
-
-// RevokeProvider is a paid mutator transaction binding the contract method 0x53ded3f8.
-//
-// Solidity: function revokeProvider(string appId, address provider) returns()
-func (_SandboxServing *SandboxServingSession) RevokeProvider(appId string, provider common.Address) (*types.Transaction, error) {
-	return _SandboxServing.Contract.RevokeProvider(&_SandboxServing.TransactOpts, appId, provider)
-}
-
-// RevokeProvider is a paid mutator transaction binding the contract method 0x53ded3f8.
-//
-// Solidity: function revokeProvider(string appId, address provider) returns()
-func (_SandboxServing *SandboxServingTransactorSession) RevokeProvider(appId string, provider common.Address) (*types.Transaction, error) {
-	return _SandboxServing.Contract.RevokeProvider(&_SandboxServing.TransactOpts, appId, provider)
 }
 
 // SetTappRegistry is a paid mutator transaction binding the contract method 0x57f6e4fc.
@@ -882,25 +809,25 @@ func (_SandboxServing *SandboxServingTransactorSession) TransferOwnership(newOwn
 	return _SandboxServing.Contract.TransferOwnership(&_SandboxServing.TransactOpts, newOwner)
 }
 
-// WithdrawEarnings is a paid mutator transaction binding the contract method 0xb73c6ce9.
+// WithdrawEarnings is a paid mutator transaction binding the contract method 0x3d4d8d4f.
 //
-// Solidity: function withdrawEarnings() returns()
-func (_SandboxServing *SandboxServingTransactor) WithdrawEarnings(opts *bind.TransactOpts) (*types.Transaction, error) {
-	return _SandboxServing.contract.Transact(opts, "withdrawEarnings")
+// Solidity: function withdrawEarnings(address signer) returns()
+func (_SandboxServing *SandboxServingTransactor) WithdrawEarnings(opts *bind.TransactOpts, signer common.Address) (*types.Transaction, error) {
+	return _SandboxServing.contract.Transact(opts, "withdrawEarnings", signer)
 }
 
-// WithdrawEarnings is a paid mutator transaction binding the contract method 0xb73c6ce9.
+// WithdrawEarnings is a paid mutator transaction binding the contract method 0x3d4d8d4f.
 //
-// Solidity: function withdrawEarnings() returns()
-func (_SandboxServing *SandboxServingSession) WithdrawEarnings() (*types.Transaction, error) {
-	return _SandboxServing.Contract.WithdrawEarnings(&_SandboxServing.TransactOpts)
+// Solidity: function withdrawEarnings(address signer) returns()
+func (_SandboxServing *SandboxServingSession) WithdrawEarnings(signer common.Address) (*types.Transaction, error) {
+	return _SandboxServing.Contract.WithdrawEarnings(&_SandboxServing.TransactOpts, signer)
 }
 
-// WithdrawEarnings is a paid mutator transaction binding the contract method 0xb73c6ce9.
+// WithdrawEarnings is a paid mutator transaction binding the contract method 0x3d4d8d4f.
 //
-// Solidity: function withdrawEarnings() returns()
-func (_SandboxServing *SandboxServingTransactorSession) WithdrawEarnings() (*types.Transaction, error) {
-	return _SandboxServing.Contract.WithdrawEarnings(&_SandboxServing.TransactOpts)
+// Solidity: function withdrawEarnings(address signer) returns()
+func (_SandboxServing *SandboxServingTransactorSession) WithdrawEarnings(signer common.Address) (*types.Transaction, error) {
+	return _SandboxServing.Contract.WithdrawEarnings(&_SandboxServing.TransactOpts, signer)
 }
 
 // WithdrawRefund is a paid mutator transaction binding the contract method 0xa16c86f7.
@@ -1157,38 +1084,47 @@ func (it *SandboxServingEarningsWithdrawnIterator) Close() error {
 // SandboxServingEarningsWithdrawn represents a EarningsWithdrawn event raised by the SandboxServing contract.
 type SandboxServingEarningsWithdrawn struct {
 	Provider common.Address
+	To       common.Address
 	Amount   *big.Int
 	Raw      types.Log // Blockchain specific contextual infos
 }
 
-// FilterEarningsWithdrawn is a free log retrieval operation binding the contract event 0x48dc35af7b45e2a81fffad55f6e2fafacdb1d3d0d50d24ebdc16324f5ba757f1.
+// FilterEarningsWithdrawn is a free log retrieval operation binding the contract event 0x0c8584df0a37548f26644c41809e5f908b58e8888dd441691e8a2174ec89f305.
 //
-// Solidity: event EarningsWithdrawn(address indexed provider, uint256 amount)
-func (_SandboxServing *SandboxServingFilterer) FilterEarningsWithdrawn(opts *bind.FilterOpts, provider []common.Address) (*SandboxServingEarningsWithdrawnIterator, error) {
+// Solidity: event EarningsWithdrawn(address indexed provider, address indexed to, uint256 amount)
+func (_SandboxServing *SandboxServingFilterer) FilterEarningsWithdrawn(opts *bind.FilterOpts, provider []common.Address, to []common.Address) (*SandboxServingEarningsWithdrawnIterator, error) {
 
 	var providerRule []interface{}
 	for _, providerItem := range provider {
 		providerRule = append(providerRule, providerItem)
 	}
+	var toRule []interface{}
+	for _, toItem := range to {
+		toRule = append(toRule, toItem)
+	}
 
-	logs, sub, err := _SandboxServing.contract.FilterLogs(opts, "EarningsWithdrawn", providerRule)
+	logs, sub, err := _SandboxServing.contract.FilterLogs(opts, "EarningsWithdrawn", providerRule, toRule)
 	if err != nil {
 		return nil, err
 	}
 	return &SandboxServingEarningsWithdrawnIterator{contract: _SandboxServing.contract, event: "EarningsWithdrawn", logs: logs, sub: sub}, nil
 }
 
-// WatchEarningsWithdrawn is a free log subscription operation binding the contract event 0x48dc35af7b45e2a81fffad55f6e2fafacdb1d3d0d50d24ebdc16324f5ba757f1.
+// WatchEarningsWithdrawn is a free log subscription operation binding the contract event 0x0c8584df0a37548f26644c41809e5f908b58e8888dd441691e8a2174ec89f305.
 //
-// Solidity: event EarningsWithdrawn(address indexed provider, uint256 amount)
-func (_SandboxServing *SandboxServingFilterer) WatchEarningsWithdrawn(opts *bind.WatchOpts, sink chan<- *SandboxServingEarningsWithdrawn, provider []common.Address) (event.Subscription, error) {
+// Solidity: event EarningsWithdrawn(address indexed provider, address indexed to, uint256 amount)
+func (_SandboxServing *SandboxServingFilterer) WatchEarningsWithdrawn(opts *bind.WatchOpts, sink chan<- *SandboxServingEarningsWithdrawn, provider []common.Address, to []common.Address) (event.Subscription, error) {
 
 	var providerRule []interface{}
 	for _, providerItem := range provider {
 		providerRule = append(providerRule, providerItem)
 	}
+	var toRule []interface{}
+	for _, toItem := range to {
+		toRule = append(toRule, toItem)
+	}
 
-	logs, sub, err := _SandboxServing.contract.WatchLogs(opts, "EarningsWithdrawn", providerRule)
+	logs, sub, err := _SandboxServing.contract.WatchLogs(opts, "EarningsWithdrawn", providerRule, toRule)
 	if err != nil {
 		return nil, err
 	}
@@ -1220,9 +1156,9 @@ func (_SandboxServing *SandboxServingFilterer) WatchEarningsWithdrawn(opts *bind
 	}), nil
 }
 
-// ParseEarningsWithdrawn is a log parse operation binding the contract event 0x48dc35af7b45e2a81fffad55f6e2fafacdb1d3d0d50d24ebdc16324f5ba757f1.
+// ParseEarningsWithdrawn is a log parse operation binding the contract event 0x0c8584df0a37548f26644c41809e5f908b58e8888dd441691e8a2174ec89f305.
 //
-// Solidity: event EarningsWithdrawn(address indexed provider, uint256 amount)
+// Solidity: event EarningsWithdrawn(address indexed provider, address indexed to, uint256 amount)
 func (_SandboxServing *SandboxServingFilterer) ParseEarningsWithdrawn(log types.Log) (*SandboxServingEarningsWithdrawn, error) {
 	event := new(SandboxServingEarningsWithdrawn)
 	if err := _SandboxServing.contract.UnpackLog(event, "EarningsWithdrawn", log); err != nil {
@@ -1379,314 +1315,6 @@ func (_SandboxServing *SandboxServingFilterer) WatchOwnershipTransferred(opts *b
 func (_SandboxServing *SandboxServingFilterer) ParseOwnershipTransferred(log types.Log) (*SandboxServingOwnershipTransferred, error) {
 	event := new(SandboxServingOwnershipTransferred)
 	if err := _SandboxServing.contract.UnpackLog(event, "OwnershipTransferred", log); err != nil {
-		return nil, err
-	}
-	event.Raw = log
-	return event, nil
-}
-
-// SandboxServingProviderAuthorizedIterator is returned from FilterProviderAuthorized and is used to iterate over the raw logs and unpacked data for ProviderAuthorized events raised by the SandboxServing contract.
-type SandboxServingProviderAuthorizedIterator struct {
-	Event *SandboxServingProviderAuthorized // Event containing the contract specifics and raw log
-
-	contract *bind.BoundContract // Generic contract to use for unpacking event data
-	event    string              // Event name to use for unpacking event data
-
-	logs chan types.Log        // Log channel receiving the found contract events
-	sub  ethereum.Subscription // Subscription for errors, completion and termination
-	done bool                  // Whether the subscription completed delivering logs
-	fail error                 // Occurred error to stop iteration
-}
-
-// Next advances the iterator to the subsequent event, returning whether there
-// are any more events found. In case of a retrieval or parsing error, false is
-// returned and Error() can be queried for the exact failure.
-func (it *SandboxServingProviderAuthorizedIterator) Next() bool {
-	// If the iterator failed, stop iterating
-	if it.fail != nil {
-		return false
-	}
-	// If the iterator completed, deliver directly whatever's available
-	if it.done {
-		select {
-		case log := <-it.logs:
-			it.Event = new(SandboxServingProviderAuthorized)
-			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
-				it.fail = err
-				return false
-			}
-			it.Event.Raw = log
-			return true
-
-		default:
-			return false
-		}
-	}
-	// Iterator still in progress, wait for either a data or an error event
-	select {
-	case log := <-it.logs:
-		it.Event = new(SandboxServingProviderAuthorized)
-		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
-			it.fail = err
-			return false
-		}
-		it.Event.Raw = log
-		return true
-
-	case err := <-it.sub.Err():
-		it.done = true
-		it.fail = err
-		return it.Next()
-	}
-}
-
-// Error returns any retrieval or parsing error occurred during filtering.
-func (it *SandboxServingProviderAuthorizedIterator) Error() error {
-	return it.fail
-}
-
-// Close terminates the iteration process, releasing any pending underlying
-// resources.
-func (it *SandboxServingProviderAuthorizedIterator) Close() error {
-	it.sub.Unsubscribe()
-	return nil
-}
-
-// SandboxServingProviderAuthorized represents a ProviderAuthorized event raised by the SandboxServing contract.
-type SandboxServingProviderAuthorized struct {
-	AppId    string
-	Provider common.Address
-	AppOwner common.Address
-	Raw      types.Log // Blockchain specific contextual infos
-}
-
-// FilterProviderAuthorized is a free log retrieval operation binding the contract event 0x4d74591d5b7b436fec8d2f5c8c5e100907522e4e2994631f171f9417770d245c.
-//
-// Solidity: event ProviderAuthorized(string appId, address indexed provider, address indexed appOwner)
-func (_SandboxServing *SandboxServingFilterer) FilterProviderAuthorized(opts *bind.FilterOpts, provider []common.Address, appOwner []common.Address) (*SandboxServingProviderAuthorizedIterator, error) {
-
-	var providerRule []interface{}
-	for _, providerItem := range provider {
-		providerRule = append(providerRule, providerItem)
-	}
-	var appOwnerRule []interface{}
-	for _, appOwnerItem := range appOwner {
-		appOwnerRule = append(appOwnerRule, appOwnerItem)
-	}
-
-	logs, sub, err := _SandboxServing.contract.FilterLogs(opts, "ProviderAuthorized", providerRule, appOwnerRule)
-	if err != nil {
-		return nil, err
-	}
-	return &SandboxServingProviderAuthorizedIterator{contract: _SandboxServing.contract, event: "ProviderAuthorized", logs: logs, sub: sub}, nil
-}
-
-// WatchProviderAuthorized is a free log subscription operation binding the contract event 0x4d74591d5b7b436fec8d2f5c8c5e100907522e4e2994631f171f9417770d245c.
-//
-// Solidity: event ProviderAuthorized(string appId, address indexed provider, address indexed appOwner)
-func (_SandboxServing *SandboxServingFilterer) WatchProviderAuthorized(opts *bind.WatchOpts, sink chan<- *SandboxServingProviderAuthorized, provider []common.Address, appOwner []common.Address) (event.Subscription, error) {
-
-	var providerRule []interface{}
-	for _, providerItem := range provider {
-		providerRule = append(providerRule, providerItem)
-	}
-	var appOwnerRule []interface{}
-	for _, appOwnerItem := range appOwner {
-		appOwnerRule = append(appOwnerRule, appOwnerItem)
-	}
-
-	logs, sub, err := _SandboxServing.contract.WatchLogs(opts, "ProviderAuthorized", providerRule, appOwnerRule)
-	if err != nil {
-		return nil, err
-	}
-	return event.NewSubscription(func(quit <-chan struct{}) error {
-		defer sub.Unsubscribe()
-		for {
-			select {
-			case log := <-logs:
-				// New log arrived, parse the event and forward to the user
-				event := new(SandboxServingProviderAuthorized)
-				if err := _SandboxServing.contract.UnpackLog(event, "ProviderAuthorized", log); err != nil {
-					return err
-				}
-				event.Raw = log
-
-				select {
-				case sink <- event:
-				case err := <-sub.Err():
-					return err
-				case <-quit:
-					return nil
-				}
-			case err := <-sub.Err():
-				return err
-			case <-quit:
-				return nil
-			}
-		}
-	}), nil
-}
-
-// ParseProviderAuthorized is a log parse operation binding the contract event 0x4d74591d5b7b436fec8d2f5c8c5e100907522e4e2994631f171f9417770d245c.
-//
-// Solidity: event ProviderAuthorized(string appId, address indexed provider, address indexed appOwner)
-func (_SandboxServing *SandboxServingFilterer) ParseProviderAuthorized(log types.Log) (*SandboxServingProviderAuthorized, error) {
-	event := new(SandboxServingProviderAuthorized)
-	if err := _SandboxServing.contract.UnpackLog(event, "ProviderAuthorized", log); err != nil {
-		return nil, err
-	}
-	event.Raw = log
-	return event, nil
-}
-
-// SandboxServingProviderRevokedIterator is returned from FilterProviderRevoked and is used to iterate over the raw logs and unpacked data for ProviderRevoked events raised by the SandboxServing contract.
-type SandboxServingProviderRevokedIterator struct {
-	Event *SandboxServingProviderRevoked // Event containing the contract specifics and raw log
-
-	contract *bind.BoundContract // Generic contract to use for unpacking event data
-	event    string              // Event name to use for unpacking event data
-
-	logs chan types.Log        // Log channel receiving the found contract events
-	sub  ethereum.Subscription // Subscription for errors, completion and termination
-	done bool                  // Whether the subscription completed delivering logs
-	fail error                 // Occurred error to stop iteration
-}
-
-// Next advances the iterator to the subsequent event, returning whether there
-// are any more events found. In case of a retrieval or parsing error, false is
-// returned and Error() can be queried for the exact failure.
-func (it *SandboxServingProviderRevokedIterator) Next() bool {
-	// If the iterator failed, stop iterating
-	if it.fail != nil {
-		return false
-	}
-	// If the iterator completed, deliver directly whatever's available
-	if it.done {
-		select {
-		case log := <-it.logs:
-			it.Event = new(SandboxServingProviderRevoked)
-			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
-				it.fail = err
-				return false
-			}
-			it.Event.Raw = log
-			return true
-
-		default:
-			return false
-		}
-	}
-	// Iterator still in progress, wait for either a data or an error event
-	select {
-	case log := <-it.logs:
-		it.Event = new(SandboxServingProviderRevoked)
-		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
-			it.fail = err
-			return false
-		}
-		it.Event.Raw = log
-		return true
-
-	case err := <-it.sub.Err():
-		it.done = true
-		it.fail = err
-		return it.Next()
-	}
-}
-
-// Error returns any retrieval or parsing error occurred during filtering.
-func (it *SandboxServingProviderRevokedIterator) Error() error {
-	return it.fail
-}
-
-// Close terminates the iteration process, releasing any pending underlying
-// resources.
-func (it *SandboxServingProviderRevokedIterator) Close() error {
-	it.sub.Unsubscribe()
-	return nil
-}
-
-// SandboxServingProviderRevoked represents a ProviderRevoked event raised by the SandboxServing contract.
-type SandboxServingProviderRevoked struct {
-	AppId    string
-	Provider common.Address
-	AppOwner common.Address
-	Raw      types.Log // Blockchain specific contextual infos
-}
-
-// FilterProviderRevoked is a free log retrieval operation binding the contract event 0xcf0c28f6275e9bccdddfe2edd1ad4e6f615a3716ec829c7861f41bbdea6a381a.
-//
-// Solidity: event ProviderRevoked(string appId, address indexed provider, address indexed appOwner)
-func (_SandboxServing *SandboxServingFilterer) FilterProviderRevoked(opts *bind.FilterOpts, provider []common.Address, appOwner []common.Address) (*SandboxServingProviderRevokedIterator, error) {
-
-	var providerRule []interface{}
-	for _, providerItem := range provider {
-		providerRule = append(providerRule, providerItem)
-	}
-	var appOwnerRule []interface{}
-	for _, appOwnerItem := range appOwner {
-		appOwnerRule = append(appOwnerRule, appOwnerItem)
-	}
-
-	logs, sub, err := _SandboxServing.contract.FilterLogs(opts, "ProviderRevoked", providerRule, appOwnerRule)
-	if err != nil {
-		return nil, err
-	}
-	return &SandboxServingProviderRevokedIterator{contract: _SandboxServing.contract, event: "ProviderRevoked", logs: logs, sub: sub}, nil
-}
-
-// WatchProviderRevoked is a free log subscription operation binding the contract event 0xcf0c28f6275e9bccdddfe2edd1ad4e6f615a3716ec829c7861f41bbdea6a381a.
-//
-// Solidity: event ProviderRevoked(string appId, address indexed provider, address indexed appOwner)
-func (_SandboxServing *SandboxServingFilterer) WatchProviderRevoked(opts *bind.WatchOpts, sink chan<- *SandboxServingProviderRevoked, provider []common.Address, appOwner []common.Address) (event.Subscription, error) {
-
-	var providerRule []interface{}
-	for _, providerItem := range provider {
-		providerRule = append(providerRule, providerItem)
-	}
-	var appOwnerRule []interface{}
-	for _, appOwnerItem := range appOwner {
-		appOwnerRule = append(appOwnerRule, appOwnerItem)
-	}
-
-	logs, sub, err := _SandboxServing.contract.WatchLogs(opts, "ProviderRevoked", providerRule, appOwnerRule)
-	if err != nil {
-		return nil, err
-	}
-	return event.NewSubscription(func(quit <-chan struct{}) error {
-		defer sub.Unsubscribe()
-		for {
-			select {
-			case log := <-logs:
-				// New log arrived, parse the event and forward to the user
-				event := new(SandboxServingProviderRevoked)
-				if err := _SandboxServing.contract.UnpackLog(event, "ProviderRevoked", log); err != nil {
-					return err
-				}
-				event.Raw = log
-
-				select {
-				case sink <- event:
-				case err := <-sub.Err():
-					return err
-				case <-quit:
-					return nil
-				}
-			case err := <-sub.Err():
-				return err
-			case <-quit:
-				return nil
-			}
-		}
-	}), nil
-}
-
-// ParseProviderRevoked is a log parse operation binding the contract event 0xcf0c28f6275e9bccdddfe2edd1ad4e6f615a3716ec829c7861f41bbdea6a381a.
-//
-// Solidity: event ProviderRevoked(string appId, address indexed provider, address indexed appOwner)
-func (_SandboxServing *SandboxServingFilterer) ParseProviderRevoked(log types.Log) (*SandboxServingProviderRevoked, error) {
-	event := new(SandboxServingProviderRevoked)
-	if err := _SandboxServing.contract.UnpackLog(event, "ProviderRevoked", log); err != nil {
 		return nil, err
 	}
 	event.Raw = log
@@ -2002,9 +1630,9 @@ func (_SandboxServing *SandboxServingFilterer) ParseRefundWithdrawn(log types.Lo
 	return event, nil
 }
 
-// SandboxServingServiceDeregisteredIterator is returned from FilterServiceDeregistered and is used to iterate over the raw logs and unpacked data for ServiceDeregistered events raised by the SandboxServing contract.
-type SandboxServingServiceDeregisteredIterator struct {
-	Event *SandboxServingServiceDeregistered // Event containing the contract specifics and raw log
+// SandboxServingServiceRemovedIterator is returned from FilterServiceRemoved and is used to iterate over the raw logs and unpacked data for ServiceRemoved events raised by the SandboxServing contract.
+type SandboxServingServiceRemovedIterator struct {
+	Event *SandboxServingServiceRemoved // Event containing the contract specifics and raw log
 
 	contract *bind.BoundContract // Generic contract to use for unpacking event data
 	event    string              // Event name to use for unpacking event data
@@ -2018,7 +1646,7 @@ type SandboxServingServiceDeregisteredIterator struct {
 // Next advances the iterator to the subsequent event, returning whether there
 // are any more events found. In case of a retrieval or parsing error, false is
 // returned and Error() can be queried for the exact failure.
-func (it *SandboxServingServiceDeregisteredIterator) Next() bool {
+func (it *SandboxServingServiceRemovedIterator) Next() bool {
 	// If the iterator failed, stop iterating
 	if it.fail != nil {
 		return false
@@ -2027,7 +1655,7 @@ func (it *SandboxServingServiceDeregisteredIterator) Next() bool {
 	if it.done {
 		select {
 		case log := <-it.logs:
-			it.Event = new(SandboxServingServiceDeregistered)
+			it.Event = new(SandboxServingServiceRemoved)
 			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
 				it.fail = err
 				return false
@@ -2042,7 +1670,7 @@ func (it *SandboxServingServiceDeregisteredIterator) Next() bool {
 	// Iterator still in progress, wait for either a data or an error event
 	select {
 	case log := <-it.logs:
-		it.Event = new(SandboxServingServiceDeregistered)
+		it.Event = new(SandboxServingServiceRemoved)
 		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
 			it.fail = err
 			return false
@@ -2058,51 +1686,60 @@ func (it *SandboxServingServiceDeregisteredIterator) Next() bool {
 }
 
 // Error returns any retrieval or parsing error occurred during filtering.
-func (it *SandboxServingServiceDeregisteredIterator) Error() error {
+func (it *SandboxServingServiceRemovedIterator) Error() error {
 	return it.fail
 }
 
 // Close terminates the iteration process, releasing any pending underlying
 // resources.
-func (it *SandboxServingServiceDeregisteredIterator) Close() error {
+func (it *SandboxServingServiceRemovedIterator) Close() error {
 	it.sub.Unsubscribe()
 	return nil
 }
 
-// SandboxServingServiceDeregistered represents a ServiceDeregistered event raised by the SandboxServing contract.
-type SandboxServingServiceDeregistered struct {
+// SandboxServingServiceRemoved represents a ServiceRemoved event raised by the SandboxServing contract.
+type SandboxServingServiceRemoved struct {
 	Provider common.Address
+	AppOwner common.Address
 	Raw      types.Log // Blockchain specific contextual infos
 }
 
-// FilterServiceDeregistered is a free log retrieval operation binding the contract event 0xd7e651500ba05e9dad5db5a5e0e22eeb2c054121ae21d59d7bc3d3a16c561507.
+// FilterServiceRemoved is a free log retrieval operation binding the contract event 0xce18ed5f98092048b907492d6519072f293e784afa42ce7ba2cca26f3805a661.
 //
-// Solidity: event ServiceDeregistered(address indexed provider)
-func (_SandboxServing *SandboxServingFilterer) FilterServiceDeregistered(opts *bind.FilterOpts, provider []common.Address) (*SandboxServingServiceDeregisteredIterator, error) {
+// Solidity: event ServiceRemoved(address indexed provider, address indexed appOwner)
+func (_SandboxServing *SandboxServingFilterer) FilterServiceRemoved(opts *bind.FilterOpts, provider []common.Address, appOwner []common.Address) (*SandboxServingServiceRemovedIterator, error) {
 
 	var providerRule []interface{}
 	for _, providerItem := range provider {
 		providerRule = append(providerRule, providerItem)
 	}
+	var appOwnerRule []interface{}
+	for _, appOwnerItem := range appOwner {
+		appOwnerRule = append(appOwnerRule, appOwnerItem)
+	}
 
-	logs, sub, err := _SandboxServing.contract.FilterLogs(opts, "ServiceDeregistered", providerRule)
+	logs, sub, err := _SandboxServing.contract.FilterLogs(opts, "ServiceRemoved", providerRule, appOwnerRule)
 	if err != nil {
 		return nil, err
 	}
-	return &SandboxServingServiceDeregisteredIterator{contract: _SandboxServing.contract, event: "ServiceDeregistered", logs: logs, sub: sub}, nil
+	return &SandboxServingServiceRemovedIterator{contract: _SandboxServing.contract, event: "ServiceRemoved", logs: logs, sub: sub}, nil
 }
 
-// WatchServiceDeregistered is a free log subscription operation binding the contract event 0xd7e651500ba05e9dad5db5a5e0e22eeb2c054121ae21d59d7bc3d3a16c561507.
+// WatchServiceRemoved is a free log subscription operation binding the contract event 0xce18ed5f98092048b907492d6519072f293e784afa42ce7ba2cca26f3805a661.
 //
-// Solidity: event ServiceDeregistered(address indexed provider)
-func (_SandboxServing *SandboxServingFilterer) WatchServiceDeregistered(opts *bind.WatchOpts, sink chan<- *SandboxServingServiceDeregistered, provider []common.Address) (event.Subscription, error) {
+// Solidity: event ServiceRemoved(address indexed provider, address indexed appOwner)
+func (_SandboxServing *SandboxServingFilterer) WatchServiceRemoved(opts *bind.WatchOpts, sink chan<- *SandboxServingServiceRemoved, provider []common.Address, appOwner []common.Address) (event.Subscription, error) {
 
 	var providerRule []interface{}
 	for _, providerItem := range provider {
 		providerRule = append(providerRule, providerItem)
 	}
+	var appOwnerRule []interface{}
+	for _, appOwnerItem := range appOwner {
+		appOwnerRule = append(appOwnerRule, appOwnerItem)
+	}
 
-	logs, sub, err := _SandboxServing.contract.WatchLogs(opts, "ServiceDeregistered", providerRule)
+	logs, sub, err := _SandboxServing.contract.WatchLogs(opts, "ServiceRemoved", providerRule, appOwnerRule)
 	if err != nil {
 		return nil, err
 	}
@@ -2112,8 +1749,8 @@ func (_SandboxServing *SandboxServingFilterer) WatchServiceDeregistered(opts *bi
 			select {
 			case log := <-logs:
 				// New log arrived, parse the event and forward to the user
-				event := new(SandboxServingServiceDeregistered)
-				if err := _SandboxServing.contract.UnpackLog(event, "ServiceDeregistered", log); err != nil {
+				event := new(SandboxServingServiceRemoved)
+				if err := _SandboxServing.contract.UnpackLog(event, "ServiceRemoved", log); err != nil {
 					return err
 				}
 				event.Raw = log
@@ -2134,12 +1771,12 @@ func (_SandboxServing *SandboxServingFilterer) WatchServiceDeregistered(opts *bi
 	}), nil
 }
 
-// ParseServiceDeregistered is a log parse operation binding the contract event 0xd7e651500ba05e9dad5db5a5e0e22eeb2c054121ae21d59d7bc3d3a16c561507.
+// ParseServiceRemoved is a log parse operation binding the contract event 0xce18ed5f98092048b907492d6519072f293e784afa42ce7ba2cca26f3805a661.
 //
-// Solidity: event ServiceDeregistered(address indexed provider)
-func (_SandboxServing *SandboxServingFilterer) ParseServiceDeregistered(log types.Log) (*SandboxServingServiceDeregistered, error) {
-	event := new(SandboxServingServiceDeregistered)
-	if err := _SandboxServing.contract.UnpackLog(event, "ServiceDeregistered", log); err != nil {
+// Solidity: event ServiceRemoved(address indexed provider, address indexed appOwner)
+func (_SandboxServing *SandboxServingFilterer) ParseServiceRemoved(log types.Log) (*SandboxServingServiceRemoved, error) {
+	event := new(SandboxServingServiceRemoved)
+	if err := _SandboxServing.contract.UnpackLog(event, "ServiceRemoved", log); err != nil {
 		return nil, err
 	}
 	event.Raw = log

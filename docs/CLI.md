@@ -4,10 +4,16 @@ Two command-line tools are provided for operators and users:
 
 | Tool | Role |
 |------|------|
-| `cmd/provider` | Provider operator: register/update service on-chain |
+| `cmd/provider` | App owner: manage node services on-chain (register/rotate/withdraw) |
 | `cmd/user` | End user: manage balance and sandboxes |
 
-Private keys can be passed via `--key` flag or environment variable (`PROVIDER_KEY` / `USER_KEY`). The `0x` prefix is optional.
+Private keys can be passed via `--key` flag or environment variable (`OWNER_KEY` / `USER_KEY`; `PROVIDER_KEY` is accepted as a legacy alias for `OWNER_KEY`). The `0x` prefix is optional.
+
+> **v2 identity model:** the *provider address* is the node's TEE signer
+> address — its key lives inside the enclave and dies with the machine. All
+> management commands are therefore signed by the **appId owner's** key, and
+> take the node's signer address via `--signer`. Get a node's signer from its
+> `/api/info` (`provider_address`) or `tapp-cli get-app-key`.
 
 ---
 
@@ -15,19 +21,22 @@ Private keys can be passed via `--key` flag or environment variable (`PROVIDER_K
 
 ### `register` / `init-service`
 
-Bind a SandboxServing service to a TappRegistry appId and set its prices.
+Register/update a node's service: bind its TEE signer address to a TappRegistry
+appId and set URL + prices. Signed by the **app owner's** key.
 (`init-service` is an alias for `register`.)
 
-Prerequisites (done on TappRegistry by the same provider wallet, in separate txs
-via `tapp-cli`):
+Prerequisites (done on TappRegistry by the app owner, in separate txs via
+`tapp-cli`):
 
 1. `tapp-cli register-onchain` — registers the app + first TEE node, pays stake.
-2. `tapp-cli authorize-invalidator-onchain --invalidator <SETTLEMENT_CONTRACT>` —
+2. `tapp-cli add-node-onchain` — one per additional machine.
+3. `tapp-cli authorize-invalidator-onchain --invalidator <SETTLEMENT_CONTRACT>` —
    permits this contract to bump the app's ack version on price changes.
 
 ```bash
-PROVIDER_KEY=0x<hex> go run ./cmd/provider/ register \
+OWNER_KEY=0x<hex> go run ./cmd/provider/ register \
   --app-id      <tapp-app-id> \
+  --signer      0x<node-tee-address> \
   --url         <0g-sandbox-url> \
   [--price-per-cpu <neuron-per-cpu-per-minute>] \
   [--price-per-mem <neuron-per-gb-per-minute>] \
@@ -41,58 +50,76 @@ PROVIDER_KEY=0x<hex> go run ./cmd/provider/ register \
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--key` | `PROVIDER_KEY` env | Provider private key (hex). Must derive to the app owner registered in TappRegistry. |
-| `--app-id` | (required) | TappRegistry appId this service is bound to. Must already be registered + have this contract authorized as an invalidator. |
+| `--key` | `OWNER_KEY` env | App owner private key (hex). Must be the appId's TappRegistry owner. |
+| `--signer` | (required) | The node's TEE signer address = the provider address. From the node's `/api/info` (`provider_address`) or `tapp-cli get-app-key`. |
+| `--app-id` | (required) | TappRegistry appId. The signer must already be an active node of it, and this contract must be an authorized invalidator. |
 | `--url` | (required) | Public URL of the billing proxy (e.g. `http://1.2.3.4:8080`) |
 | `--price-per-cpu` | `1000000000000000` | Price per CPU core per minute (neuron) |
 | `--price-per-mem` | `500000000000000` | Price per GB memory per minute (neuron) |
 | `--fee` | `60000000000000000` | Flat fee per sandbox creation (neuron) |
 | `--rpc` | `https://evmrpc-testnet.0g.ai` | EVM RPC endpoint |
 | `--chain-id` | `16602` | Chain ID |
-| `--contract` | deployed testnet addr | Settlement contract (BeaconProxy) address |
+| `--contract` | `SETTLEMENT_CONTRACT` env | Settlement contract (BeaconProxy) address |
 
-The contract verifies on call: `tap.getAppInfo(appId).owner == msg.sender` and
+The contract verifies on call: caller is `tap.getAppInfo(appId).owner`, the
+signer is an active node (`tap.getNode(appId, signer).addedAt != 0`), and
 `tap.isAuthorizedInvalidator(appId, address(this)) == true`. Stake is not
 collected here — TappRegistry holds per-node stake.
 
-The appId field on the service is **set-once**: the first call writes it,
-subsequent calls must pass the same value or revert. To switch to a different
-appId, the operator must deregister and re-register.
+The appId field on a signer's service is **set-once**: the first call writes
+it, subsequent calls must pass the same value or revert. To bind a different
+appId, `remove-service` first. Each node (signer) gets its own fully isolated
+service entry: separate URL/prices, user balances, voucher nonces, earnings.
 
-**Example — testnet**
+> **After calling `register`**: just (re)deploy the billing service — it
+> derives its provider identity from the TEE key and resolves the app owner
+> from `getAppInfo(BACKEND_APP_NAME).owner` automatically; nothing to configure.
+
+---
+
+### `remove-service`
+
+Remove a node's service entry — e.g. the machine was rebuilt (its signer is
+gone forever) or you're rebinding the signer to a different appId. Signed by
+the app owner's key. **Sweeps any pending earnings to the owner in the same
+tx** (once the entry is gone there is no appId left to authorize a later
+withdrawal). User balances stay refundable; nonce watermarks stay put so old
+vouchers can't replay after a re-register.
 
 ```bash
-# Steps 1 + 2: register the app in TappRegistry + authorize this contract.
-# See the `tapp-cli` documentation in the 0g-tapp repo for the full command set.
-
-# Step 3: bind the service in SandboxServing.
-PROVIDER_KEY=0x... go run ./cmd/provider/ register \
-  --app-id        my-sandbox-app \
-  --url           http://<provider-host>:8080 \
-  --price-per-cpu 1000000000000000 \
-  --price-per-mem 500000000000000 \
-  --fee           60000000000000000
+OWNER_KEY=0x<hex> go run ./cmd/provider/ remove-service \
+  --signer 0x<node-tee-address> \
+  [--contract <proxy-address>]
 ```
 
-**Output**
+---
 
-```
-Provider:       0xea69...1837
-AppId:          my-sandbox-app
-Contract:       0x<proxy-address>
-Service URL:    http://<provider-host>:8080
-CPU price/min:  1000000000000000 neuron
-Mem price/min:  500000000000000 neuron/GB
-Create fee:     60000000000000000 neuron
+### `rotate`
 
-[1/1] AddOrUpdateService...
-      tx: 0x...
-      confirmed ✓
+One-command SandboxServing side of a machine rebuild: copies the old signer's
+service entry (appId/URL/prices) to the new signer, then removes the old entry
+(sweeping its earnings to the owner). Same prices → no ack invalidation.
 
-Done. Provider address: 0xea69...1837
+```bash
+OWNER_KEY=0x<hex> go run ./cmd/provider/ rotate \
+  --old 0x<dead-signer> \
+  --new 0x<new-signer> \
+  [--url <new-service-url>] \
+  [--contract <proxy-address>]
 ```
 
-> **After calling `register`**: set `PROVIDER_ADDRESS` in your `.env`, then redeploy the billing service.
+Full rotation runbook (rotate is step 4):
+
+1. Machine back up with the new TEE key. The billing server's settler detects
+   its signer is not yet a registered node and **holds the voucher queue**
+   (no gas burned, no dead-lettered revenue).
+2. `tapp-cli add-node-onchain` — **ADD** the new signer (don't replace): old
+   and new nodes coexist, so both signers' vouchers settle.
+3. Wait for the old signer's queue to drain (`GET /api/queue/summary` → 0).
+4. `provider rotate --old 0x… --new 0x…`
+5. `tapp-cli remove-node-onchain` for the old signer (stake unlocks ~1 day).
+6. Users with balance at the old signer: `requestRefund` → 2h lock →
+   `withdrawRefund` → `deposit` to the new signer.
 
 ---
 
@@ -140,28 +167,26 @@ Service:
 
 ### `withdraw`
 
-Withdraw all accumulated earnings from the settlement contract to the provider wallet.
+Withdraw a node's accumulated earnings **to the app owner's wallet**. Signed
+by the owner's key — the provider (signer) key never leaves the enclave and
+has no payout rights of its own.
 
 ```bash
-PROVIDER_KEY=0x<hex> go run ./cmd/provider/ withdraw \
+OWNER_KEY=0x<hex> go run ./cmd/provider/ withdraw \
+  --signer 0x<node-tee-address> \
   [--rpc      <rpc-url>] \
   [--chain-id <chain-id>] \
   [--contract <proxy-address>]
 ```
 
-**Example**
-
-```bash
-PROVIDER_KEY=0x<hex> go run ./cmd/provider/ withdraw
 ```
+App owner:          0xea69...1837
+Provider (signer):  0x59d1...44dd
+Earnings:           5000000000000000000 neuron
 
-```
-Provider:  0xea69...1837
-Earnings:  5000000000000000000 neuron
-
-Withdrawing earnings...
+Withdrawing earnings to the owner...
   tx: 0x...
-  confirmed ✓  (5000000000000000000 neuron withdrawn)
+  confirmed ✓  (5000000000000000000 neuron paid to 0xea69...1837)
 ```
 
 ---

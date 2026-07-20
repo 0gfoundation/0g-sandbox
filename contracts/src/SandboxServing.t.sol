@@ -24,6 +24,9 @@ contract MockTappRegistry is ITappRegistry {
     function addNode(string calldata appId, address signer) external {
         nodeAddedAt[appId][signer] = block.timestamp;
     }
+    function removeNode(string calldata appId, address signer) external {
+        nodeAddedAt[appId][signer] = 0;
+    }
     function setAck(address user, string calldata appId, bool v) external {
         userAcked[user][appId] = v;
     }
@@ -57,11 +60,16 @@ contract SandboxServingTest is Test {
     MockTappRegistry public tap;
 
     address user     = makeAddr("user");
-    address provider = makeAddr("provider");
+    address appOwner = makeAddr("appOwner");
 
-    // TEE signing key (deterministic, for tests only)
+    // TEE signing key of node #1 (deterministic, tests only). Its address IS
+    // the provider: voucher payee, services key, balance bucket, earnings key.
     uint256 constant TEE_PRIV = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
-    address teeSigner;
+    address provider; // = vm.addr(TEE_PRIV)
+
+    // Second node's TEE key, for multi-node / cross-signing cases.
+    uint256 constant TEE2_PRIV = 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
+    address provider2; // = vm.addr(TEE2_PRIV)
 
     string constant APP_ID = "sandbox-test-app";
 
@@ -78,18 +86,22 @@ contract SandboxServingTest is Test {
         BeaconProxy proxy = new BeaconProxy(address(beacon), initData);
         serving = SandboxServing(payable(address(proxy)));
 
-        teeSigner = vm.addr(TEE_PRIV);
+        provider  = vm.addr(TEE_PRIV);
+        provider2 = vm.addr(TEE2_PRIV);
 
         vm.deal(user, 10 ether);
-        vm.deal(provider, 10 ether);
+        vm.deal(appOwner, 10 ether);
 
-        // Provider's 3-step registration ceremony (here collapsed for tests).
-        tap.setAppOwner(APP_ID, provider);
-        tap.addNode(APP_ID, teeSigner);
+        // App owner's 4-step registration ceremony (collapsed for tests):
+        // registerApp + addNode + authorizeInvalidator in TappRegistry,
+        // then addOrUpdateService(signer, ...) here.
+        tap.setAppOwner(APP_ID, appOwner);
+        tap.addNode(APP_ID, provider);
         tap.authorize(APP_ID, address(serving));
 
-        vm.prank(provider);
+        vm.prank(appOwner);
         serving.addOrUpdateService(
+            provider,
             "https://provider.example.com",
             APP_ID,
             1000,   // pricePerCPUPerMin
@@ -155,9 +167,28 @@ contract SandboxServingTest is Test {
         assertEq(pending, 0.5 ether);
     }
 
+    /// Rotation path: after a machine rebuild the old signer's bucket is
+    /// drained via the normal refund flow — no service entry required.
+    function test_Refund_WorksAfterServiceRemoved() public {
+        vm.prank(user);
+        serving.deposit{value: 1 ether}(user, provider);
+
+        vm.prank(appOwner);
+        serving.removeService(provider);
+
+        vm.prank(user);
+        serving.requestRefund(provider, 1 ether);
+        vm.warp(block.timestamp + 2 hours + 1);
+        uint256 before = user.balance;
+        vm.prank(user);
+        serving.withdrawRefund(provider);
+        assertEq(user.balance - before, 1 ether);
+    }
+
     // ── Settlement ──────────────────────────────────────────────────────────
 
-    function _makeVoucher(
+    function _makeVoucherSignedBy(
+        uint256 privKey,
         address _user,
         address _provider,
         uint256 totalFee,
@@ -170,7 +201,7 @@ contract SandboxServingTest is Test {
         bytes32 digest = keccak256(abi.encodePacked(
             "\x19\x01", serving.domainSeparator(), structHash
         ));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(TEE_PRIV, digest);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privKey, digest);
         bytes memory sig = abi.encodePacked(r, s, v);
 
         return SandboxServing.SandboxVoucher({
@@ -183,13 +214,22 @@ contract SandboxServingTest is Test {
         });
     }
 
+    function _makeVoucher(
+        address _user,
+        address _provider,
+        uint256 totalFee,
+        bytes32 usageHash,
+        uint256 nonce
+    ) internal view returns (SandboxServing.SandboxVoucher memory) {
+        return _makeVoucherSignedBy(TEE_PRIV, _user, _provider, totalFee, usageHash, nonce);
+    }
+
     function _settle(SandboxServing.SandboxVoucher memory v)
         internal
         returns (SandboxServing.SettlementStatus)
     {
         SandboxServing.SandboxVoucher[] memory vs = new SandboxServing.SandboxVoucher[](1);
         vs[0] = v;
-        vm.prank(provider);
         SandboxServing.SettlementStatus[] memory statuses = serving.settleFeesWithTEE(vs);
         return statuses[0];
     }
@@ -257,39 +297,56 @@ contract SandboxServingTest is Test {
         assertEq(uint8(status), uint8(SandboxServing.SettlementStatus.INVALID_SIGNATURE));
     }
 
-    function test_Settle_InvalidSignature_UnknownSigner() public {
-        // Voucher correctly signed by teeSigner, but tap no longer lists it as a node.
+    function test_Settle_InvalidSignature_StrangerKey() public {
+        // Correct payee, but signed by a key that is neither the payee nor a node.
         vm.prank(user);
         serving.deposit{value: 1 ether}(user, provider);
         tap.setAck(user, APP_ID, true);
 
-        // Remove the node from tap (set addedAt back to 0 by re-deploying mock state)
-        // Instead, just submit a voucher signed by a different key:
-        uint256 strangerPriv = 0xfeedbeef;
-        address stranger = vm.addr(strangerPriv);
-        tap.addNode(APP_ID, stranger); // need different node off — instead sign with stranger but stranger is also a node
-        // Reset: sign with TEE_PRIV but remove that node by overwriting (set time=0 by direct slot manipulation is too brittle).
-        // Cleaner: deploy a fresh mock with no nodes for this voucher's signer.
-        MockTappRegistry tap2 = new MockTappRegistry();
-        tap2.setAppOwner(APP_ID, provider);
-        tap2.setAck(user, APP_ID, true);
-        tap2.authorize(APP_ID, address(serving));
-        // tap2 has NO addNode for teeSigner → getNode(...).addedAt == 0 → INVALID_SIGNATURE.
-        // But serving is still bound to original tap; the easiest path is to verify the existing tap flow rejects unknown signers.
-        stranger; tap2; // suppress unused warnings — this branch documents the design; the actual unknown-signer test is below.
-
-        // Submit a voucher signed by strangerPriv — strangerPriv is not a node in tap.
-        SandboxServing.SandboxVoucher memory bad = _makeVoucher(user, provider, 100, keccak256("u-stranger"), 1);
-        // Override signature with stranger's key
-        bytes32 structHash = keccak256(abi.encode(
-            VOUCHER_TYPEHASH, user, provider, bad.usageHash, bad.nonce, bad.totalFee
-        ));
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", serving.domainSeparator(), structHash));
-        uint256 strangerPriv2 = 0x1111111111111111111111111111111111111111111111111111111111111111;
-        (uint8 vv, bytes32 r, bytes32 s) = vm.sign(strangerPriv2, digest);
-        bad.signature = abi.encodePacked(r, s, vv);
+        uint256 strangerPriv = 0x1111111111111111111111111111111111111111111111111111111111111111;
+        SandboxServing.SandboxVoucher memory bad =
+            _makeVoucherSignedBy(strangerPriv, user, provider, 100, keccak256("u-stranger"), 1);
 
         SandboxServing.SettlementStatus status = _settle(bad);
+        assertEq(uint8(status), uint8(SandboxServing.SettlementStatus.INVALID_SIGNATURE));
+    }
+
+    /// v2 core property: a voucher must be signed BY its own payee. Node #1
+    /// signing a voucher that names node #2 as payee is rejected even though
+    /// node #1 is an active node of the same app.
+    function test_Settle_CrossSigningRejected() public {
+        tap.addNode(APP_ID, provider2);
+        vm.prank(appOwner);
+        serving.addOrUpdateService(provider2, "https://node2.example.com", APP_ID, 1000, 5000, 500);
+
+        vm.prank(user);
+        serving.deposit{value: 1 ether}(user, provider2);
+        tap.setAck(user, APP_ID, true);
+
+        // Payee is provider2 but signature comes from node #1's key.
+        SandboxServing.SandboxVoucher memory cross =
+            _makeVoucherSignedBy(TEE_PRIV, user, provider2, 1000, keccak256("cross"), 1);
+        SandboxServing.SettlementStatus status = _settle(cross);
+        assertEq(uint8(status), uint8(SandboxServing.SettlementStatus.INVALID_SIGNATURE));
+
+        // Signed by its own payee → settles.
+        SandboxServing.SandboxVoucher memory good =
+            _makeVoucherSignedBy(TEE2_PRIV, user, provider2, 1000, keccak256("own"), 1);
+        assertEq(uint8(_settle(good)), uint8(SandboxServing.SettlementStatus.SUCCESS));
+        assertEq(serving.getProviderEarnings(provider2), 1000);
+    }
+
+    function test_Settle_RemovedNodeRejected() public {
+        // Signer was a node when the service was registered, then got removed
+        // from TappRegistry (remove-node-onchain). Its vouchers must stop settling.
+        vm.prank(user);
+        serving.deposit{value: 1 ether}(user, provider);
+        tap.setAck(user, APP_ID, true);
+
+        tap.removeNode(APP_ID, provider);
+        SandboxServing.SettlementStatus status = _settle(
+            _makeVoucher(user, provider, 100, keccak256("late"), 1)
+        );
         assertEq(uint8(status), uint8(SandboxServing.SettlementStatus.INVALID_SIGNATURE));
     }
 
@@ -321,146 +378,182 @@ contract SandboxServingTest is Test {
         assertEq(serving.getProviderEarnings(provider), 400);
     }
 
-    function test_WithdrawEarnings() public {
+    // ── Earnings ─────────────────────────────────────────────────────────────
+
+    function test_WithdrawEarnings_PaysAppOwner() public {
         vm.prank(user);
         serving.deposit{value: 1 ether}(user, provider);
         tap.setAck(user, APP_ID, true);
 
         _settle(_makeVoucher(user, provider, 5000, keccak256("u1"), 1));
 
-        uint256 before = provider.balance;
-        vm.prank(provider);
-        serving.withdrawEarnings();
-        assertEq(provider.balance - before, 5000);
+        uint256 before = appOwner.balance;
+        vm.prank(appOwner);
+        serving.withdrawEarnings(provider);
+        assertEq(appOwner.balance - before, 5000);
         assertEq(serving.getProviderEarnings(provider), 0);
+    }
+
+    function test_WithdrawEarnings_RejectsNonAppOwner() public {
+        vm.prank(user);
+        serving.deposit{value: 1 ether}(user, provider);
+        tap.setAck(user, APP_ID, true);
+        _settle(_makeVoucher(user, provider, 5000, keccak256("u1"), 1));
+
+        address impostor = makeAddr("impostor");
+        vm.expectRevert("not app owner");
+        vm.prank(impostor);
+        serving.withdrawEarnings(provider);
+
+        // The signer address itself has no special payout right either.
+        vm.deal(provider, 1 ether);
+        vm.expectRevert("not app owner");
+        vm.prank(provider);
+        serving.withdrawEarnings(provider);
+    }
+
+    function test_WithdrawEarnings_UnknownSignerRejected() public {
+        address unknown = makeAddr("unknown");
+        vm.expectRevert("not app owner");
+        vm.prank(appOwner);
+        serving.withdrawEarnings(unknown);
     }
 
     // ── Service registration ─────────────────────────────────────────────────
 
     function test_AddService_RejectsNonAppOwner() public {
         address impostor = makeAddr("impostor");
-        // impostor does NOT own APP_ID in tap, and was never authorized as a delegate
-        vm.expectRevert("not app owner or authorized provider");
+        vm.expectRevert("not app owner");
         vm.prank(impostor);
-        serving.addOrUpdateService("u", APP_ID, 1, 1, 1);
+        serving.addOrUpdateService(provider, "u", APP_ID, 1, 1, 1);
+    }
+
+    function test_AddService_RejectsNonNodeSigner() public {
+        // Signer not registered as a node of the appId in TappRegistry.
+        address ghost = makeAddr("ghost");
+        vm.expectRevert("signer not an active node");
+        vm.prank(appOwner);
+        serving.addOrUpdateService(ghost, "u", APP_ID, 1, 1, 1);
     }
 
     function test_AddService_RejectsWhenNotAuthorized() public {
-        // Set up a new provider that owns a different app but never authorized us.
+        // A different app whose owner never authorized us as invalidator.
         string memory appId2 = "another-app";
-        address p2 = makeAddr("p2");
-        tap.setAppOwner(appId2, p2);
+        address owner2 = makeAddr("owner2");
+        address signer2 = makeAddr("signer2");
+        tap.setAppOwner(appId2, owner2);
+        tap.addNode(appId2, signer2);
         // No tap.authorize(appId2, serving)
         vm.expectRevert("sandbox not authorized as invalidator");
-        vm.prank(p2);
-        serving.addOrUpdateService("u", appId2, 1, 1, 1);
+        vm.prank(owner2);
+        serving.addOrUpdateService(signer2, "u", appId2, 1, 1, 1);
     }
 
     function test_UpdateService_AppIdImmutable() public {
-        // Try to switch to a different appId — must revert.
+        // Try to rebind the same signer to a different appId — must revert.
         string memory appId2 = "another-app";
-        tap.setAppOwner(appId2, provider);
+        tap.setAppOwner(appId2, appOwner);
+        tap.addNode(appId2, provider);
         tap.authorize(appId2, address(serving));
-        vm.expectRevert("appId immutable; deregister to change");
-        vm.prank(provider);
-        serving.addOrUpdateService("u", appId2, 1, 1, 1);
+        vm.expectRevert("appId immutable; remove to change");
+        vm.prank(appOwner);
+        serving.addOrUpdateService(provider, "u", appId2, 1, 1, 1);
     }
 
     function test_UpdateService_PriceChangeInvalidatesAcks() public {
         uint256 before = tap.invalidateCount();
-        vm.prank(provider);
-        serving.addOrUpdateService("u", APP_ID, 9999, 5000, 500); // CPU price changed
+        vm.prank(appOwner);
+        serving.addOrUpdateService(provider, "u", APP_ID, 9999, 5000, 500); // CPU price changed
         assertEq(tap.invalidateCount(), before + 1);
     }
 
     function test_UpdateService_UrlChangeDoesNotInvalidate() public {
         uint256 before = tap.invalidateCount();
-        vm.prank(provider);
-        serving.addOrUpdateService("new-url", APP_ID, 1000, 5000, 500); // only URL changed
+        vm.prank(appOwner);
+        serving.addOrUpdateService(provider, "new-url", APP_ID, 1000, 5000, 500); // only URL changed
         assertEq(tap.invalidateCount(), before, "URL change must not invalidate acks");
     }
 
-    // ── Delegated providers ──────────────────────────────────────────────────
+    /// One appId, many nodes: each signer gets its own isolated service entry,
+    /// balance bucket, nonce stream, and earnings — registered by the same owner.
+    function test_MultiNode_IsolatedLedgers() public {
+        tap.addNode(APP_ID, provider2);
+        vm.prank(appOwner);
+        serving.addOrUpdateService(provider2, "https://node2.example.com", APP_ID, 2000, 6000, 700);
 
-    function test_AuthorizeProvider_AllowsDelegateToRegisterOwnService() public {
-        address delegate = makeAddr("delegate");
+        assertTrue(serving.serviceExists(provider2));
+        (, string memory appId2,,,) = serving.services(provider2);
+        assertEq(appId2, APP_ID);
 
-        vm.prank(provider);
-        serving.authorizeProvider(APP_ID, delegate);
-        assertTrue(serving.authorizedProviders(APP_ID, delegate));
-
-        vm.prank(delegate);
-        serving.addOrUpdateService("https://delegate.example.com", APP_ID, 2000, 6000, 700);
-
-        assertTrue(serving.serviceExists(delegate));
-        (, string memory delegateAppId,,,) = serving.services(delegate);
-        assertEq(delegateAppId, APP_ID);
-
-        // Delegate's balance/nonce/earnings are independent of the app owner's.
         vm.prank(user);
-        serving.deposit{value: 1 ether}(user, delegate);
+        serving.deposit{value: 1 ether}(user, provider2);
         tap.setAck(user, APP_ID, true);
 
-        vm.prank(delegate);
-        SandboxServing.SandboxVoucher[] memory vs = new SandboxServing.SandboxVoucher[](1);
-        vs[0] = _makeVoucher(user, delegate, 1000, keccak256("delegate-usage"), 1);
-        SandboxServing.SettlementStatus[] memory statuses = serving.settleFeesWithTEE(vs);
-        assertEq(uint8(statuses[0]), uint8(SandboxServing.SettlementStatus.SUCCESS));
+        SandboxServing.SandboxVoucher memory v =
+            _makeVoucherSignedBy(TEE2_PRIV, user, provider2, 1000, keccak256("node2-usage"), 1);
+        assertEq(uint8(_settle(v)), uint8(SandboxServing.SettlementStatus.SUCCESS));
 
-        assertEq(serving.getProviderEarnings(delegate), 1000);
-        assertEq(serving.getProviderEarnings(provider), 0); // app owner's own earnings untouched
-        (uint256 delegateBal,,) = serving.getBalance(user, delegate);
-        (uint256 providerBal,,) = serving.getBalance(user, provider);
-        assertEq(delegateBal, 1 ether - 1000);
-        assertEq(providerBal, 0); // no shared pool — user never deposited to `provider`
+        assertEq(serving.getProviderEarnings(provider2), 1000);
+        assertEq(serving.getProviderEarnings(provider), 0); // node1's ledger untouched
+        (uint256 bal2,,) = serving.getBalance(user, provider2);
+        (uint256 bal1,,) = serving.getBalance(user, provider);
+        assertEq(bal2, 1 ether - 1000);
+        assertEq(bal1, 0); // no shared pool
     }
 
-    function test_AuthorizeProvider_RejectsNonAppOwnerCaller() public {
-        address impostor = makeAddr("impostor");
-        address delegate = makeAddr("delegate");
-        vm.expectRevert("not app owner");
-        vm.prank(impostor);
-        serving.authorizeProvider(APP_ID, delegate);
-    }
+    // ── removeService ─────────────────────────────────────────────────────────
 
-    function test_AuthorizeProvider_RejectsZeroAddress() public {
-        vm.expectRevert("zero provider");
-        vm.prank(provider);
-        serving.authorizeProvider(APP_ID, address(0));
-    }
-
-    function test_RevokeProvider_BlocksFurtherRegisterButKeepsExistingService() public {
-        address delegate = makeAddr("delegate");
-        vm.prank(provider);
-        serving.authorizeProvider(APP_ID, delegate);
-        vm.prank(delegate);
-        serving.addOrUpdateService("https://delegate.example.com", APP_ID, 2000, 6000, 700);
-
-        vm.prank(provider);
-        serving.revokeProvider(APP_ID, delegate);
-        assertFalse(serving.authorizedProviders(APP_ID, delegate));
-
-        vm.expectRevert("not app owner or authorized provider");
-        vm.prank(delegate);
-        serving.addOrUpdateService("https://delegate.example.com", APP_ID, 3000, 6000, 700);
-
-        // Existing service keeps settling — revocation is administrative only.
+    function test_RemoveService_SweepsEarningsAndBlocksSettlement() public {
         vm.prank(user);
-        serving.deposit{value: 1 ether}(user, delegate);
+        serving.deposit{value: 1 ether}(user, provider);
         tap.setAck(user, APP_ID, true);
-        vm.prank(delegate);
-        SandboxServing.SandboxVoucher[] memory vs = new SandboxServing.SandboxVoucher[](1);
-        vs[0] = _makeVoucher(user, delegate, 500, keccak256("post-revoke-usage"), 1);
-        SandboxServing.SettlementStatus[] memory statuses = serving.settleFeesWithTEE(vs);
-        assertEq(uint8(statuses[0]), uint8(SandboxServing.SettlementStatus.SUCCESS));
+        _settle(_makeVoucher(user, provider, 5000, keccak256("u1"), 1));
+        assertEq(serving.getProviderEarnings(provider), 5000);
+
+        uint256 before = appOwner.balance;
+        vm.prank(appOwner);
+        serving.removeService(provider);
+
+        // Pending earnings swept to the owner in the same call.
+        assertEq(appOwner.balance - before, 5000);
+        assertEq(serving.getProviderEarnings(provider), 0);
+        assertFalse(serving.serviceExists(provider));
+
+        // No further settlement against the removed signer.
+        SandboxServing.SettlementStatus status = _settle(
+            _makeVoucher(user, provider, 100, keccak256("u2"), 2)
+        );
+        assertEq(uint8(status), uint8(SandboxServing.SettlementStatus.PROVIDER_MISMATCH));
+
+        // User balance is preserved and refundable (see test_Refund_WorksAfterServiceRemoved).
+        (uint256 bal,,) = serving.getBalance(user, provider);
+        assertEq(bal, 1 ether - 5000);
     }
 
-    function test_RevokeProvider_RejectsNonAppOwnerCaller() public {
+    function test_RemoveService_RejectsNonAppOwner() public {
         address impostor = makeAddr("impostor");
-        address delegate = makeAddr("delegate");
         vm.expectRevert("not app owner");
         vm.prank(impostor);
-        serving.revokeProvider(APP_ID, delegate);
+        serving.removeService(provider);
+    }
+
+    function test_RemoveService_ThenReRegisterKeepsNonces() public {
+        vm.prank(user);
+        serving.deposit{value: 1 ether}(user, provider);
+        tap.setAck(user, APP_ID, true);
+        _settle(_makeVoucher(user, provider, 100, keccak256("u1"), 7));
+
+        vm.prank(appOwner);
+        serving.removeService(provider);
+        vm.prank(appOwner);
+        serving.addOrUpdateService(provider, "u", APP_ID, 1000, 5000, 500);
+
+        // Old voucher can't be replayed: nonce watermark survived the remove.
+        SandboxServing.SettlementStatus status = _settle(
+            _makeVoucher(user, provider, 100, keccak256("u1"), 7)
+        );
+        assertEq(uint8(status), uint8(SandboxServing.SettlementStatus.INVALID_NONCE));
+        assertEq(serving.getLastNonce(user, provider), 7);
     }
 
     function test_IsTEEAcknowledged_Shim() public {

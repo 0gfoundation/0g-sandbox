@@ -45,7 +45,7 @@ cmd/
   deploy/     deploy beacon-proxy stack (3 steps: impl → beacon → proxy)
   upgrade/    upgrade via beacon.upgradeTo(newImpl)
   verify/     verify contracts on block explorer
-  provider/   provider CLI: register (binds appId), status, withdraw, snapshot management
+  provider/   provider CLI (signed by the appId OWNER key): register (binds signer→appId), remove-service, rotate, status, withdraw, snapshot management
   user/       user CLI: create/stop/delete sandbox, exec, balance
   checkbal/   quick balance/nonce/earnings check for a private key
 internal/
@@ -77,6 +77,22 @@ contracts/
 ### Token Units
 - `1 0G = 10^18 neuron` (neuron is the smallest unit, analogous to ETH/wei)
 - All on-chain amounts are **neuron** (big.Int)
+
+### Identity Model (v2: provider IS the TEE signer)
+- The **provider address** (services key, voucher payee, `(user, provider)`
+  balance bucket, earnings ledger) is the node's TEE signer address, derived
+  from the TEE key at runtime. There is no separate provider wallet.
+- The **owner** (the appId's TappRegistry owner — resolved on-chain from
+  `getAppInfo(BACKEND_APP_NAME).owner`, never configured) does all
+  management: `register --signer`, `remove-service`, `withdraw`, `rotate`.
+  Owner is always an admin; `ADMIN_ADDRESSES` adds extra operator wallets.
+- Settlement requires the voucher to be signed **by its own payee**
+  (`recovered == v.provider`) and that address to be an active TappRegistry
+  node — one node can never settle vouchers naming another node.
+- **Machine rebuild = signer rotation** (service restarts keep the key):
+  the settler holds its queue until the new signer is a registered node;
+  `cmd/provider rotate` migrates the service entry; users move balances off
+  the old signer via the normal refund flow.
 
 ### Billing Flow
 1. User sends EIP-191-signed `POST /api/sandbox` → proxy authenticates, injects `daytona-owner`
@@ -229,7 +245,6 @@ DAYTONA_API_URL=http://localhost:3000 \
 DAYTONA_ADMIN_KEY=<key> \
 SETTLEMENT_CONTRACT=0x<proxy-addr> \
 TAPP_REGISTRY=0x<tapp-registry-addr> \
-PROVIDER_ADDRESS=0x<provider-eoa> \
 BACKEND_APP_NAME=<tapp-app-id> \
 RPC_URL=https://evmrpc-testnet.0g.ai \
 CHAIN_ID=16602 \
@@ -238,8 +253,10 @@ go run ./cmd/billing/
 ```
 
 `TAPP_REGISTRY` and `BACKEND_APP_NAME` are required — at startup the billing
-server reads `services[PROVIDER_ADDRESS].appId` from SandboxServing and queries
-TappRegistry for signer + ack state on every voucher.
+server derives its provider identity from the TEE key (**provider IS the TEE
+signer** — there is no provider wallet), resolves the app owner from
+`getAppInfo(BACKEND_APP_NAME).owner` (standing admin, surfaced in /api/info),
+and queries TappRegistry for node + ack state on every voucher.
 
 `PROXY_DOMAIN` controls the URL format for accessing user-defined service ports inside the
 sandbox. Format: `http://<port>-<sandboxId>.<PROXY_DOMAIN>/<path>`. The Daytona proxy listens
@@ -298,10 +315,11 @@ violating the workload-privacy guarantee.
 The two `/force*` paths predate `withOwnerOrAdmin` and remain as explicit
 operator-intent endpoints so log/audit grep is unambiguous.
 
-`ADMIN_ADDRESSES` is comma-separated. When unset, defaults to `[PROVIDER_ADDRESS]` for
-backward compatibility with single-key deployments. Distinct from `PROVIDER_ADDRESS`
-(the on-chain settlement identity), so multiple operators can manage infrastructure
-without holding the provider's settlement key.
+The appId's TappRegistry owner is **always** an admin — resolved live from
+the chain (`getAppInfo(BACKEND_APP_NAME).owner`), never configured;
+`ADMIN_ADDRESSES` is an additive list of extra operator wallets. The on-chain
+settlement identity (the provider address) is the TEE signer and never
+appears in admin config.
 
 ### Dashboard
 
@@ -356,9 +374,12 @@ cast send 0x<tapp-registry-address> \
   --rpc-url https://evmrpc-testnet.0g.ai \
   --private-key 0x<provider-key>
 
-# 5. Bind the SandboxServing service to the appId + set prices.
-PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ register \
+# 5. Bind the node's service to the appId + set prices. Signed by the appId
+#    OWNER key; --signer is the node's TEE address (tapp-cli get-app-key, or
+#    the billing server's /api/info `provider_address`).
+OWNER_KEY=0x<owner-key> go run ./cmd/provider/ register \
   --app-id        <appId> \
+  --signer        0x<node-tee-address> \
   --url           https://<sandbox-host> \
   --price-per-cpu <neuron/cpu/min> \
   --price-per-mem <neuron/memGB/min> \
@@ -393,7 +414,7 @@ tapp-cli -s $TAPP_SERVER docker-login \
 
 ```bash
 # 1. Prepare env (must be named .env for docker compose to pick it up).
-#    Required: SETTLEMENT_CONTRACT, TAPP_REGISTRY, PROVIDER_ADDRESS,
+#    Required: SETTLEMENT_CONTRACT, TAPP_REGISTRY,
 #              BACKEND_APP_NAME (= $APP_ID).
 cp .env.testnet .env
 
@@ -441,6 +462,6 @@ tapp-cli -s $TAPP_SERVER get-task-status --task-id <task-id>
 - `BACKEND_APP_NAME` in `.env` must match the tapp app-id exactly, and that same string is the `appId` registered in both TappRegistry and SandboxServing
 - `.env` is uploaded because docker-compose.yml mounts `./.env:/app/.env:ro` — this mount's only purpose is to trigger tapp-cli to upload the file; docker compose on the server reads it from the working directory for `${VAR}` substitution
 - The provider wallet only needs enough 0G to pay gas for `addOrUpdateService` and ongoing `settleFeesWithTEE` batches; SandboxServing no longer holds a provider stake
-- `cmd/provider register` uses `PROVIDER_KEY` env var (not `MOCK_APP_PRIVATE_KEY`)
+- `cmd/provider register` uses `OWNER_KEY` env var — the appId owner's key (`PROVIDER_KEY` accepted as a legacy alias)
 - Updating prices via `cmd/provider register` bumps `ackVersion(appId)` in TappRegistry — every existing user must call `cmd/user acknowledge` again before further vouchers settle
 - **`RESOURCE_LIMITS_DISABLED=false` on the runner service is load-bearing.** The `daytonaio/daytona-runner` image bakes `ENV RESOURCE_LIMITS_DISABLED=true` into its Dockerfile, so omitting the var in compose falls back to `true` and the runner skips setting Docker CFS / memory cgroup limits — every sandbox runs unconstrained on host resources regardless of snapshot tier. To verify: `docker exec 0g-sandbox-runner-1 env | grep RESOURCE_LIMITS` should print `=false`, and any sandbox container's `docker inspect` should show non-zero `HostConfig.CpuQuota` / `Memory`.

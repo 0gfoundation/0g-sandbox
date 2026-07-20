@@ -29,6 +29,11 @@ type SessionEntry struct {
 // balanceChecker is the minimal chain interface the monitor needs.
 type balanceChecker interface {
 	GetBalanceBatch(ctx context.Context, users []common.Address, provider common.Address) ([]*big.Int, error)
+	// GetServicePricing returns (nil, nil, nil, nil) when the provider has no
+	// registered service. Used to stop topping up buckets of providers whose
+	// service was removed — a rotated-out TEE signer can never settle again,
+	// so deposits to it are money the user must claw back via refund.
+	GetServicePricing(ctx context.Context, provider common.Address) (pricePerCPUPerSec, pricePerMemGBPerSec, createFee *big.Int, err error)
 }
 
 // Monitor polls on-chain balances for all registered sessions and triggers
@@ -139,6 +144,22 @@ func (m *Monitor) check(ctx context.Context) {
 	// For each provider, batch-fetch balances.
 	for provAddrLower, users := range providerUsers {
 		provider := common.HexToAddress(provAddrLower)
+
+		// Provider = TEE signer: after a machine rotation the owner removes
+		// the old signer's service, and nothing can ever settle against it
+		// again. Topping up that bucket would strand funds behind the refund
+		// flow — skip it and let the stale sessions age out.
+		if cpuPrice, _, _, err := m.chain.GetServicePricing(ctx, provider); err != nil {
+			m.log.Warn("monitor: service lookup failed; skipping provider this tick",
+				zap.String("provider", provAddrLower), zap.Error(err))
+			continue
+		} else if cpuPrice == nil {
+			m.log.Warn("monitor: provider service no longer registered (rotated out?) — not topping up",
+				zap.String("provider", provAddrLower),
+				zap.Int("sessions_affected", len(users)))
+			continue
+		}
+
 		balances, err := m.chain.GetBalanceBatch(ctx, users, provider)
 		if err != nil {
 			m.log.Warn("monitor: GetBalanceBatch failed",

@@ -171,8 +171,9 @@ func setupE2E(teeKeyHex string) (*e2eEnv, error) {
 			RPCURL:          rpcURL,
 			ContractAddress: contractAddr,
 			TEEPrivateKey:   teeKeyHex,
-			ProviderAddress: providerAddr.Hex(),
-			ChainID:         chainIDVal,
+			// v2: provider identity is derived from the TEE key inside
+			// chain.NewClient — providerAddr above matches it by construction.
+			ChainID: chainIDVal,
 		},
 		Billing: config.BillingConfig{VoucherIntervalSec: voucherIntervalSec, ComputePricePerSec: computePriceStr, CreateFee: createFeeStr},
 		Daytona: config.DaytonaConfig{APIURL: daytonaURL, AdminKey: daytonaKey},

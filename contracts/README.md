@@ -14,8 +14,9 @@ Deployer/Owner: `0xB831371eb2703305f1d9F8542163633D0675CEd7`
 
 | Component | Address |
 |-----------|---------|
-| **Proxy** (stable) | `0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3` |
-| Beacon | `0xaa77C82Dc6b4243Ff272d88619BD4f23455CCB6E` |
+| **Proxy** (stable) | `0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c` |
+| Beacon | `0xBF04734BC87E12aB81E21bb4018b9bFa4c118721` |
+| TappRegistry | `0x2Ce80374318B1d7Fb3345724457a182E0ad165c9` |
 
 **Upgrade history:**
 
@@ -23,9 +24,11 @@ Deployer/Owner: `0xB831371eb2703305f1d9F8542163633D0675CEd7`
 |------|------|-------|
 | initial | — | Initial deploy: per-provider balance isolation, owner model |
 | 2026-03-10 | `0x9a3D6C66e3e6E020D8D40d851Db76D76EBfa93f2` | Removed `msg.sender == provider` check in `settleFeesWithTEE`; TEE key signs settlement txs directly, no `PROVIDER_PRIVATE_KEY` needed |
+| 2026-07-19 | `0x47a8E809Cd81b94eD19874da73C0E3F82DD90E5C` | **v2 redeploy (new proxy/beacon)**: provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement.  Previous dev proxy `0x2024eB0C…E9b3` retired (refund-only) |
 
 ```env
-SETTLEMENT_CONTRACT=0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3
+SETTLEMENT_CONTRACT=0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c
+TAPP_REGISTRY=0x2Ce80374318B1d7Fb3345724457a182E0ad165c9
 ```
 
 ---
@@ -36,20 +39,21 @@ SETTLEMENT_CONTRACT=0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3
 
 | Component | Address |
 |-----------|---------|
-| **Proxy** (stable) | `0xA07b0033cA65B06B090535944C121D8677FDC12c` |
-| Beacon | `0xfdc08C0CdF629589D05E03849846006c37E800D5` |
+| **Proxy** (stable) | `0x3490B9053AC46F7Bf71A1ceBffcB2be2C1405b41` |
+| Beacon | `0x79D6D7B5468AA134360bf73cc667FC63f704B62d` |
+| TappRegistry | `0x2Ce80374318B1d7Fb3345724457a182E0ad165c9` |
 
 **Upgrade history:**
 
 | Date | Impl | Notes |
 |------|------|-------|
-| 2026-06-08 | `0xf870247949B35dC8174212F338DcdE9fCa95d5Bb` | Redeploy on a fresh proxy (supersedes `0xd7e0CD22…`); per-resource pricing + TappRegistry trust root |
-| 2026-06-08 | `0xe95DA05Bf17CAF09Cb129A706760bA52B55f14eE` | Add `deregisterService` — soft-clear a service entry so its (set-once) `appId` can be changed |
+| 2026-07-20 | `0x7a1A5FC5B1A6AC1127e2D8b63400615B2ea49C47` | **v2 redeploy (new proxy/beacon)**: provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement. Verified on chainscan. Bound to TappRegistry `0x2Ce8…65c9` (repointed from `0x95a0…` via setTappRegistry right after deploy). Supersedes the v1 testnet proxies `0xA07b0033…FC12c` and `0x3d4d8a05…cf6f` — both retired (refund-only) |
 
-**Provider stake:** 100 0G (`100000000000000000000` neuron), held in TappRegistry per node (not in SandboxServing).
+**Provider stake:** held in TappRegistry per node (not in SandboxServing); see `minStakeAmount()` on the registry (1 0G at the time of writing).
 
 ```env
-SETTLEMENT_CONTRACT=0xA07b0033cA65B06B090535944C121D8677FDC12c
+SETTLEMENT_CONTRACT=0x3490B9053AC46F7Bf71A1ceBffcB2be2C1405b41
+TAPP_REGISTRY=0x2Ce80374318B1d7Fb3345724457a182E0ad165c9
 ```
 
 ---
@@ -106,17 +110,17 @@ Trust identity — the active TEE signer set and user acknowledgements — lives
 
 | Function | Notes |
 |---|---|
-| `addOrUpdateService(url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)` | Register/update; `appId` set-once; caller must be the appId's TappRegistry owner |
-| `deregisterService()` | Soft-clear the caller's service so `appId` can change; balances/earnings/nonces preserved |
-| `withdrawEarnings()` | Withdraw accrued settlement earnings |
-| `services(provider)` / `serviceExists(provider)` | view — commercial terms |
+| `addOrUpdateService(signer, url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)` | App owner registers/updates a node's service; `signer` (= the provider address) must be an active TappRegistry node of the appId; `appId` set-once per signer |
+| `removeService(signer)` | App owner removes a node's service (e.g. after a machine rebuild); sweeps pending earnings to the owner in the same tx; user balances stay refundable, nonce watermarks stay put |
+| `withdrawEarnings(signer)` | App owner withdraws a node's accrued earnings to the owner's wallet |
+| `services(provider)` / `serviceExists(provider)` | view — commercial terms (provider = the node's TEE signer address) |
 | `getProviderEarnings(provider)` → uint256 | view |
 
 **Settlement**
 
 | Function | Notes |
 |---|---|
-| `settleFeesWithTEE(vouchers[])` → statuses[] | Permissionless; provider identified by `v.provider`; verifies the EIP-712 signature against the appId's active TEE node in TappRegistry |
+| `settleFeesWithTEE(vouchers[])` → statuses[] | Permissionless; a voucher is valid only if signed BY its own payee (`recovered == v.provider`) and that address is an active TappRegistry node of the appId — one node can never settle vouchers naming another node |
 | `previewSettlementResults(vouchers[])` → statuses[] | view — dry-run statuses |
 
 **Admin / setup**
@@ -128,7 +132,7 @@ Trust identity — the active TEE signer set and user acknowledgements — lives
 | `setTappRegistry(newRegistry)` | Repoint TappRegistry; ack state then reads from the new registry |
 | `tappRegistry()` / `domainSeparator()` / `LOCK_TIME()` | view |
 
-**Events:** `Deposited`, `RefundRequested`, `RefundWithdrawn`, `VoucherSettled`, `EarningsWithdrawn`, `ServiceUpdated`, `ServiceDeregistered`, `OwnershipTransferred`, `TappRegistryUpdated`.
+**Events:** `Deposited`, `RefundRequested`, `RefundWithdrawn`, `VoucherSettled`, `EarningsWithdrawn(provider, to, amount)`, `ServiceUpdated`, `ServiceRemoved(provider, appOwner)`, `OwnershipTransferred`, `TappRegistryUpdated`.
 
 ---
 
@@ -242,4 +246,6 @@ wallet holds enough 0G to pay gas for settlement.
 - **Proxy address never changes** — upgrading only replaces the implementation; the proxy address is the stable external-facing address
 - **Open settlement** — `settleFeesWithTEE` can be called by anyone; the provider is identified by `v.provider` in the voucher, not `msg.sender`
 - **Trust root delegation** — SandboxServing holds only commercial terms; TEE signer identity and user acknowledgement live in TappRegistry and are queried on every voucher verification
-- **`appId` is set-once** — once `addOrUpdateService` has bound a non-empty `appId`, subsequent calls must pass the same value (a provider can only update URL / prices / createFee in place, not the trust root). To bind a *different* `appId`, call **`deregisterService`** first: a soft clear of the caller's service entry (url/appId/prices/createFee) that preserves user balances, pending refunds, settled nonces, and accrued `providerEarnings` — all still withdrawable — then re-register. Emits `ServiceDeregistered(provider)`.
+- **Provider IS the TEE signer (v2)** — every provider address (services key, voucher payee, balance bucket, earnings ledger) is the TEE signer address of one TappRegistry node. The signer key never leaves the enclave and dies with the machine, so all management (register/remove/withdraw) belongs to the appId's TappRegistry owner. One appId, many nodes: each signer has a fully isolated ledger — balances are deliberately NOT shared across nodes (independently-deployed billing proxies each run their own Redis reservation admission control and can't see each other's in-flight reservations; a shared balance would overcommit).
+- **Rotation** — a machine rebuild produces a new signer. Runbook: add the new node in TappRegistry (old + new coexist), drain the old signer's voucher queue, `rotate` the service entry (cmd/provider), remove the old node. Users move balances off the dead signer via the normal refund flow; `removeService` sweeps its earnings to the owner.
+- **`appId` is set-once per signer** — once `addOrUpdateService` has bound a non-empty `appId` to a signer, subsequent calls must pass the same value. To bind a *different* `appId`, `removeService` first (user balances, pending refunds, and settled nonces are preserved — nonces stay put so old vouchers can't be replayed after a re-register).

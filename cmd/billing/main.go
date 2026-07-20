@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -44,15 +45,6 @@ func main() {
 		log.Fatal("config load failed", zap.Error(err))
 	}
 
-	// PROVIDER_ADDRESS identifies which on-chain provider this billing service
-	// represents — it goes into voucher.provider (EIP-712), the settler queue
-	// key, and provider-bound chain lookups. Enforced here (not in
-	// chain.NewClient) so broker can reuse the same chain client without
-	// declaring a provider identity it doesn't have.
-	if cfg.Chain.ProviderAddress == "" {
-		log.Fatal("PROVIDER_ADDRESS is required for the billing service")
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -80,11 +72,68 @@ func main() {
 		log.Fatal("chain client init failed", zap.Error(err))
 	}
 
+	// Provider identity = the TEE signer's own address (v2: provider IS the
+	// TEE signer). It keys the voucher payee, the settler queue, and every
+	// provider-bound lookup below.
+	providerAddr := onchain.ProviderAddress()
+	providerHex := providerAddr.Hex()
+
+	// The appId owner is resolved from the chain, never configured:
+	// getAppInfo(BACKEND_APP_NAME).owner. It is the standing admin for
+	// operator endpoints and is surfaced through /api/info. TTL-cached; on
+	// lookup failure the last known value is served so a flaky RPC can't
+	// lock the owner out mid-session.
+	backendAppName := os.Getenv("BACKEND_APP_NAME")
+	if backendAppName == "" {
+		log.Warn("BACKEND_APP_NAME not set — app owner cannot be resolved; only ADMIN_ADDRESSES wallets are admins")
+	}
+	var ownerMu sync.Mutex
+	var ownerCached string
+	var ownerCachedAt time.Time
+	appOwnerFn := func(ctx context.Context) (string, error) {
+		ownerMu.Lock()
+		defer ownerMu.Unlock()
+		if ownerCached != "" && time.Since(ownerCachedAt) < time.Minute {
+			return ownerCached, nil
+		}
+		if backendAppName == "" {
+			return "", fmt.Errorf("BACKEND_APP_NAME not set")
+		}
+		owner, err := onchain.GetAppOwner(ctx, backendAppName)
+		if err != nil {
+			if ownerCached != "" {
+				return ownerCached, nil // serve stale over failing closed
+			}
+			return "", err
+		}
+		if owner == (common.Address{}) {
+			return "", fmt.Errorf("app %q not registered in TappRegistry", backendAppName)
+		}
+		ownerCached = strings.ToLower(owner.Hex())
+		ownerCachedAt = time.Now()
+		return ownerCached, nil
+	}
+	if owner, err := appOwnerFn(ctx); err != nil {
+		log.Warn("app owner not resolvable yet", zap.String("app_id", backendAppName), zap.Error(err))
+	} else {
+		log.Info("provider identity derived from TEE key",
+			zap.String("provider", providerHex),
+			zap.String("app_id", backendAppName),
+			zap.String("owner", owner))
+	}
+	// Drift check: the service this signer is registered under must be bound
+	// to the same appId we fetch our TEE key for. A mismatch means the key
+	// and the on-chain registration point at different apps.
+	if svcAppId, err := onchain.GetServiceAppId(ctx, providerAddr); err == nil && svcAppId != "" && backendAppName != "" && svcAppId != backendAppName {
+		log.Error("appId drift: on-chain service appId != BACKEND_APP_NAME",
+			zap.String("on_chain", svcAppId), zap.String("configured", backendAppName))
+	}
+
 	// ── Pricing: on-chain service registration is the source of truth ────────
 	// Read per-resource prices and createFee from the contract so users can
 	// verify the actual billing rate on the chain explorer.
 	// Fall back to env vars only when the service is not yet registered.
-	chainCPUPerSec, chainMemPerSec, createFee, err := onchain.GetServicePricing(ctx, common.HexToAddress(cfg.Chain.ProviderAddress))
+	chainCPUPerSec, chainMemPerSec, createFee, err := onchain.GetServicePricing(ctx, providerAddr)
 	if err != nil {
 		log.Warn("could not read on-chain service pricing; falling back to env vars", zap.Error(err))
 	}
@@ -145,7 +194,7 @@ func main() {
 		onchain.PrivateKey(),
 		onchain.ChainID(),
 		onchain.ContractAddress(),
-		common.HexToAddress(cfg.Chain.ProviderAddress),
+		providerAddr,
 		rdb,
 		onchain,
 		log,
@@ -157,7 +206,7 @@ func main() {
 	// ── Billing event handler ─────────────────────────────────────────────────
 	billingHandler := billing.NewEventHandler(
 		rdb,
-		cfg.Chain.ProviderAddress,
+		providerHex,
 		computePricePerSec,
 		createFee,
 		pricePerCPUPerSec,
@@ -178,7 +227,7 @@ func main() {
 	// without a webhook URL. With ALERT_WEBHOOK_URL set, also dispatches
 	// to the configured destination (Slack/PagerDuty/etc).
 	dedup := time.Duration(cfg.Alert.DedupWindowSec) * time.Second
-	alerter := alert.NewWebhook(cfg.Alert.WebhookURL, cfg.Chain.ProviderAddress, rdb, dedup, log)
+	alerter := alert.NewWebhook(cfg.Alert.WebhookURL, providerHex, rdb, dedup, log)
 	if cfg.Alert.WebhookURL != "" {
 		log.Info("alert webhook configured", zap.Duration("dedup", dedup))
 	} else {
@@ -196,9 +245,9 @@ func main() {
 	// particular is the only safety net against KMS rotation drift, since
 	// INVALID_SIGNATURE on-chain emits no event and accumulates silently.
 	go observability.RunBalanceMonitor(ctx, onchain, alerter, cfg.Alert.SettlerLowBalanceFactor, log)
-	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, cfg.Chain.ProviderAddress)
+	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, providerHex)
 	go observability.RunQueueDepthMonitor(ctx, rdb, queueKey, alerter, cfg.Alert.QueueBacklogThreshold, log)
-	go observability.RunSignerMismatchMonitor(ctx, onchain, common.HexToAddress(cfg.Chain.ProviderAddress), alerter, log)
+	go observability.RunSignerMismatchMonitor(ctx, onchain, providerAddr, alerter, log)
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	gin.SetMode(gin.ReleaseMode)
@@ -247,7 +296,7 @@ func main() {
 			CreateFee             string `json:"create_fee"`
 		}
 		// For now: just the configured provider.  Extend via KNOWN_PROVIDERS in the future.
-		addrs := []string{cfg.Chain.ProviderAddress}
+		addrs := []string{providerHex}
 		var providers []ProviderInfo
 		for _, addr := range addrs {
 			if addr == "" {
@@ -276,6 +325,16 @@ func main() {
 		c.JSON(http.StatusOK, providers)
 	})
 
+	// ownerForInfo returns the resolved app owner or "" — /api/info is
+	// best-effort display, not an auth surface.
+	ownerForInfo := func(ctx context.Context) string {
+		owner, err := appOwnerFn(ctx)
+		if err != nil {
+			return ""
+		}
+		return owner
+	}
+
 	rpcOrigin := cfg.Chain.RPCURL
 	if u, err := url.Parse(cfg.Chain.RPCURL); err == nil {
 		rpcOrigin = u.Scheme + "://" + u.Host
@@ -283,7 +342,6 @@ func main() {
 	r.GET("/api/info", func(c *gin.Context) {
 		ctx := c.Request.Context()
 		settlerAddr := onchain.SettlerAddress()
-		providerAddr := common.HexToAddress(cfg.Chain.ProviderAddress)
 
 		// Signer health — derived from sandbox.services[provider].appId and
 		// tap.getNode(appId, settler).addedAt. All on-chain readable; no admin
@@ -329,7 +387,9 @@ func main() {
 
 		c.JSON(http.StatusOK, gin.H{
 			"contract_address":      cfg.Chain.ContractAddress,
-			"provider_address":      cfg.Chain.ProviderAddress,
+			"provider_address":      providerHex,
+			"owner_address":         ownerForInfo(c.Request.Context()),
+			"app_id":                backendAppName,
 			"chain_id":              cfg.Chain.ChainID,
 			"rpc_url":               rpcOrigin,
 			"compute_price_per_sec": computePricePerSec.String(),
@@ -432,8 +492,9 @@ func main() {
 	// Anything mounted here should be derivable from public chain RPC.
 	apiPublic := r.Group("/api")
 	api := r.Group("/api", auth.Middleware(rdb))
-	proxyHandler := proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec, cfg.Chain.ProviderAddress, cfg.Chain.AdminList(), cfg.Server.SSHGatewayHost, rdb, log, cfg.Server.BrokerURL, onchain.PrivateKey(), cfg.Billing.VoucherIntervalSec)
+	proxyHandler := proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec, providerHex, cfg.Chain.AdminList(), cfg.Server.SSHGatewayHost, rdb, log, cfg.Server.BrokerURL, onchain.PrivateKey(), cfg.Billing.VoucherIntervalSec)
 	proxyHandler.SealedOnly = cfg.Server.SealedOnly
+	proxyHandler.AppOwner = appOwnerFn
 	proxyHandler.RegisterPublic(apiPublic)
 	proxyHandler.Register(api)
 	go runStopHandler(ctx, stopCh, dtona, rdb, log, proxyHandler.BrokerDeregister)
@@ -442,7 +503,7 @@ func main() {
 	// The import runs synchronously (crane.Copy) — may take minutes for large images.
 	api.POST("/registry/pull", func(c *gin.Context) {
 		wallet := c.GetString("wallet_address")
-		if !cfg.Chain.IsAdmin(wallet) {
+		if !proxyHandler.IsAdmin(wallet) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
 			return
 		}
@@ -477,7 +538,7 @@ func main() {
 	// Pass ?dry_run=true to preview without deleting.
 	api.POST("/registry/gc", func(c *gin.Context) {
 		wallet := c.GetString("wallet_address")
-		if !cfg.Chain.IsAdmin(wallet) {
+		if !proxyHandler.IsAdmin(wallet) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
 			return
 		}
@@ -540,7 +601,7 @@ func main() {
 	// already-aggregated singleton rows.
 	api.GET("/queue/summary", func(c *gin.Context) {
 		wallet := c.GetString("wallet_address")
-		if !cfg.Chain.IsAdmin(wallet) {
+		if !proxyHandler.IsAdmin(wallet) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
 			return
 		}
@@ -550,7 +611,7 @@ func main() {
 				minCount = 1
 			}
 		}
-		queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, cfg.Chain.ProviderAddress)
+		queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, providerHex)
 		rows, scanned, truncated, err := voucher.SummarizeQueue(c.Request.Context(), rdb, queueKey, minCount)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -570,11 +631,11 @@ func main() {
 	// requeues or discards them.
 	api.GET("/queue/dlq", func(c *gin.Context) {
 		wallet := c.GetString("wallet_address")
-		if !cfg.Chain.IsAdmin(wallet) {
+		if !proxyHandler.IsAdmin(wallet) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
 			return
 		}
-		entries, err := voucher.ListDLQ(c.Request.Context(), rdb, common.HexToAddress(cfg.Chain.ProviderAddress))
+		entries, err := voucher.ListDLQ(c.Request.Context(), rdb, providerAddr)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -591,7 +652,7 @@ func main() {
 	// rationale.
 	api.POST("/queue/dlq/discard", func(c *gin.Context) {
 		wallet := c.GetString("wallet_address")
-		if !cfg.Chain.IsAdmin(wallet) {
+		if !proxyHandler.IsAdmin(wallet) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
 			return
 		}
@@ -621,7 +682,7 @@ func main() {
 	// Uses WATCH-based atomic queue rewrite; safe against concurrent settler BLPOP.
 	api.POST("/queue/aggregate", func(c *gin.Context) {
 		wallet := c.GetString("wallet_address")
-		if !cfg.Chain.IsAdmin(wallet) {
+		if !proxyHandler.IsAdmin(wallet) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
 			return
 		}
@@ -637,7 +698,7 @@ func main() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "user and provider are required"})
 			return
 		}
-		queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, cfg.Chain.ProviderAddress)
+		queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, providerHex)
 		result, err := voucher.Aggregate(c.Request.Context(), rdb, queueKey,
 			common.HexToAddress(req.User),
 			common.HexToAddress(req.Provider),
@@ -674,13 +735,13 @@ func main() {
 	// on-chain data.
 	api.GET("/observability", func(c *gin.Context) {
 		wallet := c.GetString("wallet_address")
-		if !cfg.Chain.IsAdmin(wallet) {
+		if !proxyHandler.IsAdmin(wallet) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
 			return
 		}
 		ctx := c.Request.Context()
-		queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, cfg.Chain.ProviderAddress)
-		dlqKey := fmt.Sprintf(voucher.VoucherDLQKeyFmt, cfg.Chain.ProviderAddress)
+		queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, providerHex)
+		dlqKey := fmt.Sprintf(voucher.VoucherDLQKeyFmt, providerHex)
 		depth, _ := rdb.LLen(ctx, queueKey).Result()
 		dlqDepth, _ := rdb.LLen(ctx, dlqKey).Result()
 		queueStatus := "ok"

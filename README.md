@@ -148,7 +148,7 @@ go run ./cmd/billing/
 | `SETTLEMENT_CONTRACT` | (required) | BeaconProxy address |
 | `RPC_URL` | (required) | EVM RPC endpoint |
 | `CHAIN_ID` | (required) | Chain ID (e.g. 16602) |
-| `PROVIDER_ADDRESS` | (required) | Provider's Ethereum address |
+| `BACKEND_APP_NAME` | (required) | tapp app-id = TappRegistry appId; the app owner (standing admin) and provider identity (TEE signer) are both derived from it at runtime |
 | `REDIS_ADDR` | `redis:6379` | Redis address |
 | `COMPUTE_PRICE_PER_SEC` | `16667` | neuron/sec fallback (used only when per-resource on-chain pricing is not set) |
 | `CREATE_FEE` | `5000000` | neuron flat fee fallback (on-chain value takes priority after provider registration) |

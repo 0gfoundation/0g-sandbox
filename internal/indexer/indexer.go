@@ -42,11 +42,14 @@ type ProviderRecord struct {
 type chainClient interface {
 	GetServiceUpdatedEvents(ctx context.Context, fromBlock uint64) ([]chain.ProviderEvent, uint64, error)
 	GetServiceInfo(ctx context.Context, provider common.Address) (*chain.ServiceInfo, error)
-	// GetAppOwner returns the current TappRegistry owner of appId (zero address
-	// if unregistered). Used to drop stale providers: SandboxServing service
-	// entries are permanent, so a provider is only "live" while it is still the
-	// app owner in TappRegistry — the real source of truth for (de)registration.
-	GetAppOwner(ctx context.Context, appId string) (common.Address, error)
+	// IsActiveNode reports whether `signer` is an active TappRegistry node of
+	// appId. Used to drop stale providers: in the v2 identity model the
+	// provider address IS the node's TEE signer (not the app owner), so a
+	// provider is only "live" while its address is still in the appId's node
+	// list — the real source of truth for (de)registration. removeService in
+	// SandboxServing also clears entries, but node membership catches the
+	// rotation window before the owner has cleaned up.
+	IsActiveNode(ctx context.Context, appId string, signer common.Address) (bool, error)
 }
 
 // Indexer maintains a live in-memory index of all providers registered on-chain,
@@ -91,22 +94,24 @@ func (idx *Indexer) Run(ctx context.Context) {
 	}
 }
 
-// isLiveProvider reports whether provider `addr` is still the live owner of
-// `appId` in TappRegistry — the source of truth for (de)registration. Returns
+// isLiveProvider reports whether provider `addr` is still an active
+// TappRegistry node of `appId` — the source of truth for (de)registration.
+// v2 identity model: the provider address is the node's TEE signer, NOT the
+// app owner, so owner comparison would drop every live provider. Returns
 // true on RPC error (fail-open: a transient lookup failure must not drop a
 // provider; revalidate rechecks next cycle). False when no appId is bound or
-// the current app owner is a different address (stale/superseded provider).
+// the address is no longer in the appId's node list (rotated-out/stale).
 func (idx *Indexer) isLiveProvider(ctx context.Context, addrKey, appId string, provider common.Address) bool {
 	if appId == "" {
 		return false
 	}
-	owner, err := idx.chain.GetAppOwner(ctx, appId)
+	live, err := idx.chain.IsActiveNode(ctx, appId, provider)
 	if err != nil {
-		idx.log.Warn("indexer: GetAppOwner failed; keeping provider this round",
+		idx.log.Warn("indexer: IsActiveNode failed; keeping provider this round",
 			zap.String("provider", addrKey), zap.String("app_id", appId), zap.Error(err))
 		return true
 	}
-	return strings.EqualFold(owner.Hex(), provider.Hex())
+	return live
 }
 
 // removeProvider drops a provider from the in-memory store and the Redis cache.

@@ -14,8 +14,9 @@
 
 | 组件 | 地址 |
 |------|------|
-| **Proxy**（稳定地址）| `0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3` |
-| Beacon | `0xaa77C82Dc6b4243Ff272d88619BD4f23455CCB6E` |
+| **Proxy**（稳定地址）| `0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c` |
+| Beacon | `0xBF04734BC87E12aB81E21bb4018b9bFa4c118721` |
+| TappRegistry | `0x2Ce80374318B1d7Fb3345724457a182E0ad165c9` |
 
 **升级历史：**
 
@@ -23,33 +24,36 @@
 |------|------|---------|
 | 初始 | — | 首次部署：per-provider 余额隔离，owner 模型 |
 | 2026-03-10 | `0x9a3D6C66e3e6E020D8D40d851Db76D76EBfa93f2` | 移除 `settleFeesWithTEE` 中 `msg.sender == provider` 限制，TEE key 直接签结算 tx，无需 `PROVIDER_PRIVATE_KEY` |
+| 2026-07-19 | `0x47a8E809Cd81b94eD19874da73C0E3F82DD90E5C` | **v2 重新部署(新 proxy/beacon)**:provider 即 TEE signer;注册/注销/提现归 owner;结算要求收款人本人签名。绑定 TappRegistry `0x2Ce80374318B1d7Fb3345724457a182E0ad165c9`。旧 dev proxy `0x2024eB0C…E9b3` 退役(仅退款) |
 
 ```env
-SETTLEMENT_CONTRACT=0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3
+SETTLEMENT_CONTRACT=0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c
+TAPP_REGISTRY=0x2Ce80374318B1d7Fb3345724457a182E0ad165c9
 ```
 
 ---
 
 ## 测试网合约
 
-> 正式测试网部署，用于 provider 注册和真实计费测试。
+> 生产测试网部署,用于 provider 注册与真实计费测试。
 
 | 组件 | 地址 |
 |------|------|
-| **Proxy**（稳定地址）| `0xA07b0033cA65B06B090535944C121D8677FDC12c` |
-| Beacon | `0xfdc08C0CdF629589D05E03849846006c37E800D5` |
+| **Proxy**(稳定地址) | `0x3490B9053AC46F7Bf71A1ceBffcB2be2C1405b41` |
+| Beacon | `0x79D6D7B5468AA134360bf73cc667FC63f704B62d` |
+| TappRegistry | `0x2Ce80374318B1d7Fb3345724457a182E0ad165c9` |
 
-**升级历史：**
+**升级历史:**
 
 | 日期 | Impl | 说明 |
 |------|------|------|
-| 2026-06-08 | `0xf870247949B35dC8174212F338DcdE9fCa95d5Bb` | 全新 proxy 重新部署（取代 `0xd7e0CD22…`);per-resource 定价 + TappRegistry trust root |
-| 2026-06-08 | `0xe95DA05Bf17CAF09Cb129A706760bA52B55f14eE` | 新增 `deregisterService` —— 软清除 service,使（写一次的）`appId` 可更换 |
+| 2026-07-20 | `0x7a1A5FC5B1A6AC1127e2D8b63400615B2ea49C47` | **v2 重新部署(新 proxy/beacon)**:provider 即 TEE signer;注册/注销/提现归 owner;结算要求收款人本人签名。已在 chainscan verify。取代 v1 测试网 proxy `0xA07b0033…FC12c`(绑 TappRegistry `0x2Ce8…`)与 `0x3d4d8a05…cf6f`——均退役(仅退款) |
 
-**Provider 质押：** 100 0G（`100000000000000000000` neuron），按节点存在 TappRegistry 里(不在 SandboxServing)。
+**Provider 质押:** 按节点存于 TappRegistry(不在 SandboxServing);见 registry 的 `minStakeAmount()`(当前 1 0G)。
 
 ```env
-SETTLEMENT_CONTRACT=0xA07b0033cA65B06B090535944C121D8677FDC12c
+SETTLEMENT_CONTRACT=0x3490B9053AC46F7Bf71A1ceBffcB2be2C1405b41
+TAPP_REGISTRY=0x2Ce80374318B1d7Fb3345724457a182E0ad165c9
 ```
 
 ---
@@ -105,17 +109,17 @@ cast call <beacon> "owner()(address)"
 
 | 函数 | 说明 |
 |---|---|
-| `addOrUpdateService(url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)` | 注册/更新;`appId` 写一次;调用者须是该 appId 的 TappRegistry owner |
-| `deregisterService()` | 软清除自己的 service,使 `appId` 可更换;余额/earnings/nonce 保留 |
-| `withdrawEarnings()` | 提取累计结算收益 |
-| `services(provider)` / `serviceExists(provider)` | view — 业务条款 |
+| `addOrUpdateService(signer, url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)` | app owner 为节点注册/更新服务;`signer`(= provider 地址)必须是该 appId 的在册 TappRegistry 节点;`appId` 每个 signer 写一次 |
+| `removeService(signer)` | app owner 注销节点服务(如机器重建后);同一笔 tx 把未提 earnings 清给 owner;用户余额仍可退款,nonce 水位保留 |
+| `withdrawEarnings(signer)` | app owner 把节点累计收益提到 owner 钱包 |
+| `services(provider)` / `serviceExists(provider)` | view — 业务条款(provider = 节点的 TEE signer 地址) |
 | `getProviderEarnings(provider)` → uint256 | view |
 
 **结算**
 
 | 函数 | 说明 |
 |---|---|
-| `settleFeesWithTEE(vouchers[])` → statuses[] | 无需权限;provider 由 `v.provider` 标识;按 appId 的活跃 TEE 节点验 EIP-712 签名 |
+| `settleFeesWithTEE(vouchers[])` → statuses[] | 无需权限;voucher 必须由收款人本人签名(`recovered == v.provider`)且该地址是 appId 在册节点——节点无法替别的节点结算 |
 | `previewSettlementResults(vouchers[])` → statuses[] | view — 试算结算状态 |
 
 **管理 / 初始化**
@@ -127,7 +131,7 @@ cast call <beacon> "owner()(address)"
 | `setTappRegistry(newRegistry)` | TappRegistry 重新部署后用来切换指向;ack 状态从新 registry 读 |
 | `tappRegistry()` / `domainSeparator()` / `LOCK_TIME()` | view |
 
-**事件:** `Deposited`、`RefundRequested`、`RefundWithdrawn`、`VoucherSettled`、`EarningsWithdrawn`、`ServiceUpdated`、`ServiceDeregistered`、`OwnershipTransferred`、`TappRegistryUpdated`。
+**事件:** `Deposited`、`RefundRequested`、`RefundWithdrawn`、`VoucherSettled`、`EarningsWithdrawn(provider, to, amount)`、`ServiceUpdated`、`ServiceRemoved(provider, appOwner)`、`OwnershipTransferred`、`TappRegistryUpdated`。
 
 ---
 
@@ -240,4 +244,6 @@ PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ register \
 - **Proxy 地址永不变** — 升级只替换 implementation，proxy 地址是对外稳定地址
 - **结算开放** — `settleFeesWithTEE` 任何人可调用，provider 由 voucher 内的 `v.provider` 字段标识，与 `msg.sender` 无关
 - **Trust root 委托** — SandboxServing 只持有商业条款；TEE 签名身份与用户 acknowledgement 都在 TappRegistry 中，每次 voucher 验签都会查询
-- **`appId` 写一次** — 一旦 `addOrUpdateService` 绑定了非空 `appId`，之后只能就地修改 URL / 价格 / createFee，无法替换 trust root。要绑定**不同的** `appId`,需先调 **`deregisterService`**:软清除调用者自己的 service 条目(url/appId/价格/createFee),但保留用户余额、待退款、已结算 nonce 和累计 `providerEarnings`(仍可提取),然后重新 register。触发 `ServiceDeregistered(provider)` 事件。
+- **provider 就是 TEE signer(v2)** — 合约里所有 provider 地址(services 键、voucher 收款人、余额桶、earnings 账)都是 TappRegistry 某个节点的 TEE signer 地址。signer 私钥不出 enclave、随机器消亡,所以注册/注销/提现全部归 appId 的 TappRegistry owner。一个 appId 多个节点:每个 signer 账本完全隔离——余额**刻意不共享**(各自独立部署的 billing proxy 用各自 Redis 做预留准入,互相看不见在途预留,共享余额会超卖)。
+- **轮换** — 机器重建产生新 signer。流程:TappRegistry 先 add 新节点(新旧并存)→ 排空旧 signer 的 voucher 队列 → `cmd/provider rotate` 迁移服务条目 → 摘旧节点。用户余额走退款通道离开死 signer;`removeService` 把它的 earnings 清给 owner。
+- **`appId` 每个 signer 写一次** — 绑定后只能就地改 URL/价格。要换 `appId` 先 `removeService`(用户余额、待退款、已结算 nonce 保留——nonce 不动,重注册后旧 voucher 无法重放)。
