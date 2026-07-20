@@ -146,7 +146,7 @@ The command scans the chain and prints available providers with their URL, prici
 
 ```
 [1] 0xf982279B872B9a99d64C547a0faC2Dfdfc2AEE5D
-    URL:        https://provider-private-sandbox-testnet.0g.ai
+    URL:        https://provider-private-sandbox.0g.ai
     Create fee: 0.0600 0G
     CPU price:  0.001000 0G/CPU/min
     Mem price:  0.000500 0G/GB/min
@@ -282,7 +282,7 @@ If the provider has `PROXY_DOMAIN` configured, user-defined service ports are re
 The protocol matches the provider's setup (the hosted testnet uses **https**).
 For example, if a process listens on port 8000 inside the sandbox:
 ```
-https://8000-<sandboxId>.provider-private-sandbox-testnet.0g.ai/
+https://8000-<sandboxId>.provider-private-sandbox.0g.ai/
 ```
 Prefer the `preview_urls` field from the create response — it is already the
 correct protocol + domain. Requires the provider to have wildcard DNS + TLS for
