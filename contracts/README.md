@@ -37,20 +37,21 @@ SETTLEMENT_CONTRACT=0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c
 
 | Component | Address |
 |-----------|---------|
-| **Proxy** (stable) | `0xA07b0033cA65B06B090535944C121D8677FDC12c` |
-| Beacon | `0xfdc08C0CdF629589D05E03849846006c37E800D5` |
+| **Proxy** (stable) | `0x3490B9053AC46F7Bf71A1ceBffcB2be2C1405b41` |
+| Beacon | `0x79D6D7B5468AA134360bf73cc667FC63f704B62d` |
+| TappRegistry | `0x95a0BF4148b30F6F8D86870534c51df46Da5511c` |
 
 **Upgrade history:**
 
 | Date | Impl | Notes |
 |------|------|-------|
-| 2026-06-08 | `0xf870247949B35dC8174212F338DcdE9fCa95d5Bb` | Redeploy on a fresh proxy (supersedes `0xd7e0CD22…`); per-resource pricing + TappRegistry trust root |
-| 2026-06-08 | `0xe95DA05Bf17CAF09Cb129A706760bA52B55f14eE` | Add `deregisterService` — soft-clear a service entry so its (set-once) `appId` can be changed |
+| 2026-07-20 | `0x7a1A5FC5B1A6AC1127e2D8b63400615B2ea49C47` | **v2 redeploy (new proxy/beacon)**: provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement. Verified on chainscan. Supersedes the v1 testnet proxies `0xA07b0033…FC12c` (bound to TappRegistry `0x2Ce8…`) and `0x3d4d8a05…cf6f` — both retired (refund-only) |
 
-**Provider stake:** 100 0G (`100000000000000000000` neuron), held in TappRegistry per node (not in SandboxServing).
+**Provider stake:** held in TappRegistry per node (not in SandboxServing); see `minStakeAmount()` on the registry (1 0G at the time of writing).
 
 ```env
-SETTLEMENT_CONTRACT=0xA07b0033cA65B06B090535944C121D8677FDC12c
+SETTLEMENT_CONTRACT=0x3490B9053AC46F7Bf71A1ceBffcB2be2C1405b41
+TAPP_REGISTRY=0x95a0BF4148b30F6F8D86870534c51df46Da5511c
 ```
 
 ---

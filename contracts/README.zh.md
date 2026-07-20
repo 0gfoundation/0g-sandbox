@@ -33,24 +33,25 @@ SETTLEMENT_CONTRACT=0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c
 
 ## 测试网合约
 
-> 正式测试网部署，用于 provider 注册和真实计费测试。
+> 生产测试网部署,用于 provider 注册与真实计费测试。
 
 | 组件 | 地址 |
 |------|------|
-| **Proxy**（稳定地址）| `0xA07b0033cA65B06B090535944C121D8677FDC12c` |
-| Beacon | `0xfdc08C0CdF629589D05E03849846006c37E800D5` |
+| **Proxy**(稳定地址) | `0x3490B9053AC46F7Bf71A1ceBffcB2be2C1405b41` |
+| Beacon | `0x79D6D7B5468AA134360bf73cc667FC63f704B62d` |
+| TappRegistry | `0x95a0BF4148b30F6F8D86870534c51df46Da5511c` |
 
-**升级历史：**
+**升级历史:**
 
 | 日期 | Impl | 说明 |
 |------|------|------|
-| 2026-06-08 | `0xf870247949B35dC8174212F338DcdE9fCa95d5Bb` | 全新 proxy 重新部署（取代 `0xd7e0CD22…`);per-resource 定价 + TappRegistry trust root |
-| 2026-06-08 | `0xe95DA05Bf17CAF09Cb129A706760bA52B55f14eE` | 新增 `deregisterService` —— 软清除 service,使（写一次的）`appId` 可更换 |
+| 2026-07-20 | `0x7a1A5FC5B1A6AC1127e2D8b63400615B2ea49C47` | **v2 重新部署(新 proxy/beacon)**:provider 即 TEE signer;注册/注销/提现归 owner;结算要求收款人本人签名。已在 chainscan verify。取代 v1 测试网 proxy `0xA07b0033…FC12c`(绑 TappRegistry `0x2Ce8…`)与 `0x3d4d8a05…cf6f`——均退役(仅退款) |
 
-**Provider 质押：** 100 0G（`100000000000000000000` neuron），按节点存在 TappRegistry 里(不在 SandboxServing)。
+**Provider 质押:** 按节点存于 TappRegistry(不在 SandboxServing);见 registry 的 `minStakeAmount()`(当前 1 0G)。
 
 ```env
-SETTLEMENT_CONTRACT=0xA07b0033cA65B06B090535944C121D8677FDC12c
+SETTLEMENT_CONTRACT=0x3490B9053AC46F7Bf71A1ceBffcB2be2C1405b41
+TAPP_REGISTRY=0x95a0BF4148b30F6F8D86870534c51df46Da5511c
 ```
 
 ---
