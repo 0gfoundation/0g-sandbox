@@ -226,15 +226,15 @@ cannot be combined with `--snapshot`; the API rejects it):
 
 | Snapshot | Specs | For |
 |----------|-------|-----|
-| **ubuntu** | 1 CPU / 1 GB | General vibe coding, running code, light services |
-| **openclaw** | 2 CPU / 4 GB | AI coding assistant (OpenClaw gateway) in a secure sandbox |
+| **0g-ubuntu22** | 1 CPU / 1 GB | General vibe coding, running code, light services |
+| **0g-openclaw** | 2 CPU / 4 GB | AI coding assistant (OpenClaw gateway) in a secure sandbox |
 
 Based on goal, recommend:
 
 | User goal | Recommendation |
 |-----------|----------------|
-| General vibe coding / running code | **ubuntu** snapshot (1C/1G) |
-| AI coding assistant in secure sandbox | **openclaw** snapshot (2C/4G) |
+| General vibe coding / running code | **0g-ubuntu22** snapshot (1C/1G) |
+| AI coding assistant in secure sandbox | **0g-openclaw** snapshot (2C/4G) |
 | Specific environment (Rust, Python…) | Match from snapshot list |
 | Needs custom CPU/memory | Create WITHOUT `--snapshot` and pass `--cpu/--memory/--disk` (subject to the provider's per-sandbox limits) |
 
