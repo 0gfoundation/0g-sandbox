@@ -220,7 +220,8 @@ tbody tr:hover td{background:var(--surf2)}
         </div>
         <div class="card-body">
           <div class="info-row"><span class="ik">Status</span><span id="svcRegistered">—</span></div>
-          <div class="info-row"><span class="ik">Provider Addr</span><span class="iv mono" id="infoProvider" title="" style="font-size:11px">—</span></div>
+          <div class="info-row"><span class="ik">Provider (TEE signer)</span><span class="iv mono" id="infoProvider" title="" style="font-size:11px">—</span></div>
+          <div class="info-row"><span class="ik">App Owner (admin)</span><span class="iv mono" id="infoAppOwner" title="" style="font-size:11px">—</span></div>
           <div class="info-row"><span class="ik">Service URL</span><span class="iv" id="svcUrl">—</span></div>
           <div class="info-row"><span class="ik">AppId (on-chain)</span><span class="iv purple" id="svcTEE" title="">—</span></div>
 
@@ -253,7 +254,7 @@ tbody tr:hover td{background:var(--surf2)}
         <div class="card-body">
           <div class="info-row"><span class="ik">Address</span><span class="iv mono" id="infoContract" title="" style="font-size:11px">—</span></div>
           <div class="info-row"><span class="ik">Chain ID</span><span class="iv" id="infoChain">—</span></div>
-          <div class="info-row"><span class="ik">Owner</span><span class="iv purple" id="contractOwner" title="" style="font-size:11px">—</span></div>
+          <div class="info-row"><span class="ik">Contract Admin</span><span class="iv purple" id="contractOwner" title="" style="font-size:11px">—</span></div>
         </div>
       </div>
 
@@ -461,6 +462,7 @@ window.onload = async () => {
     const cEl = document.getElementById('infoContract'); cEl.textContent = shortAddr(info.contract_address||'') || '—'; cEl.title = info.contract_address || '';
     document.getElementById('infoChain').textContent = info.chain_id || '—';
     const pEl = document.getElementById('infoProvider'); pEl.textContent = shortAddr(info.provider_address||'') || '—'; pEl.title = info.provider_address || '';
+    const oEl = document.getElementById('infoAppOwner'); oEl.textContent = shortAddr(info.owner_address||'') || '—'; oEl.title = (info.owner_address || '') + ' — the appId\'s TappRegistry owner: log in with this wallet (or an ADMIN_ADDRESSES wallet) to operate this dashboard';
     // Pre-fill AppId from /api/info.signer.app_id (set after first registration).
     if (info.signer && info.signer.app_id) {
       document.getElementById('svcAppIdInput').value = info.signer.app_id;
