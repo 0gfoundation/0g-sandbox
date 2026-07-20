@@ -579,7 +579,7 @@ var defaultTiers = []snapshotTier{
 func runSnapshot(args []string) {
 	fs := flag.NewFlagSet("snapshot", flag.ExitOnError)
 	apiURL := fs.String("api",    "http://localhost:8080", "0G Sandbox service URL")
-	keyHex := fs.String("key",    "",                     "Provider private key (hex); or set PROVIDER_KEY env")
+	keyHex := fs.String("key",    "",                     "Admin wallet key — the app owner or an ADMIN_ADDRESSES wallet (hex); or set OWNER_KEY env")
 	image  := fs.String("image",  "",                     "Docker image name (required)")
 	name   := fs.String("name",   "",                     "Snapshot name (defaults to image name)")
 	tiers  := fs.Bool("tiers",    false,                  "Create small/medium/large variants automatically")
@@ -591,7 +591,7 @@ func runSnapshot(args []string) {
 	if *image == "" {
 		fatalf("--image is required")
 	}
-	privKey := resolveKey(*keyHex, "PROVIDER_KEY")
+	privKey := resolveOwnerKey(*keyHex)
 
 	baseName := *image
 	if *name != "" {
@@ -670,10 +670,10 @@ func createSnapshot(privKey *ecdsa.PrivateKey, apiURL, imageName, name string, c
 func runListSnapshots(args []string) {
 	fs := flag.NewFlagSet("snapshots", flag.ExitOnError)
 	apiURL := fs.String("api", "http://localhost:8080", "0G Sandbox service URL")
-	keyHex := fs.String("key", "",                     "Provider private key (hex); or set PROVIDER_KEY env")
+	keyHex := fs.String("key", "",                     "Admin wallet key — the app owner or an ADMIN_ADDRESSES wallet (hex); or set OWNER_KEY env")
 	_ = fs.Parse(args)
 
-	privKey := resolveKey(*keyHex, "PROVIDER_KEY")
+	privKey := resolveOwnerKey(*keyHex)
 	msg, sig, walletAddr := signRequest(privKey, "list", "", json.RawMessage(`{}`))
 
 	req, err := http.NewRequest(http.MethodGet, *apiURL+"/api/snapshots", nil)
@@ -716,14 +716,14 @@ func runListSnapshots(args []string) {
 func runDeleteSnapshot(args []string) {
 	fs := flag.NewFlagSet("delete-snapshot", flag.ExitOnError)
 	apiURL := fs.String("api", "http://localhost:8080", "0G Sandbox service URL")
-	keyHex := fs.String("key", "", "Provider private key (hex); or set PROVIDER_KEY env")
+	keyHex := fs.String("key", "", "Admin wallet key — the app owner or an ADMIN_ADDRESSES wallet (hex); or set OWNER_KEY env")
 	id     := fs.String("id", "", "Snapshot ID (required)")
 	_ = fs.Parse(args)
 
 	if *id == "" {
 		fatalf("--id is required")
 	}
-	privKey := resolveKey(*keyHex, "PROVIDER_KEY")
+	privKey := resolveOwnerKey(*keyHex)
 	msg, sig, walletAddr := signRequest(privKey, "delete-snapshot", *id, json.RawMessage(`{}`))
 
 	req, err := http.NewRequest(http.MethodDelete, *apiURL+"/api/snapshots/"+*id, nil)
@@ -751,11 +751,11 @@ func runDeleteSnapshot(args []string) {
 func runGCImages(args []string) {
 	fs := flag.NewFlagSet("gc-images", flag.ExitOnError)
 	apiURL := fs.String("api", "http://localhost:8080", "0G Sandbox service URL")
-	keyHex := fs.String("key", "", "Provider private key (hex); or set PROVIDER_KEY env")
+	keyHex := fs.String("key", "", "Admin wallet key — the app owner or an ADMIN_ADDRESSES wallet (hex); or set OWNER_KEY env")
 	dryRun := fs.Bool("dry-run", false, "Preview deletions without actually removing tags")
 	_ = fs.Parse(args)
 
-	privKey := resolveKey(*keyHex, "PROVIDER_KEY")
+	privKey := resolveOwnerKey(*keyHex)
 	msg, sig, walletAddr := signRequest(privKey, "gc-images", "", json.RawMessage(`{}`))
 
 	url := *apiURL + "/api/registry/gc"
@@ -861,20 +861,6 @@ func resolveEnv(flagVal, envVar, label string) string {
 	return ""
 }
 
-func resolveKey(flagVal, envVar string) *ecdsa.PrivateKey {
-	hex := flagVal
-	if hex == "" {
-		hex = os.Getenv(envVar)
-	}
-	if hex == "" {
-		fatalf("private key required: use --key or %s env", envVar)
-	}
-	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(hex, "0x"))
-	if err != nil {
-		fatalf("parse private key: %v", err)
-	}
-	return privKey
-}
 
 func parseBigInt(s, name string) *big.Int {
 	v, ok := new(big.Int).SetString(s, 10)
