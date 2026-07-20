@@ -132,6 +132,11 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, ackCheck: ackCheck, eventFetcher: eventFetcher, createFee: createFee, pricePerCPUPerSec: pricePerCPUPerSec, pricePerMemGBPerSec: pricePerMemGBPerSec, voucherIntervalSec: voucherIntervalSec, computePricePerSec: computePricePerSec, providerAddress: providerAddress, adminAddresses: admins, sshGatewayHost: sshGatewayHost, rdb: rdb, teeKey: teeKey, broker: broker, log: log}
 }
 
+// IsAdmin is the exported admin check for routes registered outside this
+// handler (cmd/billing's registry/queue/session endpoints) — one source of
+// truth for "who is an operator".
+func (h *Handler) IsAdmin(wallet string) bool { return h.isAdmin(wallet) }
+
 // isAdmin reports whether wallet may call operator-only endpoints: either in
 // the configured ADMIN_ADDRESSES list, or the appId's current TappRegistry
 // owner (resolved live via AppOwner, case-insensitive).

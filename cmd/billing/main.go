@@ -503,7 +503,7 @@ func main() {
 	// The import runs synchronously (crane.Copy) — may take minutes for large images.
 	api.POST("/registry/pull", func(c *gin.Context) {
 		wallet := c.GetString("wallet_address")
-		if !cfg.Chain.IsAdmin(wallet) {
+		if !proxyHandler.IsAdmin(wallet) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
 			return
 		}
@@ -538,7 +538,7 @@ func main() {
 	// Pass ?dry_run=true to preview without deleting.
 	api.POST("/registry/gc", func(c *gin.Context) {
 		wallet := c.GetString("wallet_address")
-		if !cfg.Chain.IsAdmin(wallet) {
+		if !proxyHandler.IsAdmin(wallet) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
 			return
 		}
@@ -601,7 +601,7 @@ func main() {
 	// already-aggregated singleton rows.
 	api.GET("/queue/summary", func(c *gin.Context) {
 		wallet := c.GetString("wallet_address")
-		if !cfg.Chain.IsAdmin(wallet) {
+		if !proxyHandler.IsAdmin(wallet) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
 			return
 		}
@@ -631,7 +631,7 @@ func main() {
 	// requeues or discards them.
 	api.GET("/queue/dlq", func(c *gin.Context) {
 		wallet := c.GetString("wallet_address")
-		if !cfg.Chain.IsAdmin(wallet) {
+		if !proxyHandler.IsAdmin(wallet) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
 			return
 		}
@@ -652,7 +652,7 @@ func main() {
 	// rationale.
 	api.POST("/queue/dlq/discard", func(c *gin.Context) {
 		wallet := c.GetString("wallet_address")
-		if !cfg.Chain.IsAdmin(wallet) {
+		if !proxyHandler.IsAdmin(wallet) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
 			return
 		}
@@ -682,7 +682,7 @@ func main() {
 	// Uses WATCH-based atomic queue rewrite; safe against concurrent settler BLPOP.
 	api.POST("/queue/aggregate", func(c *gin.Context) {
 		wallet := c.GetString("wallet_address")
-		if !cfg.Chain.IsAdmin(wallet) {
+		if !proxyHandler.IsAdmin(wallet) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
 			return
 		}
@@ -735,7 +735,7 @@ func main() {
 	// on-chain data.
 	api.GET("/observability", func(c *gin.Context) {
 		wallet := c.GetString("wallet_address")
-		if !cfg.Chain.IsAdmin(wallet) {
+		if !proxyHandler.IsAdmin(wallet) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
 			return
 		}

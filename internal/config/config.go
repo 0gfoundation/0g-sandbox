@@ -76,19 +76,6 @@ func (c *ChainConfig) AdminList() []string {
 	return out
 }
 
-// IsAdmin reports whether wallet is in the admin list (case-insensitive).
-func (c *ChainConfig) IsAdmin(wallet string) bool {
-	if wallet == "" {
-		return false
-	}
-	target := strings.ToLower(wallet)
-	for _, a := range c.AdminList() {
-		if a == target {
-			return true
-		}
-	}
-	return false
-}
 
 type ServerConfig struct {
 	Port           int    `mapstructure:"port"`
