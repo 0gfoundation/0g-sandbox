@@ -209,6 +209,8 @@ const resp = await fetch("http://<proxy>/api/sandbox", {
 {
   "contract_address":     "0x...",
   "provider_address":     "0x...",
+  "owner_address":        "0x...",
+  "app_id":               "0g-sandbox-provider",
   "chain_id":             16602,
   "rpc_url":              "https://evmrpc-testnet.0g.ai",
   "create_fee":           "60000000000000000",
@@ -227,9 +229,9 @@ const resp = await fetch("http://<proxy>/api/sandbox", {
 > `"sealed": true` 的 create 请求都会被 HTTP 400 拒绝。
 
 #### `GET /api/providers`
-本 billing 实例所服务的那个 provider(`PROVIDER_ADDRESS`)的链上 service 数据。返回一个
+本 billing 实例所服务的那个 provider((节点 TEE signer 地址,运行时派生))的链上 service 数据。返回一个
 数组——目前只有一条——实时读自 `SandboxServing.services`。若该 provider 没有有效的
-service 注册(例如调用 `deregisterService` 之后),返回 `[]`。
+service 注册(例如调用 `removeService` 之后),返回 `[]`。
 ```json
 [
   {

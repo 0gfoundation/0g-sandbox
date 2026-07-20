@@ -50,53 +50,32 @@ type ChainConfig struct {
 	ContractAddress string `mapstructure:"contract_address"`
 	TappRegistry    string `mapstructure:"tapp_registry"`
 	TEEPrivateKey   string `mapstructure:"tee_private_key"`
-	ProviderAddress string `mapstructure:"provider_address"`
-	// AdminAddresses is the comma-separated list of wallet addresses that may
-	// invoke operator-only endpoints (snapshot/registry management,
-	// archive-all, force-delete, sessions). When empty, falls back to
-	// [ProviderAddress] for backward compatibility with single-key
-	// deployments. Distinct from ProviderAddress (the on-chain settlement
-	// identity) so multiple operators can manage infrastructure without
-	// holding the provider's settlement key.
+	// AdminAddresses is an ADDITIVE comma-separated list of extra wallet
+	// addresses that may invoke operator-only endpoints (snapshot/registry
+	// management, archive-all, force-delete, sessions). The appId's
+	// TappRegistry owner is ALWAYS an admin on top of this list — it is
+	// resolved from the chain at runtime (getAppInfo(BACKEND_APP_NAME).owner),
+	// never configured, so it can't drift from the on-chain truth.
 	AdminAddresses string `mapstructure:"admin_addresses"`
 	ChainID        int64  `mapstructure:"chain_id"`
 }
 
-// AdminList returns the parsed admin wallet addresses (lowercased hex).
-// When ADMIN_ADDRESSES is unset, defaults to [ProviderAddress] so existing
-// single-key deployments keep working.
+// AdminList returns the parsed extra admin wallet addresses (lowercased hex).
+// The appId owner is NOT in this list — it is resolved from the chain at
+// runtime and is always an admin on top of these.
 func (c *ChainConfig) AdminList() []string {
-	raw := strings.TrimSpace(c.AdminAddresses)
-	if raw == "" {
-		if c.ProviderAddress == "" {
-			return nil
-		}
-		return []string{strings.ToLower(c.ProviderAddress)}
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, strings.ToLower(p))
+	var out []string
+	seen := map[string]bool{}
+	for _, p := range strings.Split(c.AdminAddresses, ",") {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p != "" && !seen[p] {
+			seen[p] = true
+			out = append(out, p)
 		}
 	}
 	return out
 }
 
-// IsAdmin reports whether wallet is in the admin list (case-insensitive).
-func (c *ChainConfig) IsAdmin(wallet string) bool {
-	if wallet == "" {
-		return false
-	}
-	target := strings.ToLower(wallet)
-	for _, a := range c.AdminList() {
-		if a == target {
-			return true
-		}
-	}
-	return false
-}
 
 type ServerConfig struct {
 	Port           int    `mapstructure:"port"`
@@ -159,7 +138,6 @@ func Load() (*Config, error) {
 		"chain.rpc_url":                "RPC_URL",
 		"chain.contract_address":       "SETTLEMENT_CONTRACT",
 		"chain.tapp_registry":          "TAPP_REGISTRY",
-		"chain.provider_address":       "PROVIDER_ADDRESS",
 		"chain.admin_addresses":        "ADMIN_ADDRESSES",
 		"chain.chain_id":               "CHAIN_ID",
 		"server.port":                  "PORT",
@@ -262,7 +240,6 @@ func (c *Config) validate() error {
 		{c.Daytona.AdminKey, "DAYTONA_ADMIN_KEY"},
 		{c.Chain.RPCURL, "RPC_URL"},
 		{c.Chain.ContractAddress, "SETTLEMENT_CONTRACT"},
-		{c.Chain.ProviderAddress, "PROVIDER_ADDRESS"},
 	} {
 		if r.val == "" {
 			return fmt.Errorf("required config missing: %s", r.name)

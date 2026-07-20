@@ -14,7 +14,7 @@ import (
 
 func main() {
 	rpc := getEnv("RPC_URL", "https://evmrpc-testnet.0g.ai")
-	contractAddr := getEnv("SETTLEMENT_CONTRACT", "0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3")
+	contractAddr := getEnv("SETTLEMENT_CONTRACT", "0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c")
 	user := common.HexToAddress(getEnv("USER_ADDR", "0x2ff0F380d85543e0Ab6D32eba80DA7F3dB332dcB"))
 	provider := common.HexToAddress(getEnv("PROVIDER_ADDR", "0xB831371eb2703305f1d9F8542163633D0675CEd7"))
 

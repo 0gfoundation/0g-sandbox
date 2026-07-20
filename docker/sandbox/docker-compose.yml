@@ -21,10 +21,10 @@ services:
       TAPP_REGISTRY:           ${TAPP_REGISTRY:?TAPP_REGISTRY is required}
       CHAIN_ID:                ${CHAIN_ID:-16602}
       RPC_URL:                 ${RPC_URL:-https://evmrpc-testnet.0g.ai}
-      PROVIDER_ADDRESS:        ${PROVIDER_ADDRESS:?PROVIDER_ADDRESS is required}
-      # Comma-separated list of operator wallets allowed to call admin-only
-      # endpoints (snapshot/registry management, archive-all, force-delete,
-      # sessions). Empty defaults to [PROVIDER_ADDRESS] for single-key setups.
+      # ADDITIVE comma-separated list of extra operator wallets allowed to
+      # call admin-only endpoints. The appId owner (resolved on-chain from
+      # BACKEND_APP_NAME) is always an admin on top of this list; the
+      # provider/settlement identity is derived from the TEE key at runtime.
       ADMIN_ADDRESSES:         ${ADMIN_ADDRESSES:-}
       # Proxy domain — copied into sealed sandbox containers as
       # SANDBOX_PROXY_DOMAIN so bootstrap can compose its public URL.

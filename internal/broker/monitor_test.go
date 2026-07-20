@@ -21,6 +21,7 @@ type mockBalanceChecker struct {
 	mu       sync.Mutex
 	calls    []balanceBatchCall // recorded calls
 	balances map[string][]*big.Int // provider hex → balances (ordered by users slice)
+	unregistered map[string]bool   // provider hex → service removed on-chain
 	err      error
 }
 
@@ -37,6 +38,17 @@ func (m *mockBalanceChecker) GetBalanceBatch(_ context.Context, users []common.A
 		return nil, m.err
 	}
 	return m.balances[provider.Hex()], nil
+}
+
+// GetServicePricing: registered by default (non-nil price) so existing tests
+// exercise the top-up path; set unregistered to simulate a rotated-out signer.
+func (m *mockBalanceChecker) GetServicePricing(_ context.Context, provider common.Address) (*big.Int, *big.Int, *big.Int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.unregistered[provider.Hex()] {
+		return nil, nil, nil, nil
+	}
+	return big.NewInt(1), big.NewInt(1), big.NewInt(1), nil
 }
 
 func (m *mockBalanceChecker) callCount() int {
@@ -167,6 +179,33 @@ func TestCheck_belowThreshold_triggersTopup(t *testing.T) {
 	}
 	if mp.calls[0].provider != provider1 {
 		t.Errorf("provider = %s, want %s", mp.calls[0].provider.Hex(), provider1.Hex())
+	}
+}
+
+// v2: provider = TEE signer. After rotation the owner removes the old
+// signer's service; the monitor must stop topping up that bucket (deposits
+// there can never settle and would strand user funds behind the refund flow).
+func TestCheck_removedService_noTopup(t *testing.T) {
+	rdb := newTestRedis(t)
+	seedSession(t, rdb, SessionEntry{
+		SandboxID: "sb-1", User: userA.Hex(), Provider: provider1.Hex(),
+		PricePerSec: "100", VoucherIntervalSec: 60,
+	})
+	mc := &mockBalanceChecker{
+		unregistered: map[string]bool{provider1.Hex(): true},
+		balances: map[string][]*big.Int{
+			provider1.Hex(): {big.NewInt(0)}, // way below threshold
+		},
+	}
+	mp := &mockPaymentLayer{}
+	mon := newMonitor(rdb, mc, mp)
+	mon.check(context.Background())
+
+	if mp.depositCount() != 0 {
+		t.Fatalf("RequestDeposit called %d times for a removed service, want 0", mp.depositCount())
+	}
+	if mc.callCount() != 0 {
+		t.Errorf("GetBalanceBatch called %d times for a removed service, want 0", mc.callCount())
 	}
 }
 

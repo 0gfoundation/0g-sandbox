@@ -211,6 +211,8 @@ Server configuration and pricing.
 {
   "contract_address":     "0x...",
   "provider_address":     "0x...",
+  "owner_address":        "0x...",
+  "app_id":               "0g-sandbox-provider",
   "chain_id":             16602,
   "rpc_url":              "https://evmrpc-testnet.0g.ai",
   "create_fee":           "60000000000000000",
@@ -229,10 +231,10 @@ Server configuration and pricing.
 > request that doesn't set `"sealed": true` is rejected with HTTP 400.
 
 #### `GET /api/providers`
-On-chain service data for the provider this billing instance serves
-(`PROVIDER_ADDRESS`). Returns an array — currently a single entry — read live
-from `SandboxServing.services`. Returns `[]` if that provider has no active
-service registration (e.g. after `deregisterService`).
+On-chain service data for the provider this billing instance serves (the
+node's TEE signer address, derived at runtime). Returns an array — currently a
+single entry — read live from `SandboxServing.services`. Returns `[]` if that
+provider has no active service registration (e.g. after `removeService`).
 ```json
 [
   {

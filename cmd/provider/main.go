@@ -1,30 +1,38 @@
-// cmd/provider — provider-side management CLI
+// cmd/provider — provider-side management CLI (v2: provider IS the TEE signer)
+//
+// The provider address in SandboxServing is the node's TEE signer address;
+// its key lives inside the enclave and dies with the machine. All on-chain
+// management is therefore signed by the appId's TappRegistry OWNER key
+// (OWNER_KEY env, PROVIDER_KEY accepted as a legacy alias).
 //
 // Subcommands:
 //
-//	register       Bind URL, prices, and createFee to an appId in SandboxServing
-//	status         Show provider registration and earnings
-//	withdraw       Withdraw accumulated earnings
-//	push-image     Load a local Docker image into the internal registry via the runner
-//	snapshot       Register a registry image as a named Daytona snapshot
-//	snapshots      List all snapshots
+//	register        Register/update a node's service: bind --signer to an appId, set URL + prices
+//	remove-service  Remove a node's service (sweeps pending earnings to the owner)
+//	rotate          After a machine rebuild: re-register the new signer with the old terms, remove the old
+//	status          Show a node's registration and earnings
+//	withdraw        Withdraw a node's accumulated earnings to the owner
+//	push-image      Load a local Docker image into the internal registry via the runner
+//	snapshot        Register a registry image as a named Daytona snapshot
+//	snapshots       List all snapshots
 //	delete-snapshot Delete a snapshot by name
 //
 // Examples:
 //
-//	PROVIDER_KEY=0x<hex> go run ./cmd/provider/ register \
+//	OWNER_KEY=0x<hex> go run ./cmd/provider/ register \
 //	  --contract       0x... \
-//	  --api            http://billing-host:8080 \
+//	  --signer         0x<node-tee-address> \
 //	  --app-id         0g-sandbox-provider \
+//	  --url            http://billing-host:8080 \
 //	  --price-per-cpu  1000000000000000 \
 //	  --price-per-mem   500000000000000 \
-//	  --create-fee    60000000000000000
+//	  --fee           60000000000000000
 //
-//	PROVIDER_KEY=0x<hex> go run ./cmd/provider/ status   --contract 0x...
-//	PROVIDER_KEY=0x<hex> go run ./cmd/provider/ withdraw --contract 0x...
+//	go run ./cmd/provider/ status   --contract 0x... --address 0x<signer>
+//	OWNER_KEY=0x<hex> go run ./cmd/provider/ withdraw --contract 0x... --signer 0x<signer>
+//	OWNER_KEY=0x<hex> go run ./cmd/provider/ rotate   --contract 0x... --old 0x<dead-signer> --new 0x<new-signer>
 //
 //	go run ./cmd/provider/ push-image --image rust-sandbox:1.0.0
-//	PROVIDER_KEY=0x<hex> go run ./cmd/provider/ snapshot --api http://... --image registry:6000/daytona/rust-sandbox:1.0.0 --name rust-sandbox
 package main
 
 import (
@@ -61,15 +69,17 @@ const (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: provider <subcommand> [flags]")
-		fmt.Fprintln(os.Stderr, "  subcommands: register | deregister | status | withdraw | push-image | snapshot | snapshots | delete-snapshot | gc-images")
+		fmt.Fprintln(os.Stderr, "  subcommands: register | remove-service | rotate | status | withdraw | push-image | snapshot | snapshots | delete-snapshot | gc-images")
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
 	case "register", "init-service":
 		runRegister(os.Args[2:])
-	case "deregister":
-		runDeregister(os.Args[2:])
+	case "remove-service":
+		runRemoveService(os.Args[2:])
+	case "rotate":
+		runRotate(os.Args[2:])
 	case "status":
 		runStatus(os.Args[2:])
 	case "withdraw":
@@ -86,28 +96,52 @@ func main() {
 		runGCImages(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
-		fmt.Fprintln(os.Stderr, "  subcommands: register | deregister | status | withdraw | push-image | snapshot | snapshots | delete-snapshot | gc-images")
+		fmt.Fprintln(os.Stderr, "  subcommands: register | remove-service | rotate | status | withdraw | push-image | snapshot | snapshots | delete-snapshot | gc-images")
 		os.Exit(1)
 	}
 }
 
+// resolveOwnerKey resolves the appId owner's private key: --key flag, then
+// OWNER_KEY env, then PROVIDER_KEY env (legacy alias from before v2, when
+// the provider wallet did its own management).
+func resolveOwnerKey(flagVal string) *ecdsa.PrivateKey {
+	hex := flagVal
+	if hex == "" {
+		hex = os.Getenv("OWNER_KEY")
+	}
+	if hex == "" {
+		hex = os.Getenv("PROVIDER_KEY")
+	}
+	if hex == "" {
+		fatalf("app owner private key required: use --key or OWNER_KEY env")
+	}
+	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(hex, "0x"))
+	if err != nil {
+		fatalf("parse private key: %v", err)
+	}
+	return privKey
+}
+
 // ── register ──────────────────────────────────────────────────────────────────
 
-// runRegister binds the SandboxServing service to a TappRegistry appId and
-// sets prices. Prerequisites (done by the provider on tapp directly, in
+// runRegister registers/updates a node's service in SandboxServing: binds the
+// node's TEE signer address to a TappRegistry appId and sets URL + prices.
+// Signed by the appId OWNER's key. Prerequisites (done on tapp directly, in
 // separate txs; this CLI doesn't currently chain them):
 //
-//   1. tappRegistry.registerApp(appId, hashes, signer, teeUrl)  ← pays stake
-//   2. tappRegistry.authorizeInvalidator(appId, sandboxServingAddr)
+//  1. tappRegistry.registerApp(appId, ...)            ← pays stake
+//  2. tappRegistry.addNode(appId, signer, teeUrl)     ← one per machine
+//  3. tappRegistry.authorizeInvalidator(appId, sandboxServingAddr)
 //
-// Then this command runs sandbox.addOrUpdateService(url, appId, prices).
+// Then this command runs sandbox.addOrUpdateService(signer, url, appId, prices).
 func runRegister(args []string) {
 	fs := flag.NewFlagSet("register", flag.ExitOnError)
 	rpc            := fs.String("rpc",           defaultRPC,              "RPC endpoint")
 	chainID        := fs.Int64("chain-id",        defaultChainID,          "Chain ID")
 	contractHex    := fs.String("contract",       envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
-	keyHex         := fs.String("key",            "",                      "Provider private key (hex); or set PROVIDER_KEY env")
-	appId          := fs.String("app-id",         "",                      "TappRegistry appId to bind (required; must already be registered in tapp)")
+	keyHex         := fs.String("key",            "",                      "App owner private key (hex); or set OWNER_KEY env")
+	signerHex      := fs.String("signer",         "",                      "Node's TEE signer address = the provider address (required; get it from the node's /api/info or tapp-cli get-app-key)")
+	appId          := fs.String("app-id",         "",                      "TappRegistry appId to bind (required; signer must already be an active node of it)")
 	serviceURL     := fs.String("url",            "",                      "Provider service URL (required)")
 	pricePerCPU    := fs.String("price-per-cpu",  "1000000000000000",      "Price per CPU per minute (neuron)")
 	pricePerMemGB  := fs.String("price-per-mem",  "500000000000000",       "Price per GB memory per minute (neuron)")
@@ -120,20 +154,25 @@ func runRegister(args []string) {
 	if *appId == "" {
 		fatalf("--app-id is required")
 	}
-	privKey := resolveKey(*keyHex, "PROVIDER_KEY")
-	providerAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	if *signerHex == "" {
+		fatalf("--signer is required (the node's TEE address; see its /api/info `provider_address` or tapp-cli get-app-key)")
+	}
+	privKey := resolveOwnerKey(*keyHex)
+	ownerAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	signerAddr := common.HexToAddress(*signerHex)
 
 	pricePerCPUBig   := parseBigInt(*pricePerCPU, "--price-per-cpu")
 	pricePerMemGBBig := parseBigInt(*pricePerMemGB, "--price-per-mem")
 	createFeeBig     := parseBigInt(*createFee, "--fee")
 
-	fmt.Printf("Provider:       %s\n", providerAddr.Hex())
-	fmt.Printf("AppId:          %s\n", *appId)
-	fmt.Printf("Contract:       %s\n", *contractHex)
-	fmt.Printf("Service URL:    %s\n", *serviceURL)
-	fmt.Printf("CPU price/min:  %s neuron\n", pricePerCPUBig.String())
-	fmt.Printf("Mem price/min:  %s neuron/GB\n", pricePerMemGBBig.String())
-	fmt.Printf("Create fee:     %s neuron\n", createFeeBig.String())
+	fmt.Printf("App owner:          %s\n", ownerAddr.Hex())
+	fmt.Printf("Provider (signer):  %s\n", signerAddr.Hex())
+	fmt.Printf("AppId:              %s\n", *appId)
+	fmt.Printf("Contract:           %s\n", *contractHex)
+	fmt.Printf("Service URL:        %s\n", *serviceURL)
+	fmt.Printf("CPU price/min:      %s neuron\n", pricePerCPUBig.String())
+	fmt.Printf("Mem price/min:      %s neuron/GB\n", pricePerMemGBBig.String())
+	fmt.Printf("Create fee:         %s neuron\n", createFeeBig.String())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
@@ -142,60 +181,172 @@ func runRegister(args []string) {
 
 	auth := buildAuth(ctx, privKey, *chainID)
 	fmt.Println("\n[1/1] AddOrUpdateService...")
-	tx, err := contract.AddOrUpdateService(auth, *serviceURL, *appId, pricePerCPUBig, createFeeBig, pricePerMemGBBig)
+	tx, err := contract.AddOrUpdateService(auth, signerAddr, *serviceURL, *appId, pricePerCPUBig, createFeeBig, pricePerMemGBBig)
 	if err != nil {
-		fatalf("AddOrUpdateService: %v\n\nReminder: this requires tapp.registerApp(%s, ...) AND tapp.authorizeInvalidator(%s, %s) to have been called first.", err, *appId, *appId, *contractHex)
+		fatalf("AddOrUpdateService: %v\n\nReminders:\n  - the caller key must be the TappRegistry owner of %s\n  - %s must already be an active node of %s (tapp-cli add-node-onchain)\n  - tapp.authorizeInvalidator(%s, %s) must have been called", err, *appId, signerAddr.Hex(), *appId, *appId, *contractHex)
 	}
 	fmt.Printf("      tx: %s\n", tx.Hash().Hex())
 	if _, err := bind.WaitMined(ctx, eth, tx); err != nil {
 		fatalf("wait mined: %v", err)
 	}
 	fmt.Println("      confirmed ✓")
-	fmt.Printf("\nDone. Provider address: %s\n", providerAddr.Hex())
+	fmt.Printf("\nDone. Provider (signer) address: %s\n", signerAddr.Hex())
 }
 
-// ── deregister ──────────────────────────────────────────────────────────────────
+// ── remove-service ────────────────────────────────────────────────────────────
 
-// runDeregister clears the caller's own SandboxServing service entry so its
-// appId can be changed (appId is set-once in addOrUpdateService). Soft clear:
-// on-chain balances, pending refunds, settled nonces, and accrued earnings are
-// preserved. After this, re-run `register` with the new appId.
-func runDeregister(args []string) {
-	fs := flag.NewFlagSet("deregister", flag.ExitOnError)
+// runRemoveService removes a node's service entry. Signed by the appId
+// OWNER's key — the signer key itself may be gone (it dies with the machine).
+// Sweeps pending earnings to the owner in the same tx; user balances stay
+// refundable and nonce watermarks stay put.
+func runRemoveService(args []string) {
+	fs := flag.NewFlagSet("remove-service", flag.ExitOnError)
 	rpc         := fs.String("rpc",      defaultRPC,      "RPC endpoint")
 	chainID     := fs.Int64("chain-id",  defaultChainID,  "Chain ID")
 	contractHex := fs.String("contract", envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
-	keyHex      := fs.String("key",      "",              "Provider private key (hex); or set PROVIDER_KEY env")
+	keyHex      := fs.String("key",      "",              "App owner private key (hex); or set OWNER_KEY env")
+	signerHex   := fs.String("signer",   "",              "Node's TEE signer address whose service to remove (required)")
 	_ = fs.Parse(args)
 
-	privKey := resolveKey(*keyHex, "PROVIDER_KEY")
-	providerAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	if *signerHex == "" {
+		fatalf("--signer is required")
+	}
+	privKey := resolveOwnerKey(*keyHex)
+	ownerAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	signerAddr := common.HexToAddress(*signerHex)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	eth, contract := dialContract(ctx, *rpc, *contractHex)
 	defer eth.Close()
 
-	if exists, err := contract.ServiceExists(&bind.CallOpts{Context: ctx}, providerAddr); err != nil {
+	opts := &bind.CallOpts{Context: ctx}
+	if exists, err := contract.ServiceExists(opts, signerAddr); err != nil {
 		fatalf("ServiceExists: %v", err)
 	} else if !exists {
-		fatalf("no service registered for %s on %s — nothing to deregister", providerAddr.Hex(), *contractHex)
+		fatalf("no service registered for %s on %s — nothing to remove", signerAddr.Hex(), *contractHex)
+	}
+	earnings, err := contract.ProviderEarnings(opts, signerAddr)
+	if err != nil {
+		fatalf("ProviderEarnings: %v", err)
 	}
 
-	fmt.Printf("Provider:  %s\n", providerAddr.Hex())
-	fmt.Printf("Contract:  %s\n", *contractHex)
-	fmt.Println("\n[1/1] DeregisterService (clears url/appId/prices; balances & earnings preserved)...")
+	fmt.Printf("App owner:          %s\n", ownerAddr.Hex())
+	fmt.Printf("Provider (signer):  %s\n", signerAddr.Hex())
+	fmt.Printf("Pending earnings:   %s neuron (swept to owner in the same tx)\n", earnings.String())
+	fmt.Println("\n[1/1] RemoveService...")
 	auth := buildAuth(ctx, privKey, *chainID)
-	tx, err := contract.DeregisterService(auth)
+	tx, err := contract.RemoveService(auth, signerAddr)
 	if err != nil {
-		fatalf("DeregisterService: %v", err)
+		fatalf("RemoveService: %v", err)
 	}
 	fmt.Printf("      tx: %s\n", tx.Hash().Hex())
 	if _, err := bind.WaitMined(ctx, eth, tx); err != nil {
 		fatalf("wait mined: %v", err)
 	}
 	fmt.Println("      confirmed ✓")
-	fmt.Printf("\nDone. Service cleared. Re-run `register` with the new appId.\n")
+	fmt.Printf("\nDone. Service cleared; %s neuron swept to %s.\nUser balances at %s stay refundable; remind users to requestRefund + re-deposit to the new node.\n", earnings.String(), ownerAddr.Hex(), signerAddr.Hex())
+}
+
+// ── rotate ────────────────────────────────────────────────────────────────────
+
+// runRotate handles the SandboxServing side of a machine rebuild: the TEE key
+// changed, so a new provider identity must take over the old one's commercial
+// terms. It copies the old signer's service entry to the new signer, then
+// removes the old entry (sweeping its pending earnings to the owner).
+//
+// Full rotation runbook (this command is step 4):
+//
+//  1. machine back up with the new key — the settler holds its queue until
+//     the new signer is registered on-chain
+//  2. tapp-cli add-node-onchain (ADD the new signer; do NOT replace yet —
+//     old and new nodes coexist so both queues settle)
+//  3. wait for the OLD signer's voucher queue to drain (/api/queue/summary)
+//  4. provider rotate --old 0x<old> --new 0x<new>
+//  5. tapp-cli remove-node-onchain for the old signer (stake unlocks ~1 day)
+//  6. users requestRefund on the old bucket and re-deposit to the new signer
+func runRotate(args []string) {
+	fs := flag.NewFlagSet("rotate", flag.ExitOnError)
+	rpc         := fs.String("rpc",      defaultRPC,      "RPC endpoint")
+	chainID     := fs.Int64("chain-id",  defaultChainID,  "Chain ID")
+	contractHex := fs.String("contract", envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
+	keyHex      := fs.String("key",      "",              "App owner private key (hex); or set OWNER_KEY env")
+	oldHex      := fs.String("old",      "",              "Old (dead) signer address (required)")
+	newHex      := fs.String("new",      "",              "New signer address (required; must already be an active node — tapp-cli add-node-onchain)")
+	urlOverride := fs.String("url",      "",              "New service URL (default: keep the old service's URL)")
+	_ = fs.Parse(args)
+
+	if *oldHex == "" || *newHex == "" {
+		fatalf("--old and --new are required")
+	}
+	privKey := resolveOwnerKey(*keyHex)
+	ownerAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	oldAddr := common.HexToAddress(*oldHex)
+	newAddr := common.HexToAddress(*newHex)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	eth, contract := dialContract(ctx, *rpc, *contractHex)
+	defer eth.Close()
+
+	opts := &bind.CallOpts{Context: ctx}
+	oldExists, err := contract.ServiceExists(opts, oldAddr)
+	if err != nil {
+		fatalf("ServiceExists(old): %v", err)
+	}
+	if !oldExists {
+		fatalf("no service registered for old signer %s — nothing to rotate from", oldAddr.Hex())
+	}
+	svc, err := contract.Services(opts, oldAddr)
+	if err != nil {
+		fatalf("Services(old): %v", err)
+	}
+	earnings, err := contract.ProviderEarnings(opts, oldAddr)
+	if err != nil {
+		fatalf("ProviderEarnings(old): %v", err)
+	}
+	newURL := svc.Url
+	if *urlOverride != "" {
+		newURL = *urlOverride
+	}
+
+	fmt.Printf("App owner:     %s\n", ownerAddr.Hex())
+	fmt.Printf("Old signer:    %s (earnings %s neuron — swept to owner in step 2)\n", oldAddr.Hex(), earnings.String())
+	fmt.Printf("New signer:    %s\n", newAddr.Hex())
+	fmt.Printf("AppId:         %s\n", svc.AppId)
+	fmt.Printf("Service URL:   %s\n", newURL)
+	fmt.Println("\n⚠ Precondition: the old signer's voucher queue must be EMPTY (/api/queue/summary).")
+	fmt.Println("  Vouchers still in flight settle fine until remove-node-onchain, but any that")
+	fmt.Println("  reference the old service after this rotate will fail PROVIDER_MISMATCH.")
+
+	auth := buildAuth(ctx, privKey, *chainID)
+
+	fmt.Println("\n[1/2] AddOrUpdateService(new signer, old terms)...")
+	tx, err := contract.AddOrUpdateService(auth, newAddr, newURL, svc.AppId, svc.PricePerCPUPerMin, svc.CreateFee, svc.PricePerMemGBPerMin)
+	if err != nil {
+		fatalf("AddOrUpdateService: %v\n\nReminder: %s must already be an active node of %s (tapp-cli add-node-onchain).", err, newAddr.Hex(), svc.AppId)
+	}
+	fmt.Printf("      tx: %s\n", tx.Hash().Hex())
+	if _, err := bind.WaitMined(ctx, eth, tx); err != nil {
+		fatalf("wait mined: %v", err)
+	}
+	fmt.Println("      confirmed ✓  (same prices → no ack invalidation)")
+
+	fmt.Println("[2/2] RemoveService(old signer)...")
+	tx, err = contract.RemoveService(auth, oldAddr)
+	if err != nil {
+		fatalf("RemoveService: %v", err)
+	}
+	fmt.Printf("      tx: %s\n", tx.Hash().Hex())
+	if _, err := bind.WaitMined(ctx, eth, tx); err != nil {
+		fatalf("wait mined: %v", err)
+	}
+	fmt.Println("      confirmed ✓")
+
+	fmt.Printf("\nDone. New provider identity: %s\n", newAddr.Hex())
+	fmt.Println("Next steps:")
+	fmt.Printf("  - tapp-cli remove-node-onchain for %s (stake unlocks after ~1 day)\n", oldAddr.Hex())
+	fmt.Printf("  - users with balance at %s: requestRefund → withdrawRefund (2h lock) → deposit to %s\n", oldAddr.Hex(), newAddr.Hex())
 }
 
 // ── status ────────────────────────────────────────────────────────────────────
@@ -204,17 +355,14 @@ func runStatus(args []string) {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 	rpc         := fs.String("rpc",      defaultRPC,      "RPC endpoint")
 	contractHex := fs.String("contract", envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
-	keyHex      := fs.String("key",      "",              "Provider private key; or set PROVIDER_KEY env")
-	addrHex     := fs.String("address",  "",              "Provider address (alternative to --key)")
+	addrHex     := fs.String("address",  "",              "Provider (signer) address to inspect (required; read-only, no key needed)")
+	tappHex     := fs.String("tapp",     envOrDefault("TAPP_REGISTRY", ""), "TappRegistry address (optional; shows the appId owner and node state)")
 	_ = fs.Parse(args)
 
-	var providerAddr common.Address
-	if *addrHex != "" {
-		providerAddr = common.HexToAddress(*addrHex)
-	} else {
-		privKey := resolveKey(*keyHex, "PROVIDER_KEY")
-		providerAddr = crypto.PubkeyToAddress(privKey.PublicKey)
+	if *addrHex == "" {
+		fatalf("--address is required (the node's TEE signer address; see its /api/info `provider_address`)")
 	}
+	providerAddr := common.HexToAddress(*addrHex)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -253,22 +401,49 @@ func runStatus(args []string) {
 		fmt.Printf("  Mem price/min:    %s neuron/GB\n", svc.PricePerMemGBPerMin.String())
 		fmt.Printf("  Create fee:       %s neuron\n", svc.CreateFee.String())
 		fmt.Printf("  Earnings:         %s neuron\n", earnings.String())
-		fmt.Println("  (TEE signers + ack state now live in TappRegistry; query that contract for cluster info.)")
+		if *tappHex != "" && svc.AppId != "" {
+			tapp, err := chain.NewTappRegistry(common.HexToAddress(*tappHex), eth)
+			if err != nil {
+				fatalf("bind tappRegistry: %v", err)
+			}
+			appInfo, err := tapp.GetAppInfo(opts, svc.AppId)
+			if err != nil {
+				fatalf("tapp.getAppInfo: %v", err)
+			}
+			fmt.Printf("  App owner:        %s (manages this service + withdraws earnings)\n", appInfo.Owner.Hex())
+			node, err := tapp.GetNode(opts, svc.AppId, providerAddr)
+			if err != nil {
+				fatalf("tapp.getNode: %v", err)
+			}
+			if node.AddedAt.Sign() != 0 {
+				fmt.Printf("  Node:             active (teeUrl %s, stake %s)\n", node.TeeUrl, node.StakeAmount.String())
+			} else {
+				fmt.Println("  Node:             NOT an active TappRegistry node — its vouchers cannot settle")
+			}
+		}
 	}
 }
 
 // ── withdraw ──────────────────────────────────────────────────────────────────
 
+// runWithdraw withdraws a node's accrued earnings to the app owner. Signed by
+// the OWNER's key; the provider (signer) key never leaves the enclave and has
+// no payout rights of its own.
 func runWithdraw(args []string) {
 	fs := flag.NewFlagSet("withdraw", flag.ExitOnError)
 	rpc         := fs.String("rpc",      defaultRPC,      "RPC endpoint")
 	chainID     := fs.Int64("chain-id",  defaultChainID,  "Chain ID")
 	contractHex := fs.String("contract", envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
-	keyHex      := fs.String("key",      "",              "Provider private key; or set PROVIDER_KEY env")
+	keyHex      := fs.String("key",      "",              "App owner private key; or set OWNER_KEY env")
+	signerHex   := fs.String("signer",   "",              "Node's TEE signer address whose earnings to withdraw (required)")
 	_ = fs.Parse(args)
 
-	privKey := resolveKey(*keyHex, "PROVIDER_KEY")
-	providerAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	if *signerHex == "" {
+		fatalf("--signer is required")
+	}
+	privKey := resolveOwnerKey(*keyHex)
+	ownerAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	signerAddr := common.HexToAddress(*signerHex)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
@@ -276,7 +451,7 @@ func runWithdraw(args []string) {
 	defer eth.Close()
 
 	opts := &bind.CallOpts{Context: ctx}
-	earnings, err := contract.ProviderEarnings(opts, providerAddr)
+	earnings, err := contract.ProviderEarnings(opts, signerAddr)
 	if err != nil {
 		fatalf("ProviderEarnings: %v", err)
 	}
@@ -284,19 +459,20 @@ func runWithdraw(args []string) {
 		fmt.Println("No earnings to withdraw.")
 		return
 	}
-	fmt.Printf("Provider:  %s\n", providerAddr.Hex())
-	fmt.Printf("Earnings:  %s neuron\n", earnings.String())
+	fmt.Printf("App owner:          %s\n", ownerAddr.Hex())
+	fmt.Printf("Provider (signer):  %s\n", signerAddr.Hex())
+	fmt.Printf("Earnings:           %s neuron\n", earnings.String())
 
-	fmt.Println("\nWithdrawing earnings...")
-	tx, err := contract.WithdrawEarnings(buildAuth(ctx, privKey, *chainID))
+	fmt.Println("\nWithdrawing earnings to the owner...")
+	tx, err := contract.WithdrawEarnings(buildAuth(ctx, privKey, *chainID), signerAddr)
 	if err != nil {
-		fatalf("WithdrawEarnings: %v", err)
+		fatalf("WithdrawEarnings: %v\n\nReminder: --key must be the TappRegistry owner of the appId this signer's service is bound to.", err)
 	}
 	fmt.Printf("  tx: %s\n", tx.Hash().Hex())
 	if _, err := bind.WaitMined(ctx, eth, tx); err != nil {
 		fatalf("wait mined: %v", err)
 	}
-	fmt.Printf("  confirmed ✓  (%s neuron withdrawn)\n", earnings.String())
+	fmt.Printf("  confirmed ✓  (%s neuron paid to %s)\n", earnings.String(), ownerAddr.Hex())
 }
 
 // `set-stake` was removed: stake collection moved to TappRegistry (per-node).
@@ -403,7 +579,7 @@ var defaultTiers = []snapshotTier{
 func runSnapshot(args []string) {
 	fs := flag.NewFlagSet("snapshot", flag.ExitOnError)
 	apiURL := fs.String("api",    "http://localhost:8080", "0G Sandbox service URL")
-	keyHex := fs.String("key",    "",                     "Provider private key (hex); or set PROVIDER_KEY env")
+	keyHex := fs.String("key",    "",                     "Admin wallet key — the app owner or an ADMIN_ADDRESSES wallet (hex); or set OWNER_KEY env")
 	image  := fs.String("image",  "",                     "Docker image name (required)")
 	name   := fs.String("name",   "",                     "Snapshot name (defaults to image name)")
 	tiers  := fs.Bool("tiers",    false,                  "Create small/medium/large variants automatically")
@@ -415,7 +591,7 @@ func runSnapshot(args []string) {
 	if *image == "" {
 		fatalf("--image is required")
 	}
-	privKey := resolveKey(*keyHex, "PROVIDER_KEY")
+	privKey := resolveOwnerKey(*keyHex)
 
 	baseName := *image
 	if *name != "" {
@@ -494,10 +670,10 @@ func createSnapshot(privKey *ecdsa.PrivateKey, apiURL, imageName, name string, c
 func runListSnapshots(args []string) {
 	fs := flag.NewFlagSet("snapshots", flag.ExitOnError)
 	apiURL := fs.String("api", "http://localhost:8080", "0G Sandbox service URL")
-	keyHex := fs.String("key", "",                     "Provider private key (hex); or set PROVIDER_KEY env")
+	keyHex := fs.String("key", "",                     "Admin wallet key — the app owner or an ADMIN_ADDRESSES wallet (hex); or set OWNER_KEY env")
 	_ = fs.Parse(args)
 
-	privKey := resolveKey(*keyHex, "PROVIDER_KEY")
+	privKey := resolveOwnerKey(*keyHex)
 	msg, sig, walletAddr := signRequest(privKey, "list", "", json.RawMessage(`{}`))
 
 	req, err := http.NewRequest(http.MethodGet, *apiURL+"/api/snapshots", nil)
@@ -540,14 +716,14 @@ func runListSnapshots(args []string) {
 func runDeleteSnapshot(args []string) {
 	fs := flag.NewFlagSet("delete-snapshot", flag.ExitOnError)
 	apiURL := fs.String("api", "http://localhost:8080", "0G Sandbox service URL")
-	keyHex := fs.String("key", "", "Provider private key (hex); or set PROVIDER_KEY env")
+	keyHex := fs.String("key", "", "Admin wallet key — the app owner or an ADMIN_ADDRESSES wallet (hex); or set OWNER_KEY env")
 	id     := fs.String("id", "", "Snapshot ID (required)")
 	_ = fs.Parse(args)
 
 	if *id == "" {
 		fatalf("--id is required")
 	}
-	privKey := resolveKey(*keyHex, "PROVIDER_KEY")
+	privKey := resolveOwnerKey(*keyHex)
 	msg, sig, walletAddr := signRequest(privKey, "delete-snapshot", *id, json.RawMessage(`{}`))
 
 	req, err := http.NewRequest(http.MethodDelete, *apiURL+"/api/snapshots/"+*id, nil)
@@ -575,11 +751,11 @@ func runDeleteSnapshot(args []string) {
 func runGCImages(args []string) {
 	fs := flag.NewFlagSet("gc-images", flag.ExitOnError)
 	apiURL := fs.String("api", "http://localhost:8080", "0G Sandbox service URL")
-	keyHex := fs.String("key", "", "Provider private key (hex); or set PROVIDER_KEY env")
+	keyHex := fs.String("key", "", "Admin wallet key — the app owner or an ADMIN_ADDRESSES wallet (hex); or set OWNER_KEY env")
 	dryRun := fs.Bool("dry-run", false, "Preview deletions without actually removing tags")
 	_ = fs.Parse(args)
 
-	privKey := resolveKey(*keyHex, "PROVIDER_KEY")
+	privKey := resolveOwnerKey(*keyHex)
 	msg, sig, walletAddr := signRequest(privKey, "gc-images", "", json.RawMessage(`{}`))
 
 	url := *apiURL + "/api/registry/gc"
@@ -685,20 +861,6 @@ func resolveEnv(flagVal, envVar, label string) string {
 	return ""
 }
 
-func resolveKey(flagVal, envVar string) *ecdsa.PrivateKey {
-	hex := flagVal
-	if hex == "" {
-		hex = os.Getenv(envVar)
-	}
-	if hex == "" {
-		fatalf("private key required: use --key or %s env", envVar)
-	}
-	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(hex, "0x"))
-	if err != nil {
-		fatalf("parse private key: %v", err)
-	}
-	return privKey
-}
 
 func parseBigInt(s, name string) *big.Int {
 	v, ok := new(big.Int).SetString(s, 10)

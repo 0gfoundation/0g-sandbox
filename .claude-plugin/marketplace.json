@@ -11,7 +11,7 @@
     {
       "name": "0g-private-sandbox",
       "description": "Create and manage 0G Private Sandboxes from Claude Code",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "author": {
         "name": "0G Foundation"
       },

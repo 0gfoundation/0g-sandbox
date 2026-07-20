@@ -35,13 +35,31 @@ interface ITappRegistry {
 ///      in TappRegistry. SandboxServing owns only commercial state:
 ///      service URL, prices, balances, settlement.
 ///
-///      A provider registers in three steps (each is a separate tx by the
-///      provider's wallet):
-///        1. tappRegistry.registerApp(appId, ...)         — stakes per node
-///        2. tappRegistry.authorizeInvalidator(appId, this) — lets us bump
+///      Identity model (v2: provider IS the TEE signer)
+///      ------------------------------------------------
+///      Every "provider" address in this contract — the services key, the
+///      voucher payee, the (user, provider) balance bucket, the earnings
+///      ledger — is the TEE-derived signer address of one node (one machine)
+///      registered for the appId in TappRegistry. There is no separate
+///      provider wallet. Consequences:
+///        * a voucher is valid only if it was signed BY its own payee
+///          (recovered == v.provider) and that address is an active node;
+///          a node cannot settle vouchers naming another node as payee
+///        * the TEE key cannot leave the enclave and rotates when the
+///          machine is rebuilt, so all management (register / remove /
+///          withdraw earnings) is done by the appId's TappRegistry owner,
+///          not by the provider address itself
+///        * on rotation the old signer's service is removed by the owner
+///          (removeService sweeps pending earnings to the owner) and users
+///          move their remaining balance via the normal refund flow
+///
+///      The app owner registers a node's service in four steps:
+///        1. tappRegistry.registerApp(appId, ...)           — stakes per node
+///        2. tappRegistry.addNode(appId, signer, teeUrl)    — one per machine
+///        3. tappRegistry.authorizeInvalidator(appId, this) — lets us bump
 ///                                                            ackVersion on
 ///                                                            price changes
-///        3. sandboxServing.addOrUpdateService(url, appId, prices)
+///        4. sandboxServing.addOrUpdateService(signer, url, appId, prices)
 ///
 ///      Voucher verification reads from TappRegistry at settle time (no local
 ///      mirror of signer state — prevents the silent-drift incidents that
@@ -126,9 +144,9 @@ contract SandboxServing {
         uint256         nonce,
         SettlementStatus status
     );
-    event EarningsWithdrawn(address indexed provider, uint256 amount);
+    event EarningsWithdrawn(address indexed provider, address indexed to, uint256 amount);
     event ServiceUpdated(address indexed provider, string appId, string url);
-    event ServiceDeregistered(address indexed provider);
+    event ServiceRemoved(address indexed provider, address indexed appOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event TappRegistryUpdated(address indexed previousRegistry, address indexed newRegistry);
 
@@ -302,8 +320,10 @@ contract SandboxServing {
         return SettlementStatus.INSUFFICIENT_BALANCE;
     }
 
-    /// @dev ECDSA-recovers the voucher signer locally, then asks TappRegistry
-    ///      whether that address is an active node of the provider's app.
+    /// @dev ECDSA-recovers the voucher signer locally. Valid iff the voucher
+    ///      was signed by its own payee (provider IS the TEE signer) and that
+    ///      address is an active node of the app in TappRegistry. A node can
+    ///      therefore never settle vouchers naming another node as payee.
     function _verifySignature(SandboxVoucher calldata v, string memory appId) internal view returns (bool) {
         bytes32 structHash = keccak256(abi.encode(
             VOUCHER_TYPEHASH,
@@ -315,7 +335,7 @@ contract SandboxServing {
         ));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _domainSeparator, structHash));
         address recovered = _ecrecover(digest, v.signature);
-        if (recovered == address(0)) return false;
+        if (recovered == address(0) || recovered != v.provider) return false;
         return tappRegistry.getNode(appId, recovered).addedAt != 0;
     }
 
@@ -336,13 +356,26 @@ contract SandboxServing {
 
     // ─── Provider earnings ────────────────────────────────────────────────────
 
-    function withdrawEarnings() external nonReentrant {
-        uint256 amount = providerEarnings[msg.sender];
+    /// @notice Withdraw a node's accrued earnings to the app owner. The
+    ///         provider address is a TEE signer whose key never leaves the
+    ///         enclave (and dies with the machine), so payout authority
+    ///         belongs to the appId's TappRegistry owner.
+    function withdrawEarnings(address signer) external nonReentrant {
+        require(_isAppOwnerOf(signer, msg.sender), "not app owner");
+        uint256 amount = providerEarnings[signer];
         require(amount > 0, "no earnings");
-        providerEarnings[msg.sender] = 0;
+        providerEarnings[signer] = 0;
         (bool ok,) = msg.sender.call{value: amount}("");
         require(ok, "transfer failed");
-        emit EarningsWithdrawn(msg.sender, amount);
+        emit EarningsWithdrawn(signer, msg.sender, amount);
+    }
+
+    /// @dev True iff `caller` is the TappRegistry owner of the appId that
+    ///      `signer`'s service is bound to. Requires an existing service entry.
+    function _isAppOwnerOf(address signer, address caller) internal view returns (bool) {
+        string memory appId = services[signer].appId;
+        if (bytes(appId).length == 0) return false;
+        return tappRegistry.getAppInfo(appId).owner == caller;
     }
 
     // ─── Admin ────────────────────────────────────────────────────────────────
@@ -365,10 +398,12 @@ contract SandboxServing {
 
     // ─── Provider Management ──────────────────────────────────────────────────
 
-    /// @notice Register or update a provider service. Caller must already own
-    ///         the appId in TappRegistry, and must have authorized this contract
-    ///         as an invalidator (see ITappRegistry.authorizeInvalidator).
-    /// @dev appId is set-once on first call; later updates must pass the same
+    /// @notice Register or update a node's service. Called by the appId's
+    ///         TappRegistry owner; `signer` is the node's TEE signer address
+    ///         and must already be an active node of the appId. The contract
+    ///         must also be authorized as an invalidator for the appId
+    ///         (see ITappRegistry.authorizeInvalidator).
+    /// @dev appId is set-once per signer; later updates must pass the same
     ///      appId or revert. Stake is collected by TappRegistry (per node);
     ///      not collected here.
     ///
@@ -377,6 +412,7 @@ contract SandboxServing {
     ///      URL-only changes do NOT invalidate (URL drift can't redirect
     ///      vouchers — signature/ack still root at the on-chain trust state).
     function addOrUpdateService(
+        address          signer,
         string  calldata url,
         string  calldata appId,
         uint256 pricePerCPUPerMin,
@@ -384,19 +420,20 @@ contract SandboxServing {
         uint256 pricePerMemGBPerMin
     ) external {
         require(tappRegistry.getAppInfo(appId).owner == msg.sender, "not app owner");
+        require(tappRegistry.getNode(appId, signer).addedAt != 0, "signer not an active node");
         require(
             tappRegistry.isAuthorizedInvalidator(appId, address(this)),
             "sandbox not authorized as invalidator"
         );
 
-        Service storage svc = services[msg.sender];
+        Service storage svc = services[signer];
         bool isNew = bytes(svc.appId).length == 0;
         if (isNew) {
             svc.appId = appId;
         } else {
             require(
                 keccak256(bytes(svc.appId)) == keccak256(bytes(appId)),
-                "appId immutable; deregister to change"
+                "appId immutable; remove to change"
             );
         }
 
@@ -410,28 +447,41 @@ contract SandboxServing {
         svc.pricePerCPUPerMin   = pricePerCPUPerMin;
         svc.createFee           = createFee;
         svc.pricePerMemGBPerMin = pricePerMemGBPerMin;
-        serviceExists[msg.sender] = true;
+        serviceExists[signer] = true;
 
         if (pricesChanged) {
             tappRegistry.invalidateAcks(appId);
         }
 
-        emit ServiceUpdated(msg.sender, appId, url);
+        emit ServiceUpdated(signer, appId, url);
     }
 
-    /// @notice Clear the caller's own service registration so it can be
-    ///         re-registered under a different appId (appId is set-once in
-    ///         addOrUpdateService).
-    /// @dev Soft clear: only the service entry (url/appId/prices/createFee) is
-    ///      removed. User balances, pending refunds, settled nonces, and accrued
-    ///      providerEarnings are keyed elsewhere and preserved — they remain
-    ///      withdrawable, and nonces stay put so old vouchers can't be replayed
+    /// @notice Remove a node's service registration. Called by the appId's
+    ///         TappRegistry owner — the signer key itself may be gone (it dies
+    ///         with the machine), so removal cannot depend on it. Sweeps any
+    ///         pending earnings to the owner in the same call: once the entry
+    ///         is gone there is no appId left to authorize a later withdrawal
+    ///         (and no new earnings can accrue — settlement requires
+    ///         serviceExists).
+    /// @dev Soft clear otherwise: user balances, pending refunds, and settled
+    ///      nonces are keyed elsewhere and preserved — balances remain
+    ///      refundable, and nonces stay put so old vouchers can't be replayed
     ///      after a re-register.
-    function deregisterService() external {
-        require(serviceExists[msg.sender], "no service to deregister");
-        delete services[msg.sender];
-        serviceExists[msg.sender] = false;
-        emit ServiceDeregistered(msg.sender);
+    function removeService(address signer) external nonReentrant {
+        require(serviceExists[signer], "no service to remove");
+        require(_isAppOwnerOf(signer, msg.sender), "not app owner");
+
+        uint256 amount = providerEarnings[signer];
+        providerEarnings[signer] = 0;
+        delete services[signer];
+        serviceExists[signer] = false;
+
+        if (amount > 0) {
+            (bool ok,) = msg.sender.call{value: amount}("");
+            require(ok, "transfer failed");
+            emit EarningsWithdrawn(signer, msg.sender, amount);
+        }
+        emit ServiceRemoved(signer, msg.sender);
     }
 
     // ─── View Functions ───────────────────────────────────────────────────────

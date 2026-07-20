@@ -22,6 +22,11 @@
     "name": "addOrUpdateService",
     "inputs": [
       {
+        "name": "signer",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
         "name": "url",
         "type": "string",
         "internalType": "string"
@@ -91,13 +96,6 @@
     ],
     "outputs": [],
     "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "deregisterService",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -311,6 +309,19 @@
   },
   {
     "type": "function",
+    "name": "removeService",
+    "inputs": [
+      {
+        "name": "signer",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "requestRefund",
     "inputs": [
       {
@@ -478,7 +489,13 @@
   {
     "type": "function",
     "name": "withdrawEarnings",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "signer",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -532,6 +549,12 @@
     "inputs": [
       {
         "name": "provider",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "to",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -622,10 +645,16 @@
   },
   {
     "type": "event",
-    "name": "ServiceDeregistered",
+    "name": "ServiceRemoved",
     "inputs": [
       {
         "name": "provider",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "appOwner",
         "type": "address",
         "indexed": true,
         "internalType": "address"

@@ -145,13 +145,15 @@ After picking a provider, update `API` to the selected provider URL (from the ex
 The command scans the chain and prints available providers with their URL, pricing, and TEE signer. Example output:
 
 ```
-[1] 0xB831371eb2703305f1d9F8542163633D0675CEd7
-    URL:        http://<provider-host>:8080
+[1] 0xf982279B872B9a99d64C547a0faC2Dfdfc2AEE5D
+    URL:        https://provider-private-sandbox.0g.ai
     Create fee: 0.0600 0G
-    CPU price:  0.001000 0G/CPU/sec
-    Mem price:  0.000500 0G/GB/sec
-    TEE signer: 0x61BEb835... (v4)
+    CPU price:  0.001000 0G/CPU/min
+    Mem price:  0.000500 0G/GB/min
 ```
+
+> The provider address IS the node's TEE signer (v2 identity model) — there is
+> no separate signer field. Deposits and billing are bound to this address.
 
 It also outputs ready-to-use export commands — have the user run them:
 
@@ -219,13 +221,22 @@ Then list available snapshots:
 $USER_CLIsnapshots --api $API
 ```
 
+Standard snapshots (specs are FIXED by the snapshot — `--cpu/--memory/--disk`
+cannot be combined with `--snapshot`; the API rejects it):
+
+| Snapshot | Specs | For |
+|----------|-------|-----|
+| **0g-ubuntu22** | 1 CPU / 1 GB | General vibe coding, running code, light services |
+| **0g-openclaw** | 2 CPU / 4 GB | AI coding assistant (OpenClaw gateway) in a secure sandbox |
+
 Based on goal, recommend:
 
 | User goal | Recommendation |
 |-----------|----------------|
-| General vibe coding / running code | Default image (no snapshot) |
-| AI coding assistant in secure sandbox | **openclaw** snapshot |
+| General vibe coding / running code | **0g-ubuntu22** snapshot (1C/1G) |
+| AI coding assistant in secure sandbox | **0g-openclaw** snapshot (2C/4G) |
 | Specific environment (Rust, Python…) | Match from snapshot list |
+| Needs custom CPU/memory | Create WITHOUT `--snapshot` and pass `--cpu/--memory/--disk` (subject to the provider's per-sandbox limits) |
 
 **STOP and present recommendation:**
 > "Based on your goal, I recommend **[snapshot]**: [one-line description].
@@ -242,8 +253,17 @@ $USER_CLIcreate --api $API --name <friendly-name>
 # With snapshot
 $USER_CLIcreate --api $API --name <friendly-name> --snapshot <name>
 
-# Sealed sandbox — TEE attestation injected, SSH and toolbox permanently blocked
-$USER_CLIcreate --api $API --name <friendly-name> --sealed
+# Sealed sandbox — TEE attestation injected, SSH and toolbox permanently blocked.
+# MUST include --snapshot (bare --sealed is rejected: sealing resolves the image
+# digest, so the image must exist in the provider's internal registry).
+$USER_CLIcreate --api $API --name <friendly-name> --sealed --snapshot <name>
+
+# Restrict public ports — only listed ports are reachable without auth;
+# all other ports require the owner's preview token. Omit = all ports public.
+$USER_CLIcreate --api $API --name <friendly-name> --snapshot <name> --ports 8000,3000
+# Rules: max 16 ports; system ports 22222/2280/33333 rejected; immutable after
+# create; sealed + --ports must include 8080. The create response returns
+# ready-to-use `preview_urls` for each listed port.
 ```
 
 Copy the returned sandbox ID:
@@ -257,13 +277,16 @@ Billing starts immediately. **Do NOT wait for the sandbox to be ready** — star
 
 If the provider has `PROXY_DOMAIN` configured, user-defined service ports are reachable at:
 ```
-http://<port>-<sandboxId>.<PROXY_DOMAIN>/<path>
+<protocol>://<port>-<sandboxId>.<PROXY_DOMAIN>/<path>
 ```
-For example, if a process listens on port 8080 inside the sandbox:
+The protocol matches the provider's setup (the hosted testnet uses **https**).
+For example, if a process listens on port 8000 inside the sandbox:
 ```
-http://8080-<sandboxId>.sandbox.example.com/
+https://8000-<sandboxId>.provider-private-sandbox.0g.ai/
 ```
-The provider's `/info` endpoint lists `proxy_domain` when configured.
+Prefer the `preview_urls` field from the create response — it is already the
+correct protocol + domain. Requires the provider to have wildcard DNS + TLS for
+`*.<PROXY_DOMAIN>`; if the subdomain doesn't resolve, report it to the provider.
 
 > **Note:** Sealed sandboxes (`--sealed`) block SSH and toolbox access — use the proxy URL to reach services running inside them.
 
@@ -369,23 +392,23 @@ done &
 
 > SSH token expires ~1h. Re-run `ssh-access` to refresh.
 
-**If `RSYNC_OK=0` → use toolbox upload instead:**
+**If `RSYNC_OK=0` → upload via exec + base64 instead:**
+
+> Daytona v0.189 changed `files/upload` to multipart form (JSON base64 body no
+> longer works, and the CLI toolbox command only sends JSON). Write files
+> through `exec` instead:
 
 ```bash
 # Upload a single file
 FILE=main.py
-$USER_CLItoolbox \
-  --api $API --id $SANDBOX_ID \
-  --method POST --action files/upload \
-  --body "{\"path\":\"$REMOTE_DIR/$FILE\",\"content\":\"$(base64 -w0 $LOCAL_DIR/$FILE)\"}"
+$USER_CLIexec --api $API --id $SANDBOX_ID \
+  --cmd "sh -c 'mkdir -p $REMOTE_DIR && echo $(base64 -w0 $LOCAL_DIR/$FILE) | base64 -d > $REMOTE_DIR/$FILE'"
 
 # For multiple files — loop over them
 for FILE in $(find $LOCAL_DIR -type f -not -path '*/.git/*' -not -name '*.pyc'); do
   REL=${FILE#$LOCAL_DIR/}
-  $USER_CLItoolbox \
-    --api $API --id $SANDBOX_ID \
-    --method POST --action files/upload \
-    --body "{\"path\":\"$REMOTE_DIR/$REL\",\"content\":\"$(base64 -w0 $FILE)\"}"
+  $USER_CLIexec --api $API --id $SANDBOX_ID \
+    --cmd "sh -c 'mkdir -p $REMOTE_DIR/$(dirname $REL) && echo $(base64 -w0 $FILE) | base64 -d > $REMOTE_DIR/$REL'"
 done
 ```
 
@@ -429,9 +452,13 @@ Present the setup plan and ask how the user wants to proceed:
 > 3. **SSH Tunnel** — forward local port to sandbox — you run this on your **local machine**
 > 4. **Open Browser** — visit `http://localhost:13284/#token=<token>`
 >
-> **You'll need an Anthropic API Key** (`ANTHROPIC_API_KEY`) set in your terminal:
-> - **Claude Code users**: run `claude setup-token` to get your key
-> - **Others**: visit https://console.anthropic.com/settings/keys
+> **You'll need Anthropic credentials.** Two DIFFERENT kinds — do not mix them up:
+> - **API key** (`sk-ant-api…`, from https://console.anthropic.com/settings/keys)
+>   → export as `ANTHROPIC_API_KEY` before starting the gateway.
+> - **Claude Code OAuth token** (`sk-ant-oat…`, from `claude setup-token`)
+>   → this is NOT an API key and must NOT go into `ANTHROPIC_API_KEY`.
+>   Register it inside the sandbox via `openclaw models auth add` (paste-token
+>   flow) after the gateway is set up.
 >
 > **Choose setup method:**
 > - `A` — **Agent-assisted**: I'll run all steps and give you the SSH tunnel command
@@ -441,30 +468,30 @@ Present the setup plan and ask how the user wants to proceed:
 
 Proceed with Step 1.
 
-**Step 1 — Set gateway mode + start**
+**Step 1 — Configure gateway (mode + auth token), then start**
 
-Before running, verify `ANTHROPIC_API_KEY` is set in the terminal:
+If using an **API key**, verify it is set in the terminal (`echo $ANTHROPIC_API_KEY`);
+if empty, stop and ask the user to set it. (OAuth-token users skip this — their
+credential is registered in Step 2b instead.)
+
+> Current openclaw (2026.x) **refuses to bind to lan without gateway auth**
+> ("Refusing to bind gateway to lan without auth") — the auth token is no longer
+> auto-generated on first start. Set it explicitly BEFORE starting. Also:
+> `nohup … &` inside `exec` dies with the exec session — use `setsid`.
+
 ```bash
-echo $ANTHROPIC_API_KEY
+$USER_CLIexec --api $API --id $SANDBOX_ID \
+  --cmd "/bin/bash -c 'openclaw config set gateway.mode local && openclaw config set gateway.auth.mode token && openclaw config set gateway.auth.token \$(openssl rand -hex 16)'"
+
+$USER_CLIexec --api $API --id $SANDBOX_ID \
+  --cmd "/bin/bash -c 'export ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY; setsid nohup openclaw gateway run --bind lan --port 3284 </dev/null >/tmp/openclaw.log 2>&1 & echo launched'"
 ```
 
-If the output is empty, **stop and ask the user to set it** before continuing:
-> "`ANTHROPIC_API_KEY` is not set. Please set it in your terminal (`export ANTHROPIC_API_KEY=sk-ant-...`) and let me know when done."
-
-Only proceed once confirmed non-empty.
-
+Wait a few seconds, confirm it is actually up (the process must survive the exec
+session — if `port3284:000`, it died; check /tmp/openclaw.log):
 ```bash
 $USER_CLIexec --api $API --id $SANDBOX_ID \
-  --cmd "/bin/bash -c 'openclaw config set gateway.mode local'"
-
-$USER_CLIexec --api $API --id $SANDBOX_ID \
-  --cmd "/bin/bash -c 'export ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY; nohup bash -c \"openclaw gateway run --bind lan --port 3284 > /tmp/openclaw.log 2>&1\" &'"
-```
-
-Wait 3s, confirm running:
-```bash
-$USER_CLIexec --api $API --id $SANDBOX_ID \
-  --cmd "/bin/bash -c 'sleep 3 && grep \"listening on\" /tmp/openclaw.log'"
+  --cmd "/bin/bash -c 'sleep 5; curl -s -o /dev/null -w \"port3284:%{http_code}\" http://127.0.0.1:3284/'"
 ```
 
 **Step 2 — Get gateway auth token**
@@ -474,7 +501,15 @@ $USER_CLIexec --api $API --id $SANDBOX_ID \
   --cmd "/bin/bash -c 'node -e \"console.log(require(\\\"/root/.openclaw/openclaw.json\\\").gateway.auth.token)\"'"
 ```
 
-Show the token clearly, then say:
+**Step 2b — (OAuth-token users only) register the Claude Code token**
+
+```bash
+$USER_CLIexec --api $API --id $SANDBOX_ID \
+  --cmd "/bin/bash -c 'openclaw models auth add'"   # paste the sk-ant-oat… token when prompted
+```
+(If the interactive flow doesn't work over exec, do this step via SSH — Option B.)
+
+Show the gateway token clearly, then say:
 > Token retrieved: `<token>`
 > Next, run the following command on your **local machine**, then let me know when it's running.
 
@@ -505,12 +540,17 @@ Present the SSH token and the following exact steps to the user:
 # 1. SSH into the sandbox (use the token from ssh-access output as password)
 ssh -p <PORT> -o StrictHostKeyChecking=no '<TOKEN>@<HOST>'
 
-# 2. Inside the sandbox — set gateway mode and start with API key as env var
+# 2. Inside the sandbox — set gateway mode + auth token, then start.
+#    API-key users: export ANTHROPIC_API_KEY first.
+#    OAuth-token users (claude setup-token): do NOT export it as ANTHROPIC_API_KEY —
+#    run `openclaw models auth add` and paste the sk-ant-oat… token instead.
 openclaw config set gateway.mode local
-export ANTHROPIC_API_KEY=sk-ant-<your-key>
-nohup bash -c "openclaw gateway run --bind lan --port 3284 > /tmp/openclaw.log 2>&1" &
-# Shell prints "[1] <pid>" — press Enter once to return to prompt, then:
-sleep 3 && grep "listening on" /tmp/openclaw.log
+openclaw config set gateway.auth.mode token
+openclaw config set gateway.auth.token $(openssl rand -hex 16)
+export ANTHROPIC_API_KEY=sk-ant-api-<your-key>   # API-key users only
+setsid nohup openclaw gateway run --bind lan --port 3284 </dev/null >/tmp/openclaw.log 2>&1 &
+# Press Enter once to return to prompt, then:
+sleep 5 && curl -s -o /dev/null -w "port3284:%{http_code}\n" http://127.0.0.1:3284/
 
 # 3. Get auth token
 node -e "console.log(require('/root/.openclaw/openclaw.json').gateway.auth.token)"
@@ -525,10 +565,15 @@ ssh -N -L 13284:localhost:3284 -p 2222 -o StrictHostKeyChecking=no '<TOKEN>@<HOS
 **Important:** `ANTHROPIC_API_KEY` must be exported as an env var **before** starting the gateway — there is no `openclaw config set` for it. Do NOT suggest `openclaw config set anthropic.*`.
 
 **Gotchas:**
-- Must run `openclaw config set gateway.mode local` before starting
-- `nohup openclaw ... &` does NOT work — wrap with `nohup bash -c '...' &`
-- `ANTHROPIC_API_KEY` must be passed as env var when starting gateway — do NOT use `openclaw config set anthropic.*` (invalid key, will error)
-- Token is at `gateway.auth.token` in config JSON
+- Must set `gateway.mode local` AND `gateway.auth.mode token` + `gateway.auth.token`
+  before starting — current openclaw refuses lan bind without auth
+- Backgrounding: plain `nohup … &` dies when the exec session ends —
+  use `setsid nohup … </dev/null >log 2>&1 &`
+- `ANTHROPIC_API_KEY` accepts real API keys (sk-ant-api…) ONLY.
+  `claude setup-token` output (sk-ant-oat…) is an OAuth token → register via
+  `openclaw models auth add`, never via ANTHROPIC_API_KEY
+- Do NOT use `openclaw config set anthropic.*` (invalid key path, will error)
+- Gateway token is at `gateway.auth.token` in /root/.openclaw/openclaw.json
 - Browser URL must use `#token=` hash fragment
 - SSH token expires 60 min → re-run `ssh-access` to refresh tunnel
 - Stop gateway: `exec --cmd "/bin/bash -c 'pkill -f openclaw'"`
@@ -570,7 +615,7 @@ $USER_CLItoolbox \
 | Action | Method | Description |
 |--------|--------|-------------|
 | `files` | GET | List files |
-| `files/upload` | POST | Upload a file (base64) |
+| `files/upload` | POST | ⚠ v0.189: multipart form — NOT usable via `--body` JSON; use exec+base64 instead |
 | `files/download` | GET | Download a file |
 | `git/status` | GET | Git status |
 | `git/clone` | POST | Clone repo |
@@ -587,7 +632,7 @@ $USER_CLItoolbox \
 | `insufficient balance` on create | Balance < 0.12 0G | `deposit` more |
 | `deposit: insufficient funds` | Wallet has no 0G | Transfer 0G to wallet first |
 | `GetBalance` revert | Wrong contract address | Check `SETTLEMENT_CONTRACT` |
-| `NOT_ACKNOWLEDGED` after price change | `signerVersion` incremented | Re-run `acknowledge` |
+| `NOT_ACKNOWLEDGED` after price/node change | `ackVersion` bumped in TappRegistry | Re-run `acknowledge` |
 | Sandbox state is `stopped` | Auto-stopped or billing stopped it | Run `start` before `exec` |
 | SSH token expired | 60-min TTL | Re-run `ssh-access` |
 | `sudo apt-get` fails in sandbox | User may already be root | Try without sudo |

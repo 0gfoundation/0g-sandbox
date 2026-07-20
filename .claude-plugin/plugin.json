@@ -1,6 +1,6 @@
 {
   "name": "0g-private-sandbox",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "0G Private Sandbox — create and manage private TEE sandboxes. Includes user skill (create, manage, vibe-code) and provider skill (deploy, register, operate).",
   "author": { "name": "0G Foundation" },
   "repository": "https://github.com/0gfoundation/0g-sandbox",
