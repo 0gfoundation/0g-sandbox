@@ -254,6 +254,29 @@ State: `pending` → `active` in ~30s. Standard base snapshots to offer users:
 
 ---
 
+## New Provider Domain Checklist
+
+Setting up a domain for a provider is a MANUAL infra ritual (DNS/LB/certs live
+outside the deploy tooling). Five items — miss any and a whole feature dies
+silently (verified the hard way, 2026-07-20):
+
+1. Apex `domain` → `<host>:8082` (billing API + dashboard)
+2. **Wildcard `*.domain` → `<host>:4000`** (daytona proxy; preserve Host
+   header, WebSocket upgrade) — powers port previews (`8000-<id>.domain`)
+3. Wildcard TLS certificate covering `*.domain`
+4. TCP 2222 forwarding (SSH gateway); then set `SSH_GATEWAY_HOST=<domain>`
+5. **All records DNS-only (grey cloud)** — Cloudflare proxying (orange) blocks
+   server-to-server calls (the broker health check gets WAF 403 → "offline")
+
+Acceptance probe after wiring:
+```bash
+curl -s https://8000-test.<domain>/ | head -c 100
+# "dex/auth" redirect = wildcard routing OK; "Welcome to OpenResty!" = rule missing
+```
+Domain/env changes alter volumesHash → users must re-acknowledge; batch them.
+
+---
+
 ## Resource Quotas (oversell control)
 
 Two independent layers (both verified live):
@@ -361,3 +384,5 @@ owner and the node's TappRegistry state (active/stake).
 | Snapshot stays `pending` | Daytona can't pull the image | registry:6000 reachable? tag must not be `:latest` |
 | Everyone can create unlimited sandboxes | Org quota not enforced | See Resource Quotas — `enforceQuotas` + region_quota row |
 | SSH shows IP instead of domain | `SSH_GATEWAY_HOST` set to IP | Set it to the domain (confirm the LB forwards :2222 first) |
+| Broker frontend shows provider "offline" | Broker's server-side health check blocked: Cloudflare orange-cloud WAF 403, or container DNS can't resolve a fresh domain | Grey-cloud the DNS record (or WAF-whitelist the broker IP); fresh domains: wait out propagation |
+| Port preview URL shows an OpenResty/nginx default page | Wildcard `*.domain` traffic not forwarded to the daytona proxy | Add the wildcard→4000 rule (see New Provider Domain Checklist) |
