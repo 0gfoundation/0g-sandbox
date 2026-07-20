@@ -145,13 +145,15 @@ After picking a provider, update `API` to the selected provider URL (from the ex
 The command scans the chain and prints available providers with their URL, pricing, and TEE signer. Example output:
 
 ```
-[1] 0xB831371eb2703305f1d9F8542163633D0675CEd7
-    URL:        http://<provider-host>:8080
+[1] 0xf982279B872B9a99d64C547a0faC2Dfdfc2AEE5D
+    URL:        https://provider-private-sandbox-testnet.0g.ai
     Create fee: 0.0600 0G
-    CPU price:  0.001000 0G/CPU/sec
-    Mem price:  0.000500 0G/GB/sec
-    TEE signer: 0x61BEb835... (v4)
+    CPU price:  0.001000 0G/CPU/min
+    Mem price:  0.000500 0G/GB/min
 ```
+
+> The provider address IS the node's TEE signer (v2 identity model) — there is
+> no separate signer field. Deposits and billing are bound to this address.
 
 It also outputs ready-to-use export commands — have the user run them:
 
@@ -219,13 +221,22 @@ Then list available snapshots:
 $USER_CLIsnapshots --api $API
 ```
 
+Standard snapshots (specs are FIXED by the snapshot — `--cpu/--memory/--disk`
+cannot be combined with `--snapshot`; the API rejects it):
+
+| Snapshot | Specs | For |
+|----------|-------|-----|
+| **ubuntu** | 1 CPU / 1 GB | General vibe coding, running code, light services |
+| **openclaw** | 2 CPU / 4 GB | AI coding assistant (OpenClaw gateway) in a secure sandbox |
+
 Based on goal, recommend:
 
 | User goal | Recommendation |
 |-----------|----------------|
-| General vibe coding / running code | Default image (no snapshot) |
-| AI coding assistant in secure sandbox | **openclaw** snapshot |
+| General vibe coding / running code | **ubuntu** snapshot (1C/1G) |
+| AI coding assistant in secure sandbox | **openclaw** snapshot (2C/4G) |
 | Specific environment (Rust, Python…) | Match from snapshot list |
+| Needs custom CPU/memory | Create WITHOUT `--snapshot` and pass `--cpu/--memory/--disk` (subject to the provider's per-sandbox limits) |
 
 **STOP and present recommendation:**
 > "Based on your goal, I recommend **[snapshot]**: [one-line description].
@@ -587,7 +598,7 @@ $USER_CLItoolbox \
 | `insufficient balance` on create | Balance < 0.12 0G | `deposit` more |
 | `deposit: insufficient funds` | Wallet has no 0G | Transfer 0G to wallet first |
 | `GetBalance` revert | Wrong contract address | Check `SETTLEMENT_CONTRACT` |
-| `NOT_ACKNOWLEDGED` after price change | `signerVersion` incremented | Re-run `acknowledge` |
+| `NOT_ACKNOWLEDGED` after price/node change | `ackVersion` bumped in TappRegistry | Re-run `acknowledge` |
 | Sandbox state is `stopped` | Auto-stopped or billing stopped it | Run `start` before `exec` |
 | SSH token expired | 60-min TTL | Re-run `ssh-access` |
 | `sudo apt-get` fails in sandbox | User may already be root | Try without sudo |

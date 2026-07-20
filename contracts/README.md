@@ -23,7 +23,7 @@ Deployer/Owner: `0xB831371eb2703305f1d9F8542163633D0675CEd7`
 |------|------|-------|
 | initial | — | Initial deploy: per-provider balance isolation, owner model |
 | 2026-03-10 | `0x9a3D6C66e3e6E020D8D40d851Db76D76EBfa93f2` | Removed `msg.sender == provider` check in `settleFeesWithTEE`; TEE key signs settlement txs directly, no `PROVIDER_PRIVATE_KEY` needed |
-| 2026-07-19 | `0x47a8E809Cd81b94eD19874da73C0E3F82DD90E5C` | **v2 redeploy (new proxy/beacon)**: provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement.  Previous dev proxy `0x2024eB0C…E9b3` retired (refund-only) |
+| 2026-07-19 | `0x47a8E809Cd81b94eD19874da73C0E3F82DD90E5C` | **v2 redeploy (new proxy/beacon)**: provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement. Bound to TappRegistry `0x2Ce80374318B1d7Fb3345724457a182E0ad165c9`. Previous dev proxy `0x2024eB0C…E9b3` retired (refund-only) |
 
 ```env
 SETTLEMENT_CONTRACT=0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c
@@ -39,19 +39,19 @@ SETTLEMENT_CONTRACT=0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c
 |-----------|---------|
 | **Proxy** (stable) | `0x3490B9053AC46F7Bf71A1ceBffcB2be2C1405b41` |
 | Beacon | `0x79D6D7B5468AA134360bf73cc667FC63f704B62d` |
-| TappRegistry | `0x2Ce80374318B1d7Fb3345724457a182E0ad165c9` |
+| TappRegistry | `0x95a0BF4148b30F6F8D86870534c51df46Da5511c` |
 
 **Upgrade history:**
 
 | Date | Impl | Notes |
 |------|------|-------|
-| 2026-07-20 | `0x7a1A5FC5B1A6AC1127e2D8b63400615B2ea49C47` | **v2 redeploy (new proxy/beacon)**: provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement. Verified on chainscan. Bound to TappRegistry `0x2Ce8…65c9` (repointed from `0x95a0…` via setTappRegistry right after deploy). Supersedes the v1 testnet proxies `0xA07b0033…FC12c` and `0x3d4d8a05…cf6f` — both retired (refund-only) |
+| 2026-07-20 | `0x7a1A5FC5B1A6AC1127e2D8b63400615B2ea49C47` | **v2 redeploy (new proxy/beacon)**: provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement. Verified on chainscan. Supersedes the v1 testnet proxies `0xA07b0033…FC12c` (bound to TappRegistry `0x2Ce8…`) and `0x3d4d8a05…cf6f` — both retired (refund-only) |
 
 **Provider stake:** held in TappRegistry per node (not in SandboxServing); see `minStakeAmount()` on the registry (1 0G at the time of writing).
 
 ```env
 SETTLEMENT_CONTRACT=0x3490B9053AC46F7Bf71A1ceBffcB2be2C1405b41
-TAPP_REGISTRY=0x2Ce80374318B1d7Fb3345724457a182E0ad165c9
+TAPP_REGISTRY=0x95a0BF4148b30F6F8D86870534c51df46Da5511c
 ```
 
 ---
