@@ -203,7 +203,7 @@ tbody tr:hover td{background:var(--surf2)}
 
   <div id="noWallet" class="wallet-required">
     <div class="icon">🏭</div>
-    <p>Connect your operator wallet to manage the provider service, snapshots, sandboxes, and settlement events.</p>
+    <p>Connect the <strong>app owner</strong> wallet (or an ADMIN_ADDRESSES wallet) to manage this node's service, snapshots, sandboxes, and settlement events. The provider identity is this node's TEE signer — it has no key to connect with.</p>
     <button class="btn btn-prim" onclick="connectWallet()">Connect Wallet</button>
   </div>
 
@@ -443,8 +443,9 @@ const ABI = [
   "function services(address) view returns (string url, string appId, uint256 pricePerCPUPerMin, uint256 pricePerMemGBPerMin, uint256 createFee)",
   "function serviceExists(address) view returns (bool)",
   "function providerEarnings(address) view returns (uint256)",
-  "function addOrUpdateService(string url, string appId, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin)",
-  "function withdrawEarnings()",
+  "function addOrUpdateService(address signer, string url, string appId, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin)",
+  "function withdrawEarnings(address signer)",
+  "function removeService(address signer)",
   "function owner() view returns (address)",
   "function tappRegistry() view returns (address)",
 ];
@@ -582,15 +583,23 @@ async function logout() {
 }
 
 // ── Provider Data ─────────────────────────────────────────────────────────────
+// v2 identity model: the provider address is this node's TEE signer, taken
+// from /api/info — NEVER the connected wallet. The wallet is the appId owner
+// (or an extra admin): it signs admin API requests and owner-only txs
+// (register / withdraw), but is not a ledger identity.
+function nodeProviderAddr() {
+  return info && info.provider_address ? info.provider_address : null;
+}
 async function loadProviderData() {
-  if (!contract || !walletAddr) return;
+  const prov = nodeProviderAddr();
+  if (!contract || !walletAddr || !prov) return;
   try {
-    const exists = await contract.serviceExists(walletAddr);
+    const exists = await contract.serviceExists(prov);
     document.getElementById('svcRegistered').innerHTML = exists
       ? '<span class="badge green">✓ Registered</span>'
       : '<span class="badge red">✗ Not Registered</span>';
     if (exists) {
-      const svc = await contract.services(walletAddr);
+      const svc = await contract.services(prov);
       document.getElementById('svcUrl').textContent = svc.url || '—';
       const teeEl = document.getElementById('svcTEE');
       teeEl.textContent = svc.appId || '—'; teeEl.title = svc.appId || '';
@@ -599,7 +608,7 @@ async function loadProviderData() {
       document.getElementById('svcFee').textContent = fmtNeuron(svc.createFee.toString());
     }
     const [earn, owner] = await Promise.all([
-      contract.providerEarnings(walletAddr),
+      contract.providerEarnings(prov),
       contract.owner().catch(() => null),
     ]);
     document.getElementById('providerEarnings').textContent = fmtNeuron(earn.toString());
@@ -623,14 +632,14 @@ async function doRegisterService() {
   const fee      = document.getElementById('svcFeeInput').value;
   if (!url || !appId) { setErr('serviceErr', 'URL and AppId are required'); return; }
   setErr('serviceErr', '');
-  await sendTx('Service update', () => contract.addOrUpdateService(url, appId, BigInt(cpuPrice), BigInt(fee), BigInt(memPrice)), {
+  await sendTx('Service update', () => contract.addOrUpdateService(nodeProviderAddr(), url, appId, BigInt(cpuPrice), BigInt(fee), BigInt(memPrice)), {
     onSuccess: async () => { closeModal('serviceModal'); await loadProviderData(); },
     errEl: 'serviceErr',
   });
 }
 
 async function withdrawEarnings() {
-  await sendTx('Withdraw earnings', () => contract.withdrawEarnings(), { onSuccess: () => loadProviderData() });
+  await sendTx('Withdraw earnings', () => contract.withdrawEarnings(nodeProviderAddr()), { onSuccess: () => loadProviderData() });
 }
 
 // ── Archive All ───────────────────────────────────────────────────────────────
