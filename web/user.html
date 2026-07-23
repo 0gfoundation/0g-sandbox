@@ -1609,5 +1609,25 @@ function stateTag(state) {
 function setErr(id,msg){ const el=document.getElementById(id); if(!el) return; el.textContent=msg; el.className=msg?'err':''; }
 function setLoading(id,msg){ const el=document.getElementById(id); if(!el) return; el.textContent=msg; el.className=msg?'loading':''; }
 </script>
+<script>
+// .tip-box tooltips are absolutely positioned inside containers that clip
+// (.pv-item/.card use overflow:hidden for rounded corners), so hovering the
+// sealed-only badge showed a truncated box. On hover, promote the box to
+// position:fixed anchored to the trigger's viewport rect — escapes every
+// overflow context; viewport-clamped so it never runs off-screen.
+document.addEventListener('mouseenter', (e) => {
+  const tip = e.target && e.target.closest ? e.target.closest('.tip') : null;
+  if (!tip) return;
+  const box = tip.querySelector('.tip-box');
+  if (!box) return;
+  const r = tip.getBoundingClientRect();
+  const half = (box.offsetWidth || 220) / 2 + 8;
+  box.style.position = 'fixed';
+  box.style.left = Math.max(half, Math.min(window.innerWidth - half, r.left + r.width / 2)) + 'px';
+  box.style.top = (r.top - 7) + 'px';
+  box.style.bottom = 'auto';
+  box.style.transform = 'translate(-50%,-100%)';
+}, true);
+</script>
 </body>
 </html>
