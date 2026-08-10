@@ -81,14 +81,14 @@ func fetchMock() (*AppKey, error) {
 //
 // Required env vars:
 //
-//	BACKEND_TAPP_IP    host of the tapp-daemon  (default: 127.0.0.1)
-//	BACKEND_TAPP_PORT  port of the tapp-daemon  (default: 8080)
-//	BACKEND_APP_NAME   application identifier
+//	BACKEND_TAPP_SOCKET unix socket of the tapp-daemon (e.g. /run/tapp/tapp.sock).
+//	                    When set it takes precedence, keeping the RPC off any TCP port.
+//	BACKEND_TAPP_IP     host of the tapp-daemon  (default: 127.0.0.1; used if no socket)
+//	BACKEND_TAPP_PORT   port of the tapp-daemon  (default: 50051; used if no socket)
+//	BACKEND_APP_NAME    application identifier
 func fetchGRPC(ctx context.Context) (*AppKey, error) {
-	host := envOrDefault("BACKEND_TAPP_IP", "127.0.0.1")
-	port := envOrDefault("BACKEND_TAPP_PORT", "50051")
 	appID := os.Getenv("BACKEND_APP_NAME")
-	target := host + ":" + port
+	target := tappTarget()
 
 	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -124,4 +124,17 @@ func envOrDefault(key, dflt string) string {
 		return v
 	}
 	return dflt
+}
+
+// tappTarget builds the gRPC dial target for the tapp-daemon. A unix socket
+// (BACKEND_TAPP_SOCKET) takes precedence over TCP (BACKEND_TAPP_IP:PORT); Go's
+// grpc has a built-in "unix" resolver, so "unix:///run/tapp/tapp.sock" dials
+// the socket with no custom dialer.
+func tappTarget() string {
+	if sock := os.Getenv("BACKEND_TAPP_SOCKET"); sock != "" {
+		return "unix://" + sock
+	}
+	host := envOrDefault("BACKEND_TAPP_IP", "127.0.0.1")
+	port := envOrDefault("BACKEND_TAPP_PORT", "50051")
+	return host + ":" + port
 }
