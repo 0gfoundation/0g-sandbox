@@ -1,0 +1,44 @@
+{
+  "name": "@0glabs/sandbox-sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for 0G Private Sandbox — wallet-signed sandbox management and on-chain billing",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0gfoundation/0g-sandbox.git",
+    "directory": "sdk/ts"
+  },
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "test": "vitest run",
+    "vectors": "tsx test/gen-vectors.ts",
+    "e2e": "tsx test/e2e.ts"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

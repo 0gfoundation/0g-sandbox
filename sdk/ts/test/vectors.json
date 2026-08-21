@@ -1,0 +1,66 @@
+[
+  {
+    "name": "create-with-payload",
+    "privateKey": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "action": "create",
+    "resourceId": "",
+    "payload": {
+      "snapshot": "0g-ubuntu22",
+      "cpu": 2,
+      "sealed": true,
+      "publicPorts": [
+        8080
+      ]
+    },
+    "nonce": "000102030405060708090a0b0c0d0e0f",
+    "expiresAt": 1893456000,
+    "message": "{\"action\":\"create\",\"expires_at\":1893456000,\"nonce\":\"000102030405060708090a0b0c0d0e0f\",\"payload\":{\"snapshot\":\"0g-ubuntu22\",\"cpu\":2,\"sealed\":true,\"publicPorts\":[8080]},\"resource_id\":\"\"}",
+    "messageB64": "eyJhY3Rpb24iOiJjcmVhdGUiLCJleHBpcmVzX2F0IjoxODkzNDU2MDAwLCJub25jZSI6IjAwMDEwMjAzMDQwNTA2MDcwODA5MGEwYjBjMGQwZTBmIiwicGF5bG9hZCI6eyJzbmFwc2hvdCI6IjBnLXVidW50dTIyIiwiY3B1IjoyLCJzZWFsZWQiOnRydWUsInB1YmxpY1BvcnRzIjpbODA4MF19LCJyZXNvdXJjZV9pZCI6IiJ9",
+    "signature": "0x1c5c2e311bb17ed3d359c16cbe558fd1b4c814c8d94e42cda094894dabfdc5e66cc9ca13cc411f2f3cd84915eac61d92782caa93f5a4567b60f6a128e51fc66b1c"
+  },
+  {
+    "name": "list-empty-payload",
+    "privateKey": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "action": "list",
+    "resourceId": "",
+    "payload": {},
+    "nonce": "000102030405060708090a0b0c0d0e0f",
+    "expiresAt": 1893456000,
+    "message": "{\"action\":\"list\",\"expires_at\":1893456000,\"nonce\":\"000102030405060708090a0b0c0d0e0f\",\"payload\":{},\"resource_id\":\"\"}",
+    "messageB64": "eyJhY3Rpb24iOiJsaXN0IiwiZXhwaXJlc19hdCI6MTg5MzQ1NjAwMCwibm9uY2UiOiIwMDAxMDIwMzA0MDUwNjA3MDgwOTBhMGIwYzBkMGUwZiIsInBheWxvYWQiOnt9LCJyZXNvdXJjZV9pZCI6IiJ9",
+    "signature": "0x0abc6575a41c648ccd05b2bd0f12ee8e550ddf888662792d6716b4260b1d307312c497c2e326af7b773f531a511262169e6ec5ca4ee65fbdd7d0b71d84747c0f1c"
+  },
+  {
+    "name": "toolbox-with-resource",
+    "privateKey": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "action": "toolbox",
+    "resourceId": "a1b2c3d4-0000-1111-2222-333344445555",
+    "payload": {},
+    "nonce": "000102030405060708090a0b0c0d0e0f",
+    "expiresAt": 1893456000,
+    "message": "{\"action\":\"toolbox\",\"expires_at\":1893456000,\"nonce\":\"000102030405060708090a0b0c0d0e0f\",\"payload\":{},\"resource_id\":\"a1b2c3d4-0000-1111-2222-333344445555\"}",
+    "messageB64": "eyJhY3Rpb24iOiJ0b29sYm94IiwiZXhwaXJlc19hdCI6MTg5MzQ1NjAwMCwibm9uY2UiOiIwMDAxMDIwMzA0MDUwNjA3MDgwOTBhMGIwYzBkMGUwZiIsInBheWxvYWQiOnt9LCJyZXNvdXJjZV9pZCI6ImExYjJjM2Q0LTAwMDAtMTExMS0yMjIyLTMzMzM0NDQ0NTU1NSJ9",
+    "signature": "0xc5bfcb3634892015bb17d490c482084fba313a6b4afa07a72f6f200de192304409baa966b29456b898973914e0a2ff5fbe6cde16b71c949c7fc4d813e17a81ba1c"
+  },
+  {
+    "name": "unicode-payload",
+    "privateKey": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "action": "create",
+    "resourceId": "",
+    "payload": {
+      "name": "沙盒-α",
+      "env": {
+        "GREETING": "héllo & <world>"
+      }
+    },
+    "nonce": "000102030405060708090a0b0c0d0e0f",
+    "expiresAt": 1893456000,
+    "message": "{\"action\":\"create\",\"expires_at\":1893456000,\"nonce\":\"000102030405060708090a0b0c0d0e0f\",\"payload\":{\"name\":\"沙盒-α\",\"env\":{\"GREETING\":\"héllo & <world>\"}},\"resource_id\":\"\"}",
+    "messageB64": "eyJhY3Rpb24iOiJjcmVhdGUiLCJleHBpcmVzX2F0IjoxODkzNDU2MDAwLCJub25jZSI6IjAwMDEwMjAzMDQwNTA2MDcwODA5MGEwYjBjMGQwZTBmIiwicGF5bG9hZCI6eyJuYW1lIjoi5rKZ55uSLc6xIiwiZW52Ijp7IkdSRUVUSU5HIjoiaMOpbGxvICYgPHdvcmxkPiJ9fSwicmVzb3VyY2VfaWQiOiIifQ==",
+    "signature": "0x83b7e232e0ff4753fb6f512897fddb3f1d9501a9645a4ba97321f0ac91cc72e902fc5eed74962b6593f002f023c6d10ed8b8461529e7dbf205d896ac70cd80671c"
+  }
+]
