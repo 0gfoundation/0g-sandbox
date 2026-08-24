@@ -105,9 +105,11 @@ Codes: `INSUFFICIENT_BALANCE` `NOT_ACKNOWLEDGED` `SEALED_ONLY` `SEALED_FORBIDDEN
 `API_ERROR` `CHAIN_ERROR`.
 
 The SDK prefers a stable `code` field if the server sends one, and only falls back to
-substring-matching the error text. `create()` also validates `publicPorts` (≤16, no system
-ports, sealed⊇8080) and `sealId` (64 hex) client-side, throwing `INVALID_ARGUMENT` before any
-network call.
+substring-matching the error text. `create()` validates **format invariants** client-side
+(port range, `sealId` 64 hex, sealed⊇8080) and throws `INVALID_ARGUMENT` before any network
+call — but it does **not** duplicate server *policy* (max port count, system-port list,
+quotas); those stay authoritative on the server so the SDK never wrongly rejects on a limit
+change.
 
 HTTP requests carry a timeout (`SDKConfig.timeoutMs`, default 60s; `exec` extends it past the
 command's own timeout). Sandboxes created via a `Broker` expose `sb.provider` so you can

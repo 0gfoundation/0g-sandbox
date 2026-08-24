@@ -1,12 +1,15 @@
 import type { HttpClient } from './http.js';
 import { SandboxSDKError } from './errors.js';
 
-// Daytona system ports (TERMINAL / TOOLBOX / RECORDING) — never publishable.
-const SYSTEM_PORTS = new Set([22222, 2280, 33333]);
 const AGENT_PORT = 8080;
-const MAX_PUBLIC_PORTS = 16;
 
-/** Enforce the server's create rules client-side so misuse fails fast with a clear error. */
+/**
+ * Validate only format invariants that won't drift from the server — malformed
+ * input the SDK can reject with certainty. Server *policy* (max port count,
+ * the system-port list, quotas) is deliberately NOT duplicated here: the server
+ * is the authority, and hardcoding those would make the SDK wrongly reject
+ * valid requests whenever the server changes a limit.
+ */
 export function validateCreateOptions(opts: CreateOptions): void {
   const fail = (msg: string) => {
     throw new SandboxSDKError('INVALID_ARGUMENT', msg);
@@ -15,13 +18,12 @@ export function validateCreateOptions(opts: CreateOptions): void {
     fail('sealId must be 64 hex characters');
   }
   if (opts.publicPorts) {
-    const ports = opts.publicPorts;
-    if (ports.length > MAX_PUBLIC_PORTS) fail(`publicPorts allows at most ${MAX_PUBLIC_PORTS} ports`);
-    for (const p of ports) {
+    for (const p of opts.publicPorts) {
       if (!Number.isInteger(p) || p < 1 || p > 65535) fail(`publicPorts contains an invalid port: ${p}`);
-      if (SYSTEM_PORTS.has(p)) fail(`publicPorts must not include system port ${p}`);
     }
-    if (opts.sealed && !ports.includes(AGENT_PORT)) {
+    // sealed requires 8080 — an SDK-level contract (sealed containers front their
+    // agent there), not a tunable server limit, so it's safe to enforce early.
+    if (opts.sealed && !opts.publicPorts.includes(AGENT_PORT)) {
       fail(`sealed sandboxes must expose port ${AGENT_PORT} (the agent-fronting proxy)`);
     }
   }

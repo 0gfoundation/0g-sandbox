@@ -24,13 +24,11 @@ describe('validateCreateOptions', () => {
   it('rejects bad sealId', () => {
     expect(() => validateCreateOptions({ sealId: 'xyz' })).toThrowError(/64 hex/);
   });
-  it('rejects too many public ports', () => {
-    expect(() => validateCreateOptions({ publicPorts: Array.from({ length: 17 }, (_, i) => 1000 + i) })).toThrowError(
-      /at most 16/,
-    );
-  });
-  it('rejects system ports', () => {
-    expect(() => validateCreateOptions({ publicPorts: [22222] })).toThrowError(/system port/);
+  it('does NOT enforce server policy (port count, system ports) — server is authority', () => {
+    // These are valid *formats*; the server may or may not accept them, but the
+    // SDK must not pre-reject on drift-prone policy.
+    expect(() => validateCreateOptions({ publicPorts: Array.from({ length: 20 }, (_, i) => 1000 + i) })).not.toThrow();
+    expect(() => validateCreateOptions({ publicPorts: [22222] })).not.toThrow();
   });
   it('rejects out-of-range ports', () => {
     expect(() => validateCreateOptions({ publicPorts: [70000] })).toThrowError(/invalid port/);
