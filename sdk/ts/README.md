@@ -1,4 +1,4 @@
-# @0glabs/sandbox-sdk
+# @0gfoundation/sandbox-sdk
 
 TypeScript SDK for [0G Private Sandbox](https://github.com/0gfoundation/0g-sandbox) — private,
 isolated sandboxes billed in 0G tokens. Wraps the EIP-191 per-request signing protocol and the
@@ -9,7 +9,7 @@ Works in Node ≥ 18 and browsers. Single dependency: [viem](https://viem.sh).
 ## Quick start (agent with a private key)
 
 ```ts
-import { createSandboxSDK, privateKeySigner } from '@0glabs/sandbox-sdk';
+import { createSandboxSDK, privateKeySigner } from '@0gfoundation/sandbox-sdk';
 
 const sdk = createSandboxSDK({
   providerUrl: 'https://provider-private-sandbox.0g.ai',
@@ -38,7 +38,7 @@ const sb = await sdk.sandbox.create({ sealed: true, publicPorts: [8080], snapsho
 ## Browser wallets
 
 ```ts
-import { createSandboxSDK, fromEip1193 } from '@0glabs/sandbox-sdk';
+import { createSandboxSDK, fromEip1193 } from '@0gfoundation/sandbox-sdk';
 const signer = await fromEip1193(window.ethereum);
 const sdk = createSandboxSDK({ providerUrl, signer });
 ```
@@ -51,7 +51,7 @@ Use `privateKeySigner` for agents and automation.
 Pick a provider through a broker instead of hardcoding one:
 
 ```ts
-import { BrokerApi, createSandboxSDK, privateKeySigner } from '@0glabs/sandbox-sdk';
+import { BrokerApi, createSandboxSDK, privateKeySigner } from '@0gfoundation/sandbox-sdk';
 
 const broker = new BrokerApi('https://private-sandbox-testnet.0g.ai');
 const providers = await broker.providers();       // on-chain-indexed, stale nodes dropped
@@ -69,7 +69,7 @@ const sdk = createSandboxSDK({
 All failures throw `SandboxSDKError` with a stable `code` — branch on it, not on messages:
 
 ```ts
-import { SandboxSDKError } from '@0glabs/sandbox-sdk';
+import { SandboxSDKError } from '@0gfoundation/sandbox-sdk';
 try {
   await sdk.sandbox.create();
 } catch (e) {

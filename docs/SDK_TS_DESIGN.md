@@ -1,6 +1,6 @@
 # TypeScript SDK — Interface Design (v0)
 
-Package: `@0glabs/sandbox-sdk` · Targets: Node ≥ 18 + browser (fetch-based) · Dep: `viem` only
+Package: `@0gfoundation/sandbox-sdk` · Targets: Node ≥ 18 + browser (fetch-based) · Dep: `viem` only
 
 Wraps the two things every client must do today by hand:
 1. **EIP-191 request signing** — `{action, expires_at, nonce, payload, resource_id}` JSON →
@@ -14,7 +14,7 @@ Wraps the two things every client must do today by hand:
 ## Entry point
 
 ```ts
-import { createSandboxSDK, privateKeySigner } from '@0glabs/sandbox-sdk'
+import { createSandboxSDK, privateKeySigner } from '@0gfoundation/sandbox-sdk'
 
 const sdk = createSandboxSDK({
   providerUrl: 'https://provider-private-sandbox.0g.ai',
