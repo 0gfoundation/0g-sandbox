@@ -96,6 +96,16 @@ createSandboxSDK({ providerUrl, signer, chain: { rpcUrl, chainId, settlementCont
 All neuron amounts are `bigint` (1 0G = 10^18 neuron); `{ og: 0.5 }` is accepted at input
 boundaries.
 
+## Preview URLs
+
+The server attaches `preview_urls` to the create response only when `publicPorts` is set. For
+all-ports-public creates, give the SDK the provider's proxy domain so `previewUrl()` can build
+URLs locally:
+
+```ts
+createSandboxSDK({ providerUrl, signer, preview: { domain: 'provider-private-sandbox.0g.ai' } });
+```
+
 ## Escape hatches
 
 ```ts

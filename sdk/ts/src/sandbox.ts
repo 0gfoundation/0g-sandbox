@@ -42,8 +42,22 @@ export interface ExecOptions {
   cwd?: string;
 }
 
+/**
+ * Fallback for previewUrl(): the provider's PROXY_DOMAIN. Only needed when
+ * the create response carries no preview_urls (i.e. no publicPorts was set —
+ * the server attaches URLs only for restricted-port creates).
+ */
+export interface PreviewConfig {
+  /** e.g. 'provider-private-sandbox.0g.ai' or '1.2.3.4.nip.io:4000' */
+  domain: string;
+  protocol?: 'http' | 'https';
+}
+
 export class SandboxApi {
-  constructor(private readonly httpClient: HttpClient) {}
+  constructor(
+    private readonly httpClient: HttpClient,
+    private readonly preview?: PreviewConfig,
+  ) {}
 
   async create(opts: CreateOptions = {}): Promise<Sandbox> {
     const body: Record<string, unknown> = {};
@@ -63,7 +77,7 @@ export class SandboxApi {
       payload: body,
       body,
     });
-    return new Sandbox(this.httpClient, info);
+    return new Sandbox(this.httpClient, info, this.preview);
   }
 
   async list(): Promise<SandboxInfo[]> {
@@ -75,7 +89,7 @@ export class SandboxApi {
       action: 'get',
       resourceId: id,
     });
-    return new Sandbox(this.httpClient, info);
+    return new Sandbox(this.httpClient, info, this.preview);
   }
 }
 
@@ -83,6 +97,7 @@ export class Sandbox {
   constructor(
     private readonly httpClient: HttpClient,
     public info: SandboxInfo,
+    private readonly preview?: PreviewConfig,
   ) {}
 
   get id(): string {
@@ -106,9 +121,13 @@ export class Sandbox {
       const m = any.match(/^(https?:\/\/)(\d+)-(.+)$/);
       if (m) return `${m[1]}${port}-${m[3]}`;
     }
+    if (this.preview) {
+      return `${this.preview.protocol ?? 'http'}://${port}-${this.id}.${this.preview.domain}`;
+    }
     throw new SandboxSDKError(
       'API_ERROR',
-      'preview URL unavailable: create response carried no preview_urls (provider missing PROXY_DOMAIN?)',
+      'preview URL unavailable: the server only returns preview_urls for publicPorts creates — ' +
+        'pass publicPorts on create, or set SDKConfig.preview = { domain } to construct URLs locally',
     );
   }
 

@@ -1,7 +1,7 @@
 import { ChainApi, GALILEO_TESTNET, type ChainConfig } from './chain.js';
 import { HttpClient, type FetchLike } from './http.js';
 import { ProviderInfoApi } from './provider.js';
-import { SandboxApi } from './sandbox.js';
+import { SandboxApi, type PreviewConfig } from './sandbox.js';
 import { buildAuthHeaders, type Signer } from './signer.js';
 
 export interface SDKConfig {
@@ -10,6 +10,8 @@ export interface SDKConfig {
   signer: Signer;
   /** Defaults: 0G Galileo testnet; settlementContract auto-resolved from GET /api/info. */
   chain?: Partial<ChainConfig>;
+  /** Fallback proxy domain for previewUrl() on creates without publicPorts. */
+  preview?: PreviewConfig;
   /** Injectable fetch (tests / custom agents). */
   fetch?: FetchLike;
 }
@@ -38,7 +40,7 @@ export function createSandboxSDK(cfg: SDKConfig): SandboxSDK {
   return {
     provider,
     chain,
-    sandbox: new SandboxApi(httpClient),
+    sandbox: new SandboxApi(httpClient, cfg.preview),
     signedFetch: httpClient.signed.bind(httpClient),
   };
 }
@@ -50,7 +52,7 @@ export type { ErrorCode } from './errors.js';
 export { ChainApi, GALILEO_TESTNET, toNeuron } from './chain.js';
 export type { ChainConfig, Balance, TxReceipt, Amount, ProviderReview } from './chain.js';
 export { SandboxApi, Sandbox } from './sandbox.js';
-export type { CreateOptions, SandboxInfo, ExecResult, ExecOptions } from './sandbox.js';
+export type { CreateOptions, SandboxInfo, ExecResult, ExecOptions, PreviewConfig } from './sandbox.js';
 export { ProviderInfoApi } from './provider.js';
 export type { ProviderInfo, SnapshotInfo } from './provider.js';
 export { HttpClient } from './http.js';

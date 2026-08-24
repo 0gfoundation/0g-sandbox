@@ -227,6 +227,25 @@ export class ChainApi {
     return this.writeTo(await this.settlementAddress(), sandboxServingAbi, functionName, args, value);
   }
 
+  private async pollReceipt(hash: Hex, timeoutMs: number) {
+    const deadline = Date.now() + timeoutMs;
+    let lastErr: unknown;
+    while (Date.now() < deadline) {
+      try {
+        return await this.publicClient.getTransactionReceipt({ hash });
+      } catch (err) {
+        lastErr = err; // "not found" OR transient RPC error — keep polling
+      }
+      await sleep(2_000);
+    }
+    throw new SandboxSDKError(
+      'CHAIN_ERROR',
+      `transaction ${hash} not confirmed within ${timeoutMs / 1000}s`,
+      undefined,
+      lastErr,
+    );
+  }
+
   private async writeTo(
     address: Address,
     abi: readonly unknown[],
@@ -253,14 +272,11 @@ export class ChainApi {
         args: args as never,
         value,
       } as never);
-      // Generous retry budget: load-balanced RPCs can serve the new block from
-      // one node while the receipt lags on another (seen on evmrpc-testnet.0g.ai).
-      const receipt = await this.publicClient.waitForTransactionReceipt({
-        hash: txHash,
-        timeout: 120_000,
-        pollingInterval: 2_000,
-        retryCount: 30,
-      });
+      // Manual receipt polling: evmrpc-testnet.0g.ai is load-balanced and can
+      // error (not just return null) on pending-tx receipt lookups, which
+      // defeats viem's waitForTransactionReceipt retry accounting. Poll
+      // ourselves, tolerating any lookup error until the deadline.
+      const receipt = await this.pollReceipt(txHash, 180_000);
       if (receipt.status !== 'success') {
         throw new SandboxSDKError('CHAIN_ERROR', `transaction reverted: ${txHash}`, undefined, receipt);
       }
@@ -270,6 +286,10 @@ export class ChainApi {
       throw new SandboxSDKError('CHAIN_ERROR', (err as Error).message ?? String(err), undefined, err);
     }
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 export function toNeuron(amount: Amount): bigint {
