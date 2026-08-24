@@ -46,6 +46,24 @@ const sdk = createSandboxSDK({ providerUrl, signer });
 Note: the protocol signs **every** API request, so interactive wallets show one popup per call.
 Use `privateKeySigner` for agents and automation.
 
+## Broker: provider discovery + CORS-free routing
+
+Pick a provider through a broker instead of hardcoding one:
+
+```ts
+import { BrokerApi, createSandboxSDK, privateKeySigner } from '@0glabs/sandbox-sdk';
+
+const broker = new BrokerApi('https://private-sandbox-testnet.0g.ai');
+const providers = await broker.providers();       // on-chain-indexed, stale nodes dropped
+const chosen = providers[0];
+
+const sdk = createSandboxSDK({
+  providerUrl: chosen.url,                        // direct — Node/agents
+  // providerUrl: broker.proxyUrl(chosen.address), // via broker reverse proxy — browsers (no CORS)
+  signer: privateKeySigner(key),
+});
+```
+
 ## Error handling
 
 All failures throw `SandboxSDKError` with a stable `code` — branch on it, not on messages:

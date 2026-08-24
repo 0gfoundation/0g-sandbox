@@ -55,3 +55,5 @@ export { ProviderInfoApi } from './provider.js';
 export type { ProviderInfo, SnapshotInfo } from './provider.js';
 export { HttpClient } from './http.js';
 export type { FetchLike, SignedRequestOptions } from './http.js';
+export { BrokerApi, discoverProviders } from './broker.js';
+export type { BrokerInfo, ProviderEntry } from './broker.js';
