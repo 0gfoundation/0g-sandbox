@@ -139,4 +139,4 @@ PROVIDER_URL=… USER_KEY=0x… npm run e2e   # live end-to-end against a provid
 
 The golden vectors in `test/vectors.json` are the cross-language signing contract: the Go test
 `internal/auth/sdk_vectors_test.go` verifies every vector with the server's actual
-`auth.Recover`. Interface rationale: [`docs/SDK_TS_DESIGN.md`](../../docs/SDK_TS_DESIGN.md).
+`auth.Recover`. Overview and the signing-protocol/security notes: [`../README.md`](../README.md).
