@@ -18,13 +18,31 @@ must otherwise do by hand:
 Go and Python may follow as sibling directories; the signing protocol is pinned by shared
 golden vectors (see below) so every language stays byte-compatible.
 
-## Two ways to reach a provider
+## Provider vs broker
 
-- **Direct** — `createSandboxSDK({ providerUrl })` when you already know your provider.
+These are different roles — don't conflate them:
+
+- **Provider** — a billing proxy in front of a sandbox runtime, and the **billing
+  counterparty**. Your `(you, provider)` balance, your TEE acknowledgement, and the sandbox
+  itself all live on one provider. Every sandbox and chain operation ultimately targets a
+  provider.
+- **Broker** — a routing / discovery hub in front of *many* providers. It lists providers,
+  serves chain config, and reverse-proxies your (still wallet-signed) requests to a chosen
+  provider. It is **not** the billing counterparty: it never holds your balance, never runs
+  your sandbox — it only selects and forwards. (Separately, the broker runs a server-side
+  balance monitor that can top up `(user, provider)` balances via a payment layer; that is not
+  part of the SDK.)
+
+## Reaching a provider
+
+- **Direct** — `createSandboxSDK({ providerUrl })` when you already know your provider. HTTP
+  goes straight to that provider.
 - **Broker** — the `Broker` class fronts many providers through one endpoint: discovery,
   provider selection (explicit address today; snapshot-aware default; strategy-based routing
   reserved for later), and transparent reverse-proxy routing (browsers avoid CORS). The
-  created sandbox is pinned to its origin provider.
+  created sandbox is pinned to its origin provider. **Even here, chain operations
+  (deposit/acknowledge/refund) go straight to the `(you, provider)` bucket on-chain** — the
+  broker only picks the provider and proxies the HTTP; it is never the payee.
 
 ## Signing protocol contract
 
