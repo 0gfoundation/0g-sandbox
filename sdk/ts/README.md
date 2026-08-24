@@ -75,6 +75,12 @@ await broker.chain.deposit({ og: 0.5 }, { provider: '0xa19c…' });
 | omitted, no snapshot | first indexed provider |
 | `{ strategy: … }` | reserved — throws `NOT_IMPLEMENTED` until broker-side routing lands |
 
+On-chain **write** operations (`chain.deposit` / `requestRefund` / `withdrawRefund` /
+`acknowledge` / `revokeAcknowledgement`) require an explicit `{ provider }` — they throw
+`NO_PROVIDER` rather than default to an arbitrary provider, since list order isn't stable and
+sending funds/acks to the wrong provider is a footgun. Reads (`balance`) and `create` may
+default.
+
 The direct path (`createSandboxSDK({ providerUrl })`) still works unchanged — use it when you
 already know your provider; use `Broker` when you want discovery + selection handled for you.
 

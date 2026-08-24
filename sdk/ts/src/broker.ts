@@ -231,8 +231,22 @@ class BrokerSandboxApi {
 class BrokerChainApi {
   constructor(private readonly broker: Broker) {}
 
+  // Reads may fall back to the default provider (first / snapshot-aware).
   private async api(target?: Target) {
     return (await this.broker.sdkFor(await this.broker.resolveProvider(target))).chain;
+  }
+
+  // Writes require an explicit provider: defaulting to "first indexed provider"
+  // would silently move funds/acks to a provider the caller never chose, and
+  // list order is not stable. Reads and create can default safely; money can't.
+  private async writeApi(op: string, target?: Target) {
+    if (!target?.provider) {
+      throw new SandboxSDKError(
+        'NO_PROVIDER',
+        `broker.chain.${op} requires an explicit { provider } — refusing to default to an arbitrary provider for an on-chain write`,
+      );
+    }
+    return this.api(target);
   }
 
   async providerAddress(target?: Target) {
@@ -241,26 +255,26 @@ class BrokerChainApi {
   async balance(target?: Target): Promise<Balance> {
     return (await this.api(target)).balance();
   }
-  async deposit(amount: Amount, target?: Target): Promise<TxReceipt> {
-    return (await this.api(target)).deposit(amount);
-  }
-  async requestRefund(amount: Amount, target?: Target): Promise<TxReceipt> {
-    return (await this.api(target)).requestRefund(amount);
-  }
-  async withdrawRefund(target?: Target): Promise<TxReceipt> {
-    return (await this.api(target)).withdrawRefund();
+  async isAcknowledged(target?: Target): Promise<boolean> {
+    return (await this.api(target)).isAcknowledged();
   }
   async reviewProvider(target?: Target): Promise<ProviderReview> {
     return (await this.api(target)).reviewProvider();
   }
+  async deposit(amount: Amount, target?: Target): Promise<TxReceipt> {
+    return (await this.writeApi('deposit', target)).deposit(amount);
+  }
+  async requestRefund(amount: Amount, target?: Target): Promise<TxReceipt> {
+    return (await this.writeApi('requestRefund', target)).requestRefund(amount);
+  }
+  async withdrawRefund(target?: Target): Promise<TxReceipt> {
+    return (await this.writeApi('withdrawRefund', target)).withdrawRefund();
+  }
   async acknowledge(target?: Target): Promise<TxReceipt> {
-    return (await this.api(target)).acknowledge();
+    return (await this.writeApi('acknowledge', target)).acknowledge();
   }
   async revokeAcknowledgement(target?: Target): Promise<TxReceipt> {
-    return (await this.api(target)).revokeAcknowledgement();
-  }
-  async isAcknowledged(target?: Target): Promise<boolean> {
-    return (await this.api(target)).isAcknowledged();
+    return (await this.writeApi('revokeAcknowledgement', target)).revokeAcknowledgement();
   }
 }
 

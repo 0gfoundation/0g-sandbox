@@ -82,6 +82,28 @@ describe('Broker.resolveProvider', () => {
   });
 });
 
+describe('Broker.chain write ops require explicit provider', () => {
+  it('deposit without provider → NO_PROVIDER (no fallback to first)', async () => {
+    const b = broker(mockFetch());
+    await expect(b.chain.deposit({ og: 0.1 })).rejects.toMatchObject({ code: 'NO_PROVIDER' });
+  });
+
+  it('acknowledge / requestRefund / withdrawRefund / revoke without provider → NO_PROVIDER', async () => {
+    const b = broker(mockFetch());
+    await expect(b.chain.acknowledge()).rejects.toMatchObject({ code: 'NO_PROVIDER' });
+    await expect(b.chain.requestRefund(1n)).rejects.toMatchObject({ code: 'NO_PROVIDER' });
+    await expect(b.chain.withdrawRefund()).rejects.toMatchObject({ code: 'NO_PROVIDER' });
+    await expect(b.chain.revokeAcknowledgement()).rejects.toMatchObject({ code: 'NO_PROVIDER' });
+  });
+
+  it('reads (balance) may default without a provider', async () => {
+    const b = broker(mockFetch());
+    // resolves to first provider then hits chain (which would need RPC) — we only
+    // assert it does NOT throw NO_PROVIDER at the resolution stage.
+    await expect(b.chain.balance()).rejects.not.toMatchObject({ code: 'NO_PROVIDER' });
+  });
+});
+
 describe('Broker error surface', () => {
   it('empty provider list → NO_PROVIDER', async () => {
     const fetchFn = vi.fn(async (url: string) =>
