@@ -46,23 +46,37 @@ const sdk = createSandboxSDK({ providerUrl, signer });
 Note: the protocol signs **every** API request, so interactive wallets show one popup per call.
 Use `privateKeySigner` for agents and automation.
 
-## Broker: provider discovery + CORS-free routing
+## Broker: one endpoint in front of many providers
 
-Pick a provider through a broker instead of hardcoding one:
+Instead of hardcoding a provider, go through a broker. The `Broker` class handles
+discovery, provider selection, and routing — every request is transparently reverse-proxied to
+the chosen provider (same-origin, so browsers avoid CORS). You only ever hold the broker URL.
 
 ```ts
-import { BrokerApi, createSandboxSDK, privateKeySigner } from '@0gfoundation/sandbox-sdk';
+import { Broker, privateKeySigner } from '@0gfoundation/sandbox-sdk';
 
-const broker = new BrokerApi('https://private-sandbox-testnet.0g.ai');
-const providers = await broker.providers();       // on-chain-indexed, stale nodes dropped
-const chosen = providers[0];
+const broker = new Broker({ brokerUrl: 'https://private-sandbox-testnet.0g.ai', signer: privateKeySigner(key) });
 
-const sdk = createSandboxSDK({
-  providerUrl: chosen.url,                        // direct — Node/agents
-  // providerUrl: broker.proxyUrl(chosen.address), // via broker reverse proxy — browsers (no CORS)
-  signer: privateKeySigner(key),
-});
+await broker.providers();                                   // on-chain-indexed list (cached)
+
+// Operate with an optional target. The returned Sandbox is pinned to the
+// provider it was created on — exec/stop/delete auto-route back to it.
+const sb = await broker.sandbox.create({ snapshot: '0g-openclaw' });        // no provider → picks one that has the snapshot
+const sb2 = await broker.sandbox.create({}, { provider: '0xa19c…' });        // explicit provider
+await broker.chain.deposit({ og: 0.5 }, { provider: '0xa19c…' });
 ```
+
+**Provider resolution** (the `target` argument, both fields optional):
+
+| `target` / create opts | picked provider |
+|---|---|
+| `{ provider: '0x…' }` | that address |
+| omitted + `create({ snapshot })` | a provider with that snapshot **active** (else `NO_PROVIDER`) |
+| omitted, no snapshot | first indexed provider |
+| `{ strategy: … }` | reserved — throws `NOT_IMPLEMENTED` until broker-side routing lands |
+
+The direct path (`createSandboxSDK({ providerUrl })`) still works unchanged — use it when you
+already know your provider; use `Broker` when you want discovery + selection handled for you.
 
 ## Error handling
 

@@ -10,6 +10,8 @@ export type ErrorCode =
   | 'NOT_FOUND'
   | 'TRUST_MISMATCH'
   | 'SIGNER_NO_TX'
+  | 'NO_PROVIDER'
+  | 'NOT_IMPLEMENTED'
   | 'API_ERROR'
   | 'CHAIN_ERROR';
 
