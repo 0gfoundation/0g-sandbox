@@ -52,11 +52,6 @@ Instead of hardcoding a provider, go through a broker. The `Broker` class handle
 discovery, provider selection, and routing — every request is transparently reverse-proxied to
 the chosen provider (same-origin, so browsers avoid CORS). You only ever hold the broker URL.
 
-The broker is only a router: it is **not** the billing counterparty. Your balance,
-acknowledgement, and sandbox all live on the selected provider — even `broker.chain.deposit`
-funds the `(you, provider)` bucket on-chain directly, not the broker. See
-[../README.md](../README.md#provider-vs-broker) for the role distinction.
-
 ```ts
 import { Broker, privateKeySigner } from '@0gfoundation/sandbox-sdk';
 
