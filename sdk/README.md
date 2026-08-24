@@ -18,26 +18,24 @@ must otherwise do by hand:
 Go and Python may follow as sibling directories; the signing protocol is pinned by shared
 golden vectors (see below) so every language stays byte-compatible.
 
-## Access paths
+## Interact with the provider
 
-- **Direct** — `createSandboxSDK({ providerUrl })` when you already know your provider.
-- **Broker** — `new Broker({ brokerUrl })` fronts many providers through one endpoint: it
-  discovers, selects (explicit address today; snapshot-aware default; strategy reserved), and
-  reverse-proxies to the chosen provider (browsers avoid CORS). Created sandbox is pinned to
-  its origin provider.
+The provider does the actual work. Connect directly with `createSandboxSDK({ providerUrl })`.
 
-## Interactions by target
-
-**Broker** — discovery + routing:
-- `broker.info()` — chain config the broker indexes
-- `broker.providers()` — provider list
-- provider selection via the `target` argument on each operation
-- reverse-proxy routing to the selected provider
-
-**Provider** — the actual work (direct, or proxied through the broker):
 - `sandbox.*` — create / list / get / exec / toolbox / start / stop / delete / archive / sshAccess
 - `chain.*` — deposit / acknowledge / balance / requestRefund / withdrawRefund (on-chain, straight to RPC and the `(you, provider)` bucket)
 - `provider.info()` / `provider.snapshots()`
+
+## Interact with the broker
+
+The broker fronts many providers through one endpoint. Connect with `new Broker({ brokerUrl })`.
+
+- `broker.info()` — chain config the broker indexes
+- `broker.providers()` — provider list
+- `broker.sandbox.*` / `broker.chain.*` — the same provider operations, each taking an optional
+  `target` (`{ provider?, strategy? }`); the broker selects a provider (explicit address today;
+  snapshot-aware default; strategy reserved) and reverse-proxies to it (browsers avoid CORS).
+  A created sandbox is pinned to its origin provider.
 
 ## Signing protocol contract
 
