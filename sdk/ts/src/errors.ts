@@ -11,9 +11,17 @@ export type ErrorCode =
   | 'TRUST_MISMATCH'
   | 'SIGNER_NO_TX'
   | 'NO_PROVIDER'
+  | 'INVALID_ARGUMENT'
   | 'NOT_IMPLEMENTED'
   | 'API_ERROR'
   | 'CHAIN_ERROR';
+
+const KNOWN_CODES = new Set<ErrorCode>([
+  'INSUFFICIENT_BALANCE', 'NOT_ACKNOWLEDGED', 'SEALED_ONLY', 'SEALED_FORBIDDEN',
+  'QUOTA_EXCEEDED', 'PUBLIC_PORTS_UNSUPPORTED', 'UNAUTHORIZED', 'FORBIDDEN',
+  'NOT_FOUND', 'TRUST_MISMATCH', 'SIGNER_NO_TX', 'NO_PROVIDER', 'INVALID_ARGUMENT',
+  'NOT_IMPLEMENTED', 'API_ERROR', 'CHAIN_ERROR',
+]);
 
 export class SandboxSDKError extends Error {
   readonly code: ErrorCode;
@@ -38,6 +46,7 @@ export class SandboxSDKError extends Error {
 export function mapHttpError(status: number, bodyText: string): SandboxSDKError {
   let message = bodyText;
   let details: unknown = bodyText;
+  let serverCode: string | undefined;
   try {
     const parsed = JSON.parse(bodyText);
     details = parsed;
@@ -46,8 +55,14 @@ export function mapHttpError(status: number, bodyText: string): SandboxSDKError 
     // specific message when both exist.
     if (typeof parsed?.message === 'string') message = parsed.message;
     else if (typeof parsed?.error === 'string') message = parsed.error;
+    // Prefer a stable machine code if the server ever emits one; text-matching
+    // below is only a fallback (and is brittle to server wording changes).
+    if (typeof parsed?.code === 'string') serverCode = parsed.code;
   } catch {
     /* non-JSON body — keep raw text */
+  }
+  if (serverCode && KNOWN_CODES.has(serverCode as ErrorCode)) {
+    return new SandboxSDKError(serverCode as ErrorCode, message, status, details);
   }
   const m = message.toLowerCase();
 

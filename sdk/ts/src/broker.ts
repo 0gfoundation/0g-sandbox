@@ -160,6 +160,7 @@ export class Broker {
         tappRegistry: info.tapp_registry as `0x${string}`,
       },
       preview: this.cfg.preview,
+      providerAddress: key,
       fetch: this.fetchFn,
     });
     this.sdkCache.set(key, sdk);
@@ -221,8 +222,15 @@ class BrokerSandboxApi {
     return (await this.broker.sdkFor(addr)).sandbox.list();
   }
 
-  /** Get a sandbox. Provide target.provider — a sandbox id lives on one provider. */
-  async get(id: string, target?: Target): Promise<Sandbox> {
+  /**
+   * Get a sandbox. Requires target.provider — a bare id is meaningless without
+   * knowing which provider it lives on (use the `provider` on a Sandbox returned
+   * by create()). Defaulting to "first provider" would just 404 confusingly.
+   */
+  async get(id: string, target: Target): Promise<Sandbox> {
+    if (!target?.provider) {
+      throw new SandboxSDKError('NO_PROVIDER', 'broker.sandbox.get requires an explicit { provider } — a sandbox id lives on one provider');
+    }
     const addr = await this.broker.resolveProvider(target);
     return (await this.broker.sdkFor(addr)).sandbox.get(id);
   }

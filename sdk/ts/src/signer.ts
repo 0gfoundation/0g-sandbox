@@ -24,6 +24,9 @@ export interface Eip1193Provider {
 
 /** Signer from a raw private key (agents / server-side use). */
 export function privateKeySigner(privateKey: `0x${string}`): Signer {
+  if (!privateKey || !/^0x[0-9a-fA-F]{64}$/.test(privateKey)) {
+    throw new Error('privateKeySigner: expected a 0x-prefixed 32-byte hex private key');
+  }
   const account = privateKeyToAccount(privateKey);
   return {
     address: account.address,

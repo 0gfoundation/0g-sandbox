@@ -28,6 +28,17 @@ describe('mapHttpError', () => {
     const err = mapHttpError(500, '{"error":"upstream error","hint":"x"}');
     expect((err.details as { hint: string }).hint).toBe('x');
   });
+
+  it('prefers a server-provided stable code over text matching', () => {
+    // Message text says "insufficient balance" but code says QUOTA_EXCEEDED — code wins.
+    const err = mapHttpError(400, '{"code":"QUOTA_EXCEEDED","error":"insufficient balance"}');
+    expect(err.code).toBe('QUOTA_EXCEEDED');
+  });
+
+  it('ignores an unknown server code and falls back to text', () => {
+    const err = mapHttpError(402, '{"code":"WEIRD_CODE","error":"insufficient balance"}');
+    expect(err.code).toBe('INSUFFICIENT_BALANCE');
+  });
 });
 
 describe('previewUrl derivation', () => {

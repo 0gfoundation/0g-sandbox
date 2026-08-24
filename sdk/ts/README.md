@@ -101,7 +101,17 @@ try {
 
 Codes: `INSUFFICIENT_BALANCE` `NOT_ACKNOWLEDGED` `SEALED_ONLY` `SEALED_FORBIDDEN`
 `QUOTA_EXCEEDED` `PUBLIC_PORTS_UNSUPPORTED` `UNAUTHORIZED` `FORBIDDEN` `NOT_FOUND`
-`TRUST_MISMATCH` `SIGNER_NO_TX` `API_ERROR` `CHAIN_ERROR`.
+`TRUST_MISMATCH` `SIGNER_NO_TX` `NO_PROVIDER` `INVALID_ARGUMENT` `NOT_IMPLEMENTED`
+`API_ERROR` `CHAIN_ERROR`.
+
+The SDK prefers a stable `code` field if the server sends one, and only falls back to
+substring-matching the error text. `create()` also validates `publicPorts` (≤16, no system
+ports, sealed⊇8080) and `sealId` (64 hex) client-side, throwing `INVALID_ARGUMENT` before any
+network call.
+
+HTTP requests carry a timeout (`SDKConfig.timeoutMs`, default 60s; `exec` extends it past the
+command's own timeout). Sandboxes created via a `Broker` expose `sb.provider` so you can
+re-target them later with `broker.sandbox.get(id, { provider: sb.provider })`.
 
 ## Chain defaults
 

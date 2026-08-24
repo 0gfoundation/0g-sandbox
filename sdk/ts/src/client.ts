@@ -12,6 +12,10 @@ export interface SDKConfig {
   chain?: Partial<ChainConfig>;
   /** Fallback proxy domain for previewUrl() on creates without publicPorts. */
   preview?: PreviewConfig;
+  /** Per-request HTTP timeout in ms (default 60s; 0 disables). */
+  timeoutMs?: number;
+  /** Provider ledger address, stamped onto created Sandboxes. Set by Broker. */
+  providerAddress?: string;
   /** Injectable fetch (tests / custom agents). */
   fetch?: FetchLike;
 }
@@ -26,7 +30,7 @@ export interface SandboxSDK {
 
 /** Create an SDK bound to a single provider (direct, or via a broker proxy URL). */
 export function createSandboxSDK(cfg: SDKConfig): SandboxSDK {
-  const httpClient = new HttpClient(cfg.providerUrl, cfg.signer, cfg.fetch);
+  const httpClient = new HttpClient(cfg.providerUrl, cfg.signer, cfg.fetch, cfg.timeoutMs);
   const provider = new ProviderInfoApi(httpClient);
   const chainCfg: ChainConfig = {
     rpcUrl: cfg.chain?.rpcUrl ?? GALILEO_TESTNET.rpcUrl,
@@ -41,7 +45,7 @@ export function createSandboxSDK(cfg: SDKConfig): SandboxSDK {
   return {
     provider,
     chain,
-    sandbox: new SandboxApi(httpClient, cfg.preview),
+    sandbox: new SandboxApi(httpClient, cfg.preview, cfg.providerAddress),
     signedFetch: httpClient.signed.bind(httpClient),
   };
 }

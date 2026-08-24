@@ -6,7 +6,7 @@ export { SandboxSDKError, mapHttpError } from './errors.js';
 export type { ErrorCode } from './errors.js';
 export { ChainApi, GALILEO_TESTNET, toNeuron } from './chain.js';
 export type { ChainConfig, Balance, TxReceipt, Amount, ProviderReview } from './chain.js';
-export { SandboxApi, Sandbox } from './sandbox.js';
+export { SandboxApi, Sandbox, validateCreateOptions } from './sandbox.js';
 export type { CreateOptions, SandboxInfo, ExecResult, ExecOptions, PreviewConfig } from './sandbox.js';
 export { ProviderInfoApi } from './provider.js';
 export type { ProviderInfo, SnapshotInfo } from './provider.js';
