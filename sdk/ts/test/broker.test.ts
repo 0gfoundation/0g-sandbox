@@ -65,6 +65,61 @@ describe('Broker.resolveProvider', () => {
     await expect(b.resolveProvider(undefined, { snapshot: 'nope' })).rejects.toMatchObject({ code: 'NO_PROVIDER' });
   });
 
+  it('a probe failure is reported, not silently treated as "no snapshot"', async () => {
+    // bbbb's snapshots endpoint 500s; nobody else has "openclaw" → the error
+    // must say providers could not be probed, and carry the failure details.
+    const fetchFn = vi.fn(async (url: string) => {
+      const u = new URL(url);
+      const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200 });
+      if (u.pathname === '/api/providers') return json(PROVIDERS);
+      if (u.pathname === '/api/info') return json(INFO);
+      if (/^\/proxy\/0xaaaa[0-9a-f]+\/api\/snapshots$/.test(u.pathname)) return json(SNAPSHOTS.aaaa);
+      if (/^\/proxy\/0xbbbb[0-9a-f]+\/api\/snapshots$/.test(u.pathname)) return new Response('boom', { status: 500 });
+      return new Response('not found', { status: 404 });
+    });
+    const b = broker(fetchFn as never);
+    await expect(b.resolveProvider(undefined, { snapshot: 'openclaw' })).rejects.toMatchObject({
+      code: 'NO_PROVIDER',
+      message: expect.stringContaining('could not be probed'),
+    });
+  });
+
+  it('a probe failure on one provider does not block a healthy match on another', async () => {
+    // aaaa 500s, but bbbb genuinely has "openclaw" → still resolves to bbbb.
+    const fetchFn = vi.fn(async (url: string) => {
+      const u = new URL(url);
+      const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200 });
+      if (u.pathname === '/api/providers') return json(PROVIDERS);
+      if (u.pathname === '/api/info') return json(INFO);
+      if (/^\/proxy\/0xaaaa[0-9a-f]+\/api\/snapshots$/.test(u.pathname)) return new Response('boom', { status: 500 });
+      if (/^\/proxy\/0xbbbb[0-9a-f]+\/api\/snapshots$/.test(u.pathname)) return json(SNAPSHOTS.bbbb);
+      return new Response('not found', { status: 404 });
+    });
+    const b = broker(fetchFn as never);
+    expect(await b.resolveProvider(undefined, { snapshot: 'openclaw' })).toBe(PROVIDERS[1].address.toLowerCase());
+  });
+
+  it('a failed probe is not cached (retried next time)', async () => {
+    let bbbbCalls = 0;
+    const fetchFn = vi.fn(async (url: string) => {
+      const u = new URL(url);
+      const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200 });
+      if (u.pathname === '/api/providers') return json(PROVIDERS);
+      if (u.pathname === '/api/info') return json(INFO);
+      if (/^\/proxy\/0xaaaa[0-9a-f]+\/api\/snapshots$/.test(u.pathname)) return json(SNAPSHOTS.aaaa);
+      if (/^\/proxy\/0xbbbb[0-9a-f]+\/api\/snapshots$/.test(u.pathname)) {
+        bbbbCalls++;
+        return bbbbCalls === 1 ? new Response('boom', { status: 500 }) : json(SNAPSHOTS.bbbb);
+      }
+      return new Response('not found', { status: 404 });
+    });
+    const b = broker(fetchFn as never);
+    // first probe: bbbb fails → openclaw only on bbbb → error
+    await expect(b.resolveProvider(undefined, { snapshot: 'openclaw' })).rejects.toMatchObject({ code: 'NO_PROVIDER' });
+    // second probe: bbbb recovered, failure was NOT cached → resolves
+    expect(await b.resolveProvider(undefined, { snapshot: 'openclaw' })).toBe(PROVIDERS[1].address.toLowerCase());
+  });
+
   it('strategy is reserved → NOT_IMPLEMENTED', async () => {
     const b = broker(mockFetch());
     await expect(b.resolveProvider({ strategy: { prefer: 'price' } })).rejects.toMatchObject({

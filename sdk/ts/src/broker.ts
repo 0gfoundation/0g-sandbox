@@ -134,14 +134,20 @@ export class Broker {
     if (!snapshot) return providers[0].address.toLowerCase();
 
     // Snapshot-aware default: pick a provider that actually has it active.
-    const matches = await this.providersWithSnapshot(snapshot, providers);
-    if (matches.length === 0) {
+    const { matches, failed } = await this.providersWithSnapshot(snapshot, providers);
+    if (matches.length > 0) return matches[0].address.toLowerCase();
+    // No match. Distinguish "genuinely nobody has it" from "we couldn't reach
+    // some providers" — the latter is an operational problem the caller must see,
+    // not a silent "no such snapshot".
+    if (failed.length > 0) {
       throw new SandboxSDKError(
         'NO_PROVIDER',
-        `no provider has an active snapshot named "${snapshot}"`,
+        `no reachable provider has an active snapshot "${snapshot}"; ${failed.length} of ${providers.length} provider(s) could not be probed`,
+        undefined,
+        { failed: failed.map((f) => ({ provider: f.provider, error: f.error })) },
       );
     }
-    return matches[0].address.toLowerCase();
+    throw new SandboxSDKError('NO_PROVIDER', `no provider has an active snapshot named "${snapshot}"`);
   }
 
   /** A per-provider SandboxSDK routed through the broker's reverse proxy. Cached. */
@@ -167,28 +173,40 @@ export class Broker {
     return sdk;
   }
 
-  private async providersWithSnapshot(name: string, providers: ProviderEntry[]): Promise<ProviderEntry[]> {
-    const checks = await Promise.all(
-      providers.map(async (p) => ((await this.activeSnapshots(p.address)).includes(name) ? p : null)),
+  private async providersWithSnapshot(
+    name: string,
+    providers: ProviderEntry[],
+  ): Promise<{ matches: ProviderEntry[]; failed: { provider: string; error: string }[] }> {
+    const matches: ProviderEntry[] = [];
+    const failed: { provider: string; error: string }[] = [];
+    await Promise.all(
+      providers.map(async (p) => {
+        try {
+          if ((await this.activeSnapshots(p.address)).includes(name)) matches.push(p);
+        } catch (err) {
+          // A probe failure means "couldn't tell", NOT "doesn't have it" —
+          // record it so resolveProvider can report it instead of silently
+          // dropping the provider.
+          failed.push({ provider: p.address, error: (err as Error).message });
+        }
+      }),
     );
-    return checks.filter((p): p is ProviderEntry => p !== null);
+    return { matches, failed };
   }
 
   private async activeSnapshots(address: string): Promise<string[]> {
     const key = address.toLowerCase();
     const cached = this.snapshotCache.get(key);
     if (cached && Date.now() - cached.at < this.ttl) return cached.value;
-    let names: string[] = [];
-    try {
-      const sdk = await this.sdkFor(address);
-      const snaps = await sdk.provider.snapshots();
-      names = snaps
-        .filter((s) => (s.state ? s.state === 'active' : true))
-        .map((s) => s.name)
-        .filter((n): n is string => typeof n === 'string');
-    } catch {
-      names = []; // a provider being unreachable just excludes it from selection
-    }
+    // Let errors propagate — the caller distinguishes unreachable from empty.
+    // Only successful probes are cached, so a transient failure isn't pinned
+    // for the whole TTL.
+    const sdk = await this.sdkFor(address);
+    const snaps = await sdk.provider.snapshots();
+    const names = snaps
+      .filter((s) => (s.state ? s.state === 'active' : true))
+      .map((s) => s.name)
+      .filter((n): n is string => typeof n === 'string');
     this.snapshotCache.set(key, { at: Date.now(), value: names });
     return names;
   }
