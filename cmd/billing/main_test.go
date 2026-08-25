@@ -29,36 +29,56 @@ func newTestRedis(t *testing.T) *redis.Client {
 // mockDaytona returns a test HTTP server that records which sandbox IDs were
 // stopped, and optionally injects failures for specific IDs.
 type mockDaytona struct {
-	mu      sync.Mutex
-	stopped []string
-	failIDs map[string]bool
-	srv     *httptest.Server
+	mu             sync.Mutex
+	stopped        []string
+	failIDs        map[string]bool // POST /stop → 500
+	archiveFailIDs map[string]bool // POST /archive → 500
+	archived       map[string]bool // set once archive succeeds; drives GET state
+	srv            *httptest.Server
 }
 
 func newMockDaytona(t *testing.T) *mockDaytona {
 	t.Helper()
-	m := &mockDaytona{failIDs: make(map[string]bool)}
+	m := &mockDaytona{
+		failIDs:        make(map[string]bool),
+		archiveFailIDs: make(map[string]bool),
+		archived:       make(map[string]bool),
+	}
 	m.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Only handle POST /api/sandbox/{id}/stop
-		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/stop") {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		// Extract ID: /api/sandbox/{id}/stop → parts[3]
-		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-		if len(parts) < 4 {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/") // ["api","sandbox",id,(action)]
+		if len(parts) < 3 {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		id := parts[2] // ["api","sandbox",id,"stop"]
+		id := parts[2]
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		if m.failIDs[id] {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
+
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/stop"):
+			if m.failIDs[id] {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			m.stopped = append(m.stopped, id)
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/archive"):
+			if m.archiveFailIDs[id] {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			m.archived[id] = true
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && len(parts) == 3:
+			// GetSandbox — used by WaitStopped and the archivedAlready check.
+			state := "stopped"
+			if m.archived[id] {
+				state = "archived"
+			}
+			w.Write([]byte(`{"id":"` + id + `","state":"` + state + `"}`)) //nolint:errcheck
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
-		m.stopped = append(m.stopped, id)
-		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(m.srv.Close)
 	return m
@@ -221,7 +241,7 @@ func TestRunStopHandler_StopsAndCleansRedis(t *testing.T) {
 	rdb.Set(bg, "billing:compute:sb-1", "session", 0)          //nolint:errcheck
 	rdb.Set(bg, "stop:sandbox:sb-1", "insufficient_balance", 0) //nolint:errcheck
 
-	go runStopHandler(ctx, stopCh, mock.client(), rdb, zap.NewNop(), nil)
+	go runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil)
 
 	stopCh <- settler.StopSignal{SandboxID: "sb-1", Reason: "insufficient_balance"}
 
@@ -247,7 +267,7 @@ func TestRunStopHandler_DaytonaError_StillCleansRedis(t *testing.T) {
 	rdb.Set(bg, "billing:compute:sb-err", "session", 0)    //nolint:errcheck
 	rdb.Set(bg, "stop:sandbox:sb-err", "not_acknowledged", 0) //nolint:errcheck
 
-	go runStopHandler(ctx, stopCh, mock.client(), rdb, zap.NewNop(), nil)
+	go runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil)
 
 	stopCh <- settler.StopSignal{SandboxID: "sb-err", Reason: "not_acknowledged"}
 
@@ -268,7 +288,7 @@ func TestRunStopHandler_MultipleSignals(t *testing.T) {
 		rdb.Set(bg, "stop:sandbox:"+id, "insufficient_balance", 0) //nolint:errcheck
 	}
 
-	go runStopHandler(ctx, stopCh, mock.client(), rdb, zap.NewNop(), nil)
+	go runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil)
 
 	for _, id := range []string{"sb-x", "sb-y", "sb-z"} {
 		stopCh <- settler.StopSignal{SandboxID: id, Reason: "insufficient_balance"}
@@ -296,7 +316,7 @@ func TestRunStopHandler_ContextCancel_Exits(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		runStopHandler(ctx, stopCh, mock.client(), rdb, zap.NewNop(), nil)
+		runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil)
 		close(done)
 	}()
 

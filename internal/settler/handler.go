@@ -75,8 +75,13 @@ func HandleStatuses(
 						"amount":   v.TotalFee.String(),
 					},
 				)
-			} else {
-				persistStop(ctx, rdb, stopCh, sandboxID, "insufficient_balance", log)
+			} else if err := persistStop(ctx, rdb, stopCh, sandboxID, "insufficient_balance", log); err != nil {
+				log.Error("failed to persist stop marker; sandbox not queued for stop",
+					zap.String("sandbox", sandboxID), zap.Error(err))
+				alerter.Notify(ctx, alert.KindStopPersistFailure, alert.SeverityCritical,
+					"Failed to persist stop marker — sandbox will keep billing until Redis recovers",
+					map[string]any{"sandbox": sandboxID, "reason": "insufficient_balance", "error": err.Error()},
+				)
 			}
 
 		case chain.StatusNotAcknowledged:
@@ -85,8 +90,13 @@ func HandleStatuses(
 					zap.String("user", v.User.Hex()),
 					zap.String("provider", v.Provider.Hex()),
 				)
-			} else {
-				persistStop(ctx, rdb, stopCh, sandboxID, "not_acknowledged", log)
+			} else if err := persistStop(ctx, rdb, stopCh, sandboxID, "not_acknowledged", log); err != nil {
+				log.Error("failed to persist stop marker; sandbox not queued for stop",
+					zap.String("sandbox", sandboxID), zap.Error(err))
+				alerter.Notify(ctx, alert.KindStopPersistFailure, alert.SeverityCritical,
+					"Failed to persist stop marker — sandbox will keep billing until Redis recovers",
+					map[string]any{"sandbox": sandboxID, "reason": "not_acknowledged", "error": err.Error()},
+				)
 			}
 
 		case chain.StatusProviderMismatch, chain.StatusInvalidSignature:
@@ -128,12 +138,18 @@ func HandleStatuses(
 	}
 }
 
-func persistStop(ctx context.Context, rdb *redis.Client, stopCh chan<- StopSignal, sandboxID, reason string, log *zap.Logger) {
-	// 1. Persist first (crash-safe)
+func persistStop(ctx context.Context, rdb *redis.Client, stopCh chan<- StopSignal, sandboxID, reason string, log *zap.Logger) error {
+	// 1. Persist first (crash-safe). If this fails there is no recovery marker,
+	//    so we must NOT pretend the stop is queued — return the error and let the
+	//    caller alert. Signaling anyway would risk a stop with no way to recover
+	//    it after a crash.
 	stopKey := "stop:sandbox:" + sandboxID
-	rdb.Set(ctx, stopKey, reason, 0)
+	if err := rdb.Set(ctx, stopKey, reason, 0).Err(); err != nil {
+		return fmt.Errorf("persist stop marker %s: %w", stopKey, err)
+	}
 
-	// 2. Notify stop handler via channel
+	// 2. Notify stop handler via channel. Safe to drop here: the marker is
+	//    persisted, so recoverPendingStops re-queues it on restart.
 	select {
 	case stopCh <- StopSignal{SandboxID: sandboxID, Reason: reason}:
 	default:
@@ -141,6 +157,7 @@ func persistStop(ctx context.Context, rdb *redis.Client, stopCh chan<- StopSigna
 			zap.String("sandbox", sandboxID),
 		)
 	}
+	return nil
 }
 
 func extractSandboxID(v voucher.SandboxVoucher) string {
