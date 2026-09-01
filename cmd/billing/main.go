@@ -861,6 +861,24 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 	for {
 		select {
 		case sig := <-stopCh:
+			// Step 0: skip stale/duplicate kill orders. A backlog of
+			// INSUFFICIENT_BALANCE rejections for the same sandbox (or a marker
+			// recovered on restart after the sandbox was already archived) would
+			// otherwise re-run the ~30s stop→wait→archive round-trip against an
+			// already-terminal sandbox — the "kill storm" of #69. If it is already
+			// archived, just clean up markers and move on.
+			if archivedAlready(ctx, dtona, sig.SandboxID) {
+				log.Info("stop skipped: sandbox already archived; cleaning up markers",
+					zap.String("sandbox", sig.SandboxID),
+					zap.String("reason", sig.Reason),
+				)
+				rdb.Del(ctx, "billing:compute:"+sig.SandboxID) //nolint:errcheck
+				rdb.Del(ctx, "stop:sandbox:"+sig.SandboxID)    //nolint:errcheck
+				if deregisterBroker != nil {
+					deregisterBroker(ctx, sig.SandboxID)
+				}
+				continue
+			}
 			// Daytona requires stopped state before archive.
 			// Step 1: stop (removes container from runner).
 			if err := dtona.StopSandbox(ctx, sig.SandboxID); err != nil {

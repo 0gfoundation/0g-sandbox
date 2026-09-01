@@ -139,13 +139,22 @@ func HandleStatuses(
 }
 
 func persistStop(ctx context.Context, rdb *redis.Client, stopCh chan<- StopSignal, sandboxID, reason string, log *zap.Logger) error {
-	// 1. Persist first (crash-safe). If this fails there is no recovery marker,
-	//    so we must NOT pretend the stop is queued — return the error and let the
-	//    caller alert. Signaling anyway would risk a stop with no way to recover
-	//    it after a crash.
+	// 1. Persist first (crash-safe), deduped with SetNX. A settler outage can
+	//    back up thousands of vouchers for one sandbox; when they batch-settle and
+	//    the balance runs out, every rejection lands here. SetNX collapses that
+	//    storm into a single kill order: if the marker already exists the sandbox
+	//    is already queued for (or being) stopped, so we neither overwrite the
+	//    reason nor push a duplicate signal. The marker is deleted only after the
+	//    stop handler finishes, so a later rejection after a real stop re-queues.
+	//    If SetNX fails there is no recovery marker, so we must NOT pretend the
+	//    stop is queued — return the error and let the caller alert.
 	stopKey := "stop:sandbox:" + sandboxID
-	if err := rdb.Set(ctx, stopKey, reason, 0).Err(); err != nil {
+	created, err := rdb.SetNX(ctx, stopKey, reason, 0).Result()
+	if err != nil {
 		return fmt.Errorf("persist stop marker %s: %w", stopKey, err)
+	}
+	if !created {
+		return nil // already queued — dedup the kill order
 	}
 
 	// 2. Notify stop handler via channel. Safe to drop here: the marker is
