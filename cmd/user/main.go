@@ -201,12 +201,16 @@ func runDeposit(args []string) {
 	fs := flag.NewFlagSet("deposit", flag.ExitOnError)
 	cf := addChainFlags(fs)
 	keyHex      := fs.String("key",      "", "User private key (hex); or set USER_KEY env")
-	amount      := fs.Float64("amount",  0.01, "Amount to deposit in 0G (e.g. 0.01)")
+	amount      := fs.String("amount",   "0.01", "Amount to deposit in 0G (e.g. 0.01)")
 	providerHex := fs.String("provider", "", "Provider address to deposit for (required)")
 	_ = fs.Parse(args)
 
 	if *providerHex == "" {
 		fatalf("--provider is required")
+	}
+	depositWei, err := parse0GAmountToNeuron(*amount)
+	if err != nil {
+		fatalf("--amount: %v", err)
 	}
 
 	privKey := mustLoadKey(*keyHex)
@@ -225,12 +229,11 @@ func runDeposit(args []string) {
 	}
 	auth.Context = ctx
 
-	depositWei := ogToNeuron(*amount)
 	auth.Value = depositWei
 
 	fmt.Printf("User:     %s\n", userAddr.Hex())
 	fmt.Printf("Provider: %s\n", providerAddr.Hex())
-	fmt.Printf("Amount:   %.6f 0G (%s neuron)\n", *amount, depositWei)
+	fmt.Printf("Amount:   %s 0G (%s neuron)\n", strings.TrimSpace(*amount), depositWei)
 	fmt.Printf("Contract: %s\n", cf.contract)
 
 	fmt.Println("\n[1/1] Deposit...")
@@ -1074,12 +1077,26 @@ func mustDialContract(ctx context.Context, rpcURL, contractHex string) (*ethclie
 	return eth, contract
 }
 
-func ogToNeuron(og float64) *big.Int {
-	ogBig := new(big.Float).SetFloat64(og)
-	neuronBig := new(big.Float).Mul(ogBig,
-		new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)))
-	n, _ := neuronBig.Int(nil)
-	return n
+func parse0GAmountToNeuron(amount string) (*big.Int, error) {
+	amount = strings.TrimSpace(amount)
+	if amount == "" {
+		return nil, fmt.Errorf("must not be empty")
+	}
+
+	value, ok := new(big.Rat).SetString(amount)
+	if !ok {
+		return nil, fmt.Errorf("must be a decimal number")
+	}
+	if value.Sign() <= 0 {
+		return nil, fmt.Errorf("must be greater than zero")
+	}
+
+	scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+	scaled := new(big.Rat).Mul(value, new(big.Rat).SetInt(scale))
+	if scaled.Denom().Cmp(big.NewInt(1)) != 0 {
+		return nil, fmt.Errorf("has more than 18 decimal places")
+	}
+	return new(big.Int).Set(scaled.Num()), nil
 }
 
 func neuronTo0G(neuron *big.Int) float64 {
