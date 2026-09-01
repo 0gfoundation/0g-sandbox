@@ -143,6 +143,23 @@ func TestBlockedEndpoints(t *testing.T) {
 	}
 }
 
+// ── GET /api/volumes: admin-only (deny-by-default) ─────────────────────────────
+
+func TestVolumesList_NonAdmin_Forbidden(t *testing.T) {
+	srv, _ := mockDaytona(t, nil)
+	dtona := daytona.NewClient(srv.URL, "test-key")
+	// newTestEngine passes nil adminAddresses + no app-owner fn, so no wallet is admin.
+	r := newTestEngine(dtona, &mockBilling{}, "0xNOTADMIN")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/volumes", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("non-admin GET /api/volumes: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // ── Create: owner injection ───────────────────────────────────────────────────
 
 func TestHandleCreate_InjectsOwnerLabel(t *testing.T) {

@@ -185,7 +185,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	// ── List / paginated (filter by owner) ────────────────────────────────
 	rg.GET("/sandbox", h.handleList)
 	rg.GET("/sandbox/paginated", h.handleList)
-	rg.GET("/volumes", h.handleListGeneric("daytona-owner"))
+	rg.GET("/volumes", h.handleVolumesList)
 	rg.POST("/snapshots", h.handleSnapshotCreate)
 	rg.DELETE("/snapshots/:id", h.handleSnapshotDelete)
 
@@ -946,10 +946,19 @@ func (h *Handler) handleList(c *gin.Context) {
 	c.JSON(http.StatusOK, filtered)
 }
 
-func (h *Handler) handleListGeneric(_ string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		h.forward(c)
+// handleVolumesList gates GET /api/volumes to admins. Volumes are not a wired
+// feature in 0g-sandbox (no create path, so they carry no daytona-owner label),
+// which means an owner-scoped filter has nothing to match on and forwarding as
+// admin to a non-admin caller would leak every tenant's volume IDs. Deny-by-
+// default: admins get the raw list (ops view), everyone else gets 403. When the
+// volume feature is built, replace this with an owner-scoped list (filter the
+// forwarded response by the caller's daytona-owner label).
+func (h *Handler) handleVolumesList(c *gin.Context) {
+	if !h.isAdmin(c.GetString("wallet_address")) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin only"})
+		return
 	}
+	h.forward(c)
 }
 
 // handleListSnapshots lists all Daytona snapshots. Snapshots are admin-managed
