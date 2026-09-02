@@ -71,9 +71,9 @@ type Handler struct {
 	pricePerCPUPerSec   *big.Int       // per CPU core per second
 	pricePerMemGBPerSec *big.Int       // per GB memory per second
 	voucherIntervalSec  int64
-	providerAddress     string // on-chain settlement identity; used by broker client and balance lookups
+	providerAddress     string   // on-chain settlement identity; used by broker client and balance lookups
 	adminAddresses      []string // operator wallets allowed to call admin-only endpoints (lowercased hex)
-	sshGatewayHost      string // if set, replaces localhost in SSH commands
+	sshGatewayHost      string   // if set, replaces localhost in SSH commands
 	computePricePerSec  *big.Int
 	rdb                 *redis.Client
 	teeKey              *ecdsa.PrivateKey // TEE signing key; nil = sealed containers disabled
@@ -179,6 +179,11 @@ func (h *Handler) BrokerDeregister(ctx context.Context, sandboxID string) {
 //   - All /sandbox/:id/* routes go through a single catch-all handler to avoid
 //     Gin's restriction on mixing static segments and wildcard catch-alls.
 func (h *Handler) Register(rg *gin.RouterGroup) {
+	// The traversal guard ships WITH the package: every engine that mounts
+	// these routes gets it, not just binaries that remember the engine-wide
+	// mount (authorization binds to :id while the raw path is forwarded as
+	// admin — see PathTraversalGuard).
+	rg.Use(PathTraversalGuard())
 	// ── Create sandbox ─────────────────────────────────────────────────────
 	rg.POST("/sandbox", h.handleCreate)
 
@@ -188,7 +193,6 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/volumes", h.handleListGeneric("daytona-owner"))
 	rg.POST("/snapshots", h.handleSnapshotCreate)
 	rg.DELETE("/snapshots/:id", h.handleSnapshotDelete)
-
 
 	// ── DELETE /sandbox/:id (no action suffix, safe to register separately) ─
 	rg.DELETE("/sandbox/:id", h.withOwnerOrAdmin(h.handleDelete))
@@ -222,6 +226,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 // the auth.Middleware-protected group so dashboards/explorers can hit them
 // without a signed request.
 func (h *Handler) RegisterPublic(rg *gin.RouterGroup) {
+	rg.Use(PathTraversalGuard())
 	// On-chain VoucherSettled events. Anyone can derive the same data from
 	// the public RPC + contract address; no value in gating it.
 	rg.GET("/events", h.handleEvents)
@@ -828,12 +833,12 @@ func (h *Handler) handleEvents(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"current_block":  currentBlock,
-		"since":          sinceTimestamp,
-		"total":          total,
-		"page":           page,
-		"page_size":      pageSize,
-		"events":         result,
+		"current_block": currentBlock,
+		"since":         sinceTimestamp,
+		"total":         total,
+		"page":          page,
+		"page_size":     pageSize,
+		"events":        result,
 	})
 }
 
@@ -1101,7 +1106,6 @@ func copyRecorder(c *gin.Context, rec *httptest.ResponseRecorder) {
 	}
 	c.Data(rec.Code, rec.Header().Get("Content-Type"), rec.Body.Bytes())
 }
-
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

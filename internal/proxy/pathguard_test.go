@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/0gfoundation/0g-sandbox/internal/daytona"
 )
 
 func guardEngine() *gin.Engine {
@@ -28,6 +30,9 @@ func TestPathGuard_RejectsDotSegments(t *testing.T) {
 		"/api/sandbox/mine/../victim/ssh-access",
 		"/api/sandbox/mine/%2e%2e/victim/ssh-access",
 		"/api/sandbox/mine/%2E%2E/victim/toolbox/process/execute",
+		"/api/sandbox/mine/%252e%252e/victim/ssh-access", // double-encoded (F1)
+		"/api/sandbox/mine/%252E%252E/victim/start",
+		"/api/sandbox/mine%2fvictim/ssh-access", // encoded slash inside :id
 		"/api/sandbox/./mine/labels",
 		"/api/sandbox//mine/ssh-access",
 	} {
@@ -56,6 +61,25 @@ func TestPathGuard_AllowsCanonicalPaths(t *testing.T) {
 		r.ServeHTTP(w, req)
 		if w.Code == http.StatusBadRequest {
 			t.Errorf("%s: canonical path wrongly rejected", target)
+		}
+	}
+}
+
+// F2: the guard ships with the package — an engine that only calls Register
+// (no engine-wide mount) must still reject traversal, single- or double-encoded.
+func TestPathGuard_ShipsWithRegister(t *testing.T) {
+	srv, _ := mockDaytona(t, []daytona.Sandbox{{ID: "sb-mine", Labels: map[string]string{"daytona-owner": "0xOWNER"}}})
+	dtona := daytona.NewClient(srv.URL, "key")
+	r := newTestEngine(dtona, &mockBilling{}, "0xOWNER")
+	for _, target := range []string{
+		"/api/sandbox/sb-mine/../sb-victim/ssh-access",
+		"/api/sandbox/sb-mine/%252e%252e/sb-victim/start",
+	} {
+		req := httptest.NewRequest(http.MethodPost, target, nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%s through Register-only engine: want 400, got %d", target, w.Code)
 		}
 	}
 }
