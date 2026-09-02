@@ -301,10 +301,11 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		}
 		if available.Cmp(createRequired) < 0 {
 			c.JSON(http.StatusPaymentRequired, gin.H{
-				"error":            "insufficient balance",
-				"available":        available.String(),
-				"required":         createRequired.String(),
-				"outstanding_debt": heldDebt.String(), // must be cleared before new work
+				"error":              "insufficient balance",
+				"available":          available.String(),
+				"required":           createRequired.String(),
+				"outstanding_debt":   held.String(),    // parked debt — must be topped up
+				"pending_settlement": pending.String(), // queued usage — charged on next settle
 			})
 			return
 		}
@@ -526,10 +527,11 @@ func (h *Handler) handleStart(c *gin.Context) {
 		}
 		if available.Cmp(startRequired) < 0 {
 			c.JSON(http.StatusPaymentRequired, gin.H{
-				"error":            "insufficient balance",
-				"available":        available.String(),
-				"required":         startRequired.String(),
-				"outstanding_debt": heldDebt.String(), // must be cleared before new work
+				"error":              "insufficient balance",
+				"available":          available.String(),
+				"required":           startRequired.String(),
+				"outstanding_debt":   held.String(),    // parked debt — must be topped up
+				"pending_settlement": pending.String(), // queued usage — charged on next settle
 			})
 			return
 		}
