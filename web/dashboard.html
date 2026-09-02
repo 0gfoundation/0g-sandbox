@@ -861,7 +861,12 @@ function genUUID() {
   });
 }
 async function signedFetch(method, path, body = null, signal = null) {
-  const msg = { action: method + ':' + path, expires_at: Math.floor(Date.now() / 1000) + 300, nonce: genUUID(), payload: body || {}, resource_id: '' };
+  // Bind the signature to this provider (anti cross-provider replay) and to
+  // the addressed sandbox where the path names one.
+  const boundProvider = nodeProviderAddr() || '';
+  const ridMatch = path.match(/^\/api\/(?:sandbox|toolbox)\/([^\/]+)/);
+  const resourceId = ridMatch && ridMatch[1] !== 'paginated' ? ridMatch[1] : '';
+  const msg = { action: method + ':' + path, expires_at: Math.floor(Date.now() / 1000) + 300, nonce: genUUID(), payload: body || {}, ...(boundProvider ? { provider: boundProvider } : {}), resource_id: resourceId };
   const msgStr = JSON.stringify(msg), sig = await signer.signMessage(msgStr);
   return fetch(path, { method, headers: { 'Content-Type': 'application/json', 'X-Wallet-Address': walletAddr, 'X-Signed-Message': btoa(msgStr), 'X-Wallet-Signature': sig }, body: body ? JSON.stringify(body) : undefined, signal });
 }

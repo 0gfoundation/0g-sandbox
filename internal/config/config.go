@@ -18,12 +18,12 @@ type Config struct {
 }
 
 type BrokerConfig struct {
-	MonitorIntervalSec       int64  `mapstructure:"monitor_interval_sec"`
-	TopupIntervals           int64  `mapstructure:"topup_intervals"`
-	ThresholdIntervals       int64  `mapstructure:"threshold_intervals"`
-	PaymentLayerURL          string `mapstructure:"payment_layer_url"`
-	DepositPollIntervalSec   int64  `mapstructure:"deposit_poll_interval_sec"`
-	DepositPollTimeoutSec    int64  `mapstructure:"deposit_poll_timeout_sec"`
+	MonitorIntervalSec     int64  `mapstructure:"monitor_interval_sec"`
+	TopupIntervals         int64  `mapstructure:"topup_intervals"`
+	ThresholdIntervals     int64  `mapstructure:"threshold_intervals"`
+	PaymentLayerURL        string `mapstructure:"payment_layer_url"`
+	DepositPollIntervalSec int64  `mapstructure:"deposit_poll_interval_sec"`
+	DepositPollTimeoutSec  int64  `mapstructure:"deposit_poll_timeout_sec"`
 }
 
 type DaytonaConfig struct {
@@ -39,8 +39,8 @@ type RedisConfig struct {
 
 type BillingConfig struct {
 	VoucherIntervalSec  int64  `mapstructure:"voucher_interval_sec"`
-	ComputePricePerSec  string `mapstructure:"compute_price_per_sec"`  // flat rate (fallback)
-	PricePerCPUPerSec   string `mapstructure:"price_per_cpu_per_sec"`  // per CPU core/sec
+	ComputePricePerSec  string `mapstructure:"compute_price_per_sec"`    // flat rate (fallback)
+	PricePerCPUPerSec   string `mapstructure:"price_per_cpu_per_sec"`    // per CPU core/sec
 	PricePerMemGBPerSec string `mapstructure:"price_per_mem_gb_per_sec"` // per GB memory/sec
 	CreateFee           string `mapstructure:"create_fee"`
 }
@@ -76,7 +76,6 @@ func (c *ChainConfig) AdminList() []string {
 	return out
 }
 
-
 type ServerConfig struct {
 	Port           int    `mapstructure:"port"`
 	SSHGatewayHost string `mapstructure:"ssh_gateway_host"`
@@ -85,6 +84,12 @@ type ServerConfig struct {
 	// doesn't carry `sealed: true`. Use this to run a provider that only
 	// serves attested workloads (e.g. an AgenticID-hosting setup).
 	SealedOnly bool `mapstructure:"sealed_only"`
+
+	// AuthStrict requires every signed request to carry the provider address
+	// and (on :id routes) the resource id. Leave off only while legacy clients
+	// that predate provider binding are still in circulation — an omitted
+	// binding is exactly what a replayed legacy capture looks like.
+	AuthStrict bool `mapstructure:"auth_strict"`
 }
 
 // AlertConfig drives the operator-facing alert pipeline (settler tx failures,
@@ -109,9 +114,9 @@ func Load() (*Config, error) {
 	v.SetDefault("billing.create_fee", "5000000")
 	v.SetDefault("redis.addr", "redis:6379")
 	v.SetDefault("daytona.registry_url", "http://registry:6000")
-	v.SetDefault("alert.dedup_window_sec", 3600)            // 1h between same-kind alerts
-	v.SetDefault("alert.settler_low_balance_factor", 100)   // warn when balance < 100 settle-tx worth
-	v.SetDefault("alert.queue_backlog_threshold", 1000)     // alert if queue depth exceeds this
+	v.SetDefault("alert.dedup_window_sec", 3600)          // 1h between same-kind alerts
+	v.SetDefault("alert.settler_low_balance_factor", 100) // warn when balance < 100 settle-tx worth
+	v.SetDefault("alert.queue_backlog_threshold", 1000)   // alert if queue depth exceeds this
 
 	// Config file (optional)
 	v.SetConfigName("config")
@@ -125,29 +130,30 @@ func Load() (*Config, error) {
 
 	// Explicit env bindings
 	bindings := map[string]string{
-		"daytona.api_url":              "DAYTONA_API_URL",
-		"daytona.admin_key":            "DAYTONA_ADMIN_KEY",
-		"daytona.registry_url":         "REGISTRY_URL",
-		"redis.addr":                   "REDIS_ADDR",
-		"redis.password":               "REDIS_PASSWORD",
-		"billing.voucher_interval_sec": "VOUCHER_INTERVAL_SEC",
-		"billing.compute_price_per_sec":   "COMPUTE_PRICE_PER_SEC",
-		"billing.price_per_cpu_per_sec":   "PRICE_PER_CPU_PER_SEC",
+		"daytona.api_url":                  "DAYTONA_API_URL",
+		"daytona.admin_key":                "DAYTONA_ADMIN_KEY",
+		"daytona.registry_url":             "REGISTRY_URL",
+		"redis.addr":                       "REDIS_ADDR",
+		"redis.password":                   "REDIS_PASSWORD",
+		"billing.voucher_interval_sec":     "VOUCHER_INTERVAL_SEC",
+		"billing.compute_price_per_sec":    "COMPUTE_PRICE_PER_SEC",
+		"billing.price_per_cpu_per_sec":    "PRICE_PER_CPU_PER_SEC",
 		"billing.price_per_mem_gb_per_sec": "PRICE_PER_MEM_GB_PER_SEC",
 		"billing.create_fee":               "CREATE_FEE",
-		"chain.rpc_url":                "RPC_URL",
-		"chain.contract_address":       "SETTLEMENT_CONTRACT",
-		"chain.tapp_registry":          "TAPP_REGISTRY",
-		"chain.admin_addresses":        "ADMIN_ADDRESSES",
-		"chain.chain_id":               "CHAIN_ID",
-		"server.port":                  "PORT",
-		"server.ssh_gateway_host":       "SSH_GATEWAY_HOST",
-		"server.broker_url":             "BROKER_URL",
-		"server.sealed_only":            "SEALED_ONLY",
-		"alert.webhook_url":                  "ALERT_WEBHOOK_URL",
-		"alert.dedup_window_sec":             "ALERT_DEDUP_WINDOW_SEC",
-		"alert.settler_low_balance_factor":   "SETTLER_LOW_BALANCE_FACTOR",
-		"alert.queue_backlog_threshold":      "QUEUE_BACKLOG_THRESHOLD",
+		"chain.rpc_url":                    "RPC_URL",
+		"chain.contract_address":           "SETTLEMENT_CONTRACT",
+		"chain.tapp_registry":              "TAPP_REGISTRY",
+		"chain.admin_addresses":            "ADMIN_ADDRESSES",
+		"chain.chain_id":                   "CHAIN_ID",
+		"server.port":                      "PORT",
+		"server.ssh_gateway_host":          "SSH_GATEWAY_HOST",
+		"server.broker_url":                "BROKER_URL",
+		"server.sealed_only":               "SEALED_ONLY",
+		"server.auth_strict":               "AUTH_STRICT",
+		"alert.webhook_url":                "ALERT_WEBHOOK_URL",
+		"alert.dedup_window_sec":           "ALERT_DEDUP_WINDOW_SEC",
+		"alert.settler_low_balance_factor": "SETTLER_LOW_BALANCE_FACTOR",
+		"alert.queue_backlog_threshold":    "QUEUE_BACKLOG_THRESHOLD",
 	}
 	for key, env := range bindings {
 		if err := v.BindEnv(key, env); err != nil {
@@ -187,19 +193,19 @@ func LoadBroker() (*Config, error) {
 	v.SetDefault("broker.deposit_poll_timeout_sec", 120)
 
 	bindings := map[string]string{
-		"redis.addr":                    "REDIS_ADDR",
-		"redis.password":                "REDIS_PASSWORD",
-		"chain.rpc_url":                 "RPC_URL",
-		"chain.contract_address":        "SETTLEMENT_CONTRACT",
-		"chain.tapp_registry":           "TAPP_REGISTRY",
-		"chain.chain_id":                "CHAIN_ID",
-		"server.port":                   "BROKER_PORT",
-		"broker.monitor_interval_sec":   "BROKER_MONITOR_INTERVAL_SEC",
-		"broker.topup_intervals":        "BROKER_TOPUP_INTERVALS",
-		"broker.threshold_intervals":    "BROKER_THRESHOLD_INTERVALS",
-		"broker.payment_layer_url":           "PAYMENT_LAYER_URL",
-		"broker.deposit_poll_interval_sec":   "BROKER_DEPOSIT_POLL_INTERVAL_SEC",
-		"broker.deposit_poll_timeout_sec":    "BROKER_DEPOSIT_POLL_TIMEOUT_SEC",
+		"redis.addr":                       "REDIS_ADDR",
+		"redis.password":                   "REDIS_PASSWORD",
+		"chain.rpc_url":                    "RPC_URL",
+		"chain.contract_address":           "SETTLEMENT_CONTRACT",
+		"chain.tapp_registry":              "TAPP_REGISTRY",
+		"chain.chain_id":                   "CHAIN_ID",
+		"server.port":                      "BROKER_PORT",
+		"broker.monitor_interval_sec":      "BROKER_MONITOR_INTERVAL_SEC",
+		"broker.topup_intervals":           "BROKER_TOPUP_INTERVALS",
+		"broker.threshold_intervals":       "BROKER_THRESHOLD_INTERVALS",
+		"broker.payment_layer_url":         "PAYMENT_LAYER_URL",
+		"broker.deposit_poll_interval_sec": "BROKER_DEPOSIT_POLL_INTERVAL_SEC",
+		"broker.deposit_poll_timeout_sec":  "BROKER_DEPOSIT_POLL_TIMEOUT_SEC",
 	}
 	for key, env := range bindings {
 		if err := v.BindEnv(key, env); err != nil {
