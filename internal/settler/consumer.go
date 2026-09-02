@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -45,6 +46,10 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 		sweepInterval = time.Minute
 	}
 	var lastSweep time.Time
+	// Balance memo for held users: skip re-splitting a held-only user whose
+	// balance hasn't changed (their sandboxes are stopped, so the partition
+	// couldn't change either — re-sweeping would just churn the held list).
+	lastBal := map[common.Address]*big.Int{}
 
 	for {
 		if ctx.Err() != nil {
@@ -53,7 +58,7 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 		}
 
 		if time.Since(lastSweep) >= sweepInterval {
-			maybeSweep(ctx, rdb, onchain, queueKey, stopCh, log)
+			maybeSweep(ctx, rdb, onchain, queueKey, stopCh, lastBal, log)
 			lastSweep = time.Now()
 		}
 

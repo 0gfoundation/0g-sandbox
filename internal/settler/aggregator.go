@@ -43,9 +43,18 @@ type AggregatorChain interface {
 //     balances are re-read so a top-up reclaims and settles the debt,
 //     oldest-first, before any newer voucher.
 //
+// lastBal memoizes the balance each held user was last split against. A held
+// user's sandboxes are already stopped (no new vouchers), so re-splitting at an
+// unchanged balance provably yields the same partition — skipping it stops the
+// sweep from rewriting the whole held list every interval while the user simply
+// hasn't topped up yet (and from oscillating between equivalent partitions).
+// Users enumerated from a deep queue are always swept: same balance over a NEW
+// backlog is a different input. The memo is in-memory; a restart just costs one
+// redundant sweep per held user.
+//
 // Sandboxes whose owner cannot cover their oldest voucher are stopped
 // (persistStop dedups via SetNX, so re-sweeping never re-kills).
-func maybeSweep(ctx context.Context, rdb *redis.Client, onchain AggregatorChain, queueKey string, stopCh chan<- StopSignal, log *zap.Logger) {
+func maybeSweep(ctx context.Context, rdb *redis.Client, onchain AggregatorChain, queueKey string, stopCh chan<- StopSignal, lastBal map[common.Address]*big.Int, log *zap.Logger) {
 	provider := onchain.ProviderAddress()
 	heldUsersKey := fmt.Sprintf(voucher.VoucherHeldUsersKeyFmt, strings.ToLower(provider.Hex()))
 
@@ -64,6 +73,7 @@ func maybeSweep(ctx context.Context, rdb *redis.Client, onchain AggregatorChain,
 	}
 
 	seen := map[common.Address]bool{}
+	fromQueue := map[common.Address]bool{}
 	var users []common.Address
 	if qlen > backlogSweepThreshold {
 		rows, _, truncated, err := voucher.SummarizeQueue(ctx, rdb, queueKey, 1)
@@ -78,6 +88,7 @@ func maybeSweep(ctx context.Context, rdb *redis.Client, onchain AggregatorChain,
 			u := common.HexToAddress(r.User)
 			if !seen[u] {
 				seen[u] = true
+				fromQueue[u] = true
 				users = append(users, u)
 			}
 		}
@@ -94,7 +105,7 @@ func maybeSweep(ctx context.Context, rdb *redis.Client, onchain AggregatorChain,
 			}
 		}
 	}
-	sweepUsers(ctx, rdb, onchain, queueKey, stopCh, users, log)
+	sweepUsersMemo(ctx, rdb, onchain, queueKey, stopCh, users, fromQueue, lastBal, log)
 }
 
 // sweepUsers re-splits the given users' outstanding backlog against their
@@ -102,6 +113,15 @@ func maybeSweep(ctx context.Context, rdb *redis.Client, onchain AggregatorChain,
 // rejects INSUFFICIENT_BALANCE, so the user's remaining queued vouchers are
 // parked as debt immediately instead of burning one nonce per interval.
 func sweepUsers(ctx context.Context, rdb *redis.Client, onchain AggregatorChain, queueKey string, stopCh chan<- StopSignal, users []common.Address, log *zap.Logger) {
+	sweepUsersMemo(ctx, rdb, onchain, queueKey, stopCh, users, nil, nil, log)
+}
+
+// sweepUsersMemo is sweepUsers with the held-user balance memo: a user NOT in
+// fromQueue (held-only) whose balance equals lastBal's entry is skipped — same
+// balance over the same stopped backlog re-derives the same partition, so the
+// rewrite would be pure churn. Passing nil maps disables the memo (targeted
+// sweeps always run).
+func sweepUsersMemo(ctx context.Context, rdb *redis.Client, onchain AggregatorChain, queueKey string, stopCh chan<- StopSignal, users []common.Address, fromQueue map[common.Address]bool, lastBal map[common.Address]*big.Int, log *zap.Logger) {
 	if len(users) == 0 {
 		return
 	}
@@ -115,6 +135,14 @@ func sweepUsers(ctx context.Context, rdb *redis.Client, onchain AggregatorChain,
 		var bal *big.Int
 		if i < len(balances) {
 			bal = balances[i]
+		}
+		if lastBal != nil && !fromQueue[u] {
+			if prev, ok := lastBal[u]; ok && prev != nil && bal != nil && prev.Cmp(bal) == 0 {
+				continue // held-only user, balance unchanged: nothing to reclaim or re-park
+			}
+		}
+		if lastBal != nil && bal != nil {
+			lastBal[u] = new(big.Int).Set(bal)
 		}
 		res, err := voucher.AggregateCovered(ctx, rdb, queueKey, u, provider, bal)
 		if err != nil {

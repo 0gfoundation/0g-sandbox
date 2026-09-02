@@ -114,7 +114,7 @@ func TestMaybeSweep_SteadyStateUntouched(t *testing.T) {
 
 	chainMock := &mockAggChain{provider: prov, bal: map[common.Address]*big.Int{u: big.NewInt(10_000)}}
 	stopCh := make(chan StopSignal, 4)
-	maybeSweep(context.Background(), rdb, chainMock, queueKey, stopCh, zap.NewNop())
+	maybeSweep(context.Background(), rdb, chainMock, queueKey, stopCh, map[common.Address]*big.Int{}, zap.NewNop())
 
 	if chainMock.calls != 0 {
 		t.Errorf("steady state must not read balances; got %d calls", chainMock.calls)
@@ -141,7 +141,7 @@ func TestMaybeSweep_BacklogTriggers(t *testing.T) {
 	// balance covers half the backlog
 	chainMock := &mockAggChain{provider: prov, bal: map[common.Address]*big.Int{u: big.NewInt(int64(n/2) * 100)}}
 	stopCh := make(chan StopSignal, 4)
-	maybeSweep(context.Background(), rdb, chainMock, queueKey, stopCh, zap.NewNop())
+	maybeSweep(context.Background(), rdb, chainMock, queueKey, stopCh, map[common.Address]*big.Int{}, zap.NewNop())
 
 	if chainMock.calls != 1 {
 		t.Errorf("expected one balance batch call, got %d", chainMock.calls)
@@ -174,7 +174,7 @@ func TestMaybeSweep_ReclaimAfterTopUp(t *testing.T) {
 
 	// Top-up: maybeSweep (queue empty, held-users non-empty) reclaims all 3.
 	chainMock.bal[u] = big.NewInt(1000)
-	maybeSweep(context.Background(), rdb, chainMock, queueKey, stopCh, zap.NewNop())
+	maybeSweep(context.Background(), rdb, chainMock, queueKey, stopCh, map[common.Address]*big.Int{}, zap.NewNop())
 
 	items, _ := rdb.LRange(context.Background(), queueKey, 0, -1).Result()
 	if len(items) != 1 {
@@ -187,5 +187,41 @@ func TestMaybeSweep_ReclaimAfterTopUp(t *testing.T) {
 	// Debt cleared → index empty.
 	if users, _ := voucher.HeldUsers(context.Background(), rdb, prov); len(users) != 0 {
 		t.Errorf("held-users index should be empty, got %v", users)
+	}
+}
+
+// Anti-churn: a held-only user whose balance has not changed must be skipped
+// entirely on subsequent sweeps — one balance read, zero queue/held rewrites —
+// instead of oscillating between equivalent partitions every interval.
+func TestMaybeSweep_HeldUnchangedBalanceSkipped(t *testing.T) {
+	rdb, _, prov, queueKey := aggSetup(t)
+	u := common.HexToAddress("0xAAA")
+	for i := 0; i < 4; i++ {
+		pushVoucher(t, rdb, queueKey, "sb-1", u, prov, 100)
+	}
+	chainMock := &mockAggChain{provider: prov, bal: map[common.Address]*big.Int{u: big.NewInt(250)}}
+	stopCh := make(chan StopSignal, 4)
+	lastBal := map[common.Address]*big.Int{}
+
+	// Pass 1: splits (covered 2, held 2).
+	maybeSweep(context.Background(), rdb, chainMock, queueKey, stopCh, lastBal, zap.NewNop())
+	// held-users guard keeps firing, so pass 2 runs — but must be a no-op.
+	heldKey := fmt.Sprintf(voucher.VoucherHeldKeyFmt, strings.ToLower(u.Hex()), strings.ToLower(prov.Hex()))
+	qBefore, _ := rdb.LRange(context.Background(), queueKey, 0, -1).Result()
+	hBefore, _ := rdb.LRange(context.Background(), heldKey, 0, -1).Result()
+
+	maybeSweep(context.Background(), rdb, chainMock, queueKey, stopCh, lastBal, zap.NewNop())
+
+	qAfter, _ := rdb.LRange(context.Background(), queueKey, 0, -1).Result()
+	hAfter, _ := rdb.LRange(context.Background(), heldKey, 0, -1).Result()
+	if fmt.Sprint(qBefore) != fmt.Sprint(qAfter) || fmt.Sprint(hBefore) != fmt.Sprint(hAfter) {
+		t.Fatal("unchanged balance must not rewrite queue or held list")
+	}
+
+	// Top-up: balance change re-enables the sweep and reclaims everything.
+	chainMock.bal[u] = big.NewInt(1000)
+	maybeSweep(context.Background(), rdb, chainMock, queueKey, stopCh, lastBal, zap.NewNop())
+	if n, _ := rdb.LLen(context.Background(), heldKey).Result(); n != 0 {
+		t.Errorf("after top-up held should be reclaimed, got %d", n)
 	}
 }
