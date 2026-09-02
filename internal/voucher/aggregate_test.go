@@ -386,3 +386,32 @@ func TestHeldDebt_SumsHeldList(t *testing.T) {
 		t.Errorf("held debt: got %v err %v want 300", d, err)
 	}
 }
+
+func TestAggregateCovered_ReclaimsHeldOnTopUp(t *testing.T) {
+	rdb, mr := setup(t)
+	defer mr.Close()
+	user := common.HexToAddress("0xAAA")
+	prov := common.HexToAddress("0xBBB")
+	for i := 0; i < 4; i++ { // 4 × 100 = 400
+		enqueueRaw(t, rdb, voucherFor(fmt.Sprintf("sb-%d", i), user, prov, 100))
+	}
+	// Pass 1: broke (balance 0) → nothing settles, whole backlog parked.
+	r1, err := AggregateCovered(context.Background(), rdb, testQueueKey, user, prov, big.NewInt(0))
+	if err != nil || r1.Covered != 0 || r1.Held != 4 {
+		t.Fatalf("pass1: %+v err=%v", r1, err)
+	}
+	// Pass 2: topped up to 250 → reclaim the oldest two (200) as one aggregate, hold two.
+	r2, err := AggregateCovered(context.Background(), rdb, testQueueKey, user, prov, big.NewInt(250))
+	if err != nil || r2.Covered != 2 || r2.CoveredFeeWei != "200" || r2.Held != 2 {
+		t.Fatalf("pass2: %+v err=%v", r2, err)
+	}
+	if aggFee, _ := queueAggFeeAndRest(t, rdb); aggFee == nil || aggFee.String() != "200" {
+		t.Errorf("reclaimed aggregate fee: %v want 200", aggFee)
+	}
+	if got := heldLen(t, rdb, user, prov); got != 2 {
+		t.Errorf("held after reclaim: got %d want 2", got)
+	}
+	if len(r2.HeldSandboxIDs) != 2 {
+		t.Errorf("held sandbox ids: %v want 2 distinct", r2.HeldSandboxIDs)
+	}
+}

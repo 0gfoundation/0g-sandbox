@@ -139,17 +139,27 @@ type CoveredResult struct {
 	CoveredFeeWei string `json:"covered_fee_wei"` // the aggregate's total_fee (0 if none covered)
 	Held          int    `json:"held"`            // vouchers parked in the held (debt) list
 	HeldFeeWei    string `json:"held_fee_wei"`
+	// HeldSandboxIDs are the distinct sandboxes with parked (unpayable) debt.
+	// The caller stops them — they run on an account that can no longer pay and
+	// would otherwise keep generating unpayable vouchers every interval.
+	HeldSandboxIDs []string `json:"held_sandbox_ids,omitempty"`
 }
 
-// AggregateCovered splits one (user, provider)'s queued backlog against the
-// balance the caller read on-chain, in a single atomic queue rewrite:
+// AggregateCovered re-splits one (user, provider)'s entire outstanding backlog —
+// the already-parked held list PLUS what is currently queued — against the
+// balance the caller read on-chain, in a single atomic rewrite of both keys:
 //
-//   - The longest chronological prefix whose summed fee is ≤ balance is folded
-//     into ONE aggregated voucher left on the queue for immediate settlement.
-//   - Every voucher after that prefix is moved to the held list
+//   - The longest chronological prefix (held first — it is older — then queued)
+//     whose summed fee is ≤ balance is folded into ONE aggregated voucher left on
+//     the queue for immediate settlement.
+//   - Everything after that prefix is written back to the held list
 //     (VoucherHeldKeyFmt) — the debt, parked out of the settle path so the
-//     settler never submits a guaranteed-reject settlement. It stays collectable
-//     and is moved back to the queue when the user tops up.
+//     settler never submits a guaranteed-reject settlement.
+//
+// Because it reconsiders the held list every call, this is also the recovery
+// path: once the user tops up, a later call folds the now-affordable held prefix
+// back onto the queue and settles it. Debt is therefore always paid oldest-first
+// and before new compute.
 //
 // Ordering matters: on-chain nonces settle strictly increasing and the contract
 // sweeps the whole remaining balance on the first INSUFFICIENT_BALANCE, so we
@@ -157,11 +167,12 @@ type CoveredResult struct {
 // vouchers out of order. Once one voucher would overflow the balance, all
 // subsequent ones are held even if a later, cheaper one would have fit.
 //
-// A balance that covers the entire backlog holds nothing; a balance below the
-// first voucher's fee covers nothing and parks the whole backlog (the caller
-// then stops the sandbox). Other users' vouchers are preserved untouched.
+// A balance covering the whole backlog clears the held list; a balance below the
+// first fee covers nothing and parks everything (the caller then stops the
+// held sandboxes). Other users' queued vouchers are preserved untouched.
 //
-// Uses WATCH/MULTI/EXEC for atomicity against concurrent BLPOP by the settler.
+// WATCH covers both the queue and the held key for atomicity against a
+// concurrent settler BLPOP.
 func AggregateCovered(ctx context.Context, rdb *redis.Client, queueKey string, user, provider common.Address, balance *big.Int) (*CoveredResult, error) {
 	const maxRetries = 5
 	if balance == nil {
@@ -174,28 +185,46 @@ func AggregateCovered(ctx context.Context, rdb *redis.Client, queueKey string, u
 	var result *CoveredResult
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		txErr := rdb.Watch(ctx, func(tx *redis.Tx) error {
-			items, err := tx.LRange(ctx, queueKey, 0, -1).Result()
+			held, err := tx.LRange(ctx, heldKey, 0, -1).Result()
+			if err != nil {
+				return err
+			}
+			queued, err := tx.LRange(ctx, queueKey, 0, -1).Result()
 			if err != nil {
 				return err
 			}
 
-			kept := make([]string, 0, len(items))
-			coveredSum := new(big.Int)
-			coveredCount := 0
-			heldSum := new(big.Int)
-			var heldRaws []string
-			holding := false
-
-			for _, raw := range items {
+			// mine = this user's backlog, oldest first: held (older) then queued.
+			// kept = other users' queued vouchers, preserved in place.
+			mine := make([]string, 0, len(held)+len(queued))
+			mine = append(mine, held...)
+			kept := make([]string, 0, len(queued))
+			for _, raw := range queued {
 				var v SandboxVoucher
 				if err := json.Unmarshal([]byte(raw), &v); err != nil {
 					kept = append(kept, raw) // malformed: leave in place, don't lose it
 					continue
 				}
-				if !strings.EqualFold(v.User.Hex(), userLower) ||
-					!strings.EqualFold(v.Provider.Hex(), providerLower) {
+				if strings.EqualFold(v.User.Hex(), userLower) &&
+					strings.EqualFold(v.Provider.Hex(), providerLower) {
+					mine = append(mine, raw)
+				} else {
 					kept = append(kept, raw)
-					continue
+				}
+			}
+
+			coveredSum := new(big.Int)
+			coveredCount := 0
+			heldSum := new(big.Int)
+			var heldRaws []string
+			sbSeen := map[string]bool{}
+			var heldSandboxIDs []string
+			holding := false
+
+			for _, raw := range mine {
+				var v SandboxVoucher
+				if err := json.Unmarshal([]byte(raw), &v); err != nil {
+					continue // drop unparseable debt entries (settler couldn't process them either)
 				}
 				fee := v.TotalFee
 				if fee == nil {
@@ -212,11 +241,10 @@ func AggregateCovered(ctx context.Context, rdb *redis.Client, queueKey string, u
 				}
 				heldRaws = append(heldRaws, raw)
 				heldSum.Add(heldSum, fee)
-			}
-
-			if coveredCount == 0 && len(heldRaws) == 0 {
-				result = &CoveredResult{CoveredFeeWei: "0", HeldFeeWei: "0"}
-				return nil
+				if v.SandboxID != "" && !sbSeen[v.SandboxID] {
+					sbSeen[v.SandboxID] = true
+					heldSandboxIDs = append(heldSandboxIDs, v.SandboxID)
+				}
 			}
 
 			var rawAgg string
@@ -237,6 +265,7 @@ func AggregateCovered(ctx context.Context, rdb *redis.Client, queueKey string, u
 			}
 
 			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				// Rebuild the queue: other users' vouchers + this user's covered aggregate.
 				pipe.Del(ctx, queueKey)
 				if len(kept) > 0 {
 					vals := make([]any, len(kept))
@@ -248,6 +277,8 @@ func AggregateCovered(ctx context.Context, rdb *redis.Client, queueKey string, u
 				if coveredCount > 0 {
 					pipe.RPush(ctx, queueKey, rawAgg)
 				}
+				// Rewrite the held list to exactly the new remainder.
+				pipe.Del(ctx, heldKey)
 				if len(heldRaws) > 0 {
 					vals := make([]any, len(heldRaws))
 					for i, s := range heldRaws {
@@ -261,13 +292,14 @@ func AggregateCovered(ctx context.Context, rdb *redis.Client, queueKey string, u
 				return err
 			}
 			result = &CoveredResult{
-				Covered:       coveredCount,
-				CoveredFeeWei: coveredSum.String(),
-				Held:          len(heldRaws),
-				HeldFeeWei:    heldSum.String(),
+				Covered:        coveredCount,
+				CoveredFeeWei:  coveredSum.String(),
+				Held:           len(heldRaws),
+				HeldFeeWei:     heldSum.String(),
+				HeldSandboxIDs: heldSandboxIDs,
 			}
 			return nil
-		}, queueKey)
+		}, queueKey, heldKey)
 
 		if txErr == nil {
 			return result, nil
