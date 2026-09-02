@@ -108,6 +108,30 @@ type AggregateResult struct {
 	TotalFeeWei string `json:"total_fee_wei"`
 }
 
+// HeldDebt returns the total parked (unpayable) debt for one (user, provider):
+// the sum of fees in the held list. Zero when there is no held backlog. Callers
+// subtract this from a user's on-chain balance to get the balance actually
+// available for new work — outstanding debt is settled (oldest first) before
+// any new compute.
+func HeldDebt(ctx context.Context, rdb *redis.Client, user, provider common.Address) (*big.Int, error) {
+	heldKey := fmt.Sprintf(VoucherHeldKeyFmt, strings.ToLower(user.Hex()), strings.ToLower(provider.Hex()))
+	items, err := rdb.LRange(ctx, heldKey, 0, -1).Result()
+	if err != nil {
+		return nil, err
+	}
+	total := new(big.Int)
+	for _, raw := range items {
+		var v SandboxVoucher
+		if err := json.Unmarshal([]byte(raw), &v); err != nil {
+			continue
+		}
+		if v.TotalFee != nil {
+			total.Add(total, v.TotalFee)
+		}
+	}
+	return total, nil
+}
+
 // CoveredResult is what AggregateCovered returns: how the backlog for one
 // (user, provider) was split against the current balance.
 type CoveredResult struct {

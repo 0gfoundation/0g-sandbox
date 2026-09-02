@@ -361,3 +361,28 @@ func TestAggregateCovered_ZeroCoverageParksAll(t *testing.T) {
 		t.Errorf("held list len: %d want 3", got)
 	}
 }
+
+func TestHeldDebt_SumsHeldList(t *testing.T) {
+	rdb, mr := setup(t)
+	defer mr.Close()
+	user := common.HexToAddress("0xAAA")
+	prov := common.HexToAddress("0xBBB")
+
+	// no held list yet → zero
+	d, err := HeldDebt(context.Background(), rdb, user, prov)
+	if err != nil || d.Sign() != 0 {
+		t.Fatalf("empty held: got %v err %v want 0", d, err)
+	}
+
+	// park three vouchers via AggregateCovered with balance 0 (covers nothing)
+	for i := 0; i < 3; i++ {
+		enqueueRaw(t, rdb, voucherFor(fmt.Sprintf("sb-%d", i), user, prov, 100))
+	}
+	if _, err := AggregateCovered(context.Background(), rdb, testQueueKey, user, prov, big.NewInt(0)); err != nil {
+		t.Fatal(err)
+	}
+	d, err = HeldDebt(context.Background(), rdb, user, prov)
+	if err != nil || d.String() != "300" {
+		t.Errorf("held debt: got %v err %v want 300", d, err)
+	}
+}

@@ -26,6 +26,7 @@ import (
 	"github.com/0gfoundation/0g-sandbox/internal/daytona"
 	"github.com/0gfoundation/0g-sandbox/internal/events"
 	"github.com/0gfoundation/0g-sandbox/internal/registry"
+	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
 
 // BillingHooks is satisfied by billing.EventHandler.
@@ -71,9 +72,9 @@ type Handler struct {
 	pricePerCPUPerSec   *big.Int       // per CPU core per second
 	pricePerMemGBPerSec *big.Int       // per GB memory per second
 	voucherIntervalSec  int64
-	providerAddress     string // on-chain settlement identity; used by broker client and balance lookups
+	providerAddress     string   // on-chain settlement identity; used by broker client and balance lookups
 	adminAddresses      []string // operator wallets allowed to call admin-only endpoints (lowercased hex)
-	sshGatewayHost      string // if set, replaces localhost in SSH commands
+	sshGatewayHost      string   // if set, replaces localhost in SSH commands
 	computePricePerSec  *big.Int
 	rdb                 *redis.Client
 	teeKey              *ecdsa.PrivateKey // TEE signing key; nil = sealed containers disabled
@@ -189,7 +190,6 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/snapshots", h.handleSnapshotCreate)
 	rg.DELETE("/snapshots/:id", h.handleSnapshotDelete)
 
-
 	// ── DELETE /sandbox/:id (no action suffix, safe to register separately) ─
 	rg.DELETE("/sandbox/:id", h.withOwnerOrAdmin(h.handleDelete))
 
@@ -271,13 +271,14 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	createReserved := false
 	if h.balCheck != nil {
 		createRequired = new(big.Int).Add(h.createFee, h.intervalCost(reqCPU, reqMemGB))
+		heldDebt := h.heldDebt(c.Request.Context(), wallet)
 		balance, err := h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
 		if err != nil {
 			h.log.Error("balance check", zap.String("wallet", wallet), zap.Error(err))
 			c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 			return
 		}
-		available := availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress))
+		available := availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress), heldDebt)
 		if available.Cmp(createRequired) < 0 && h.broker != nil {
 			// Ask the broker to top up the user's balance (funding-only call:
 			// sandbox_id="" means no monitoring session is registered yet).
@@ -291,14 +292,15 @@ func (h *Handler) handleCreate(c *gin.Context) {
 					c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 					return
 				}
-				available = availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress))
+				available = availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress), heldDebt)
 			}
 		}
 		if available.Cmp(createRequired) < 0 {
 			c.JSON(http.StatusPaymentRequired, gin.H{
-				"error":     "insufficient balance",
-				"available": available.String(),
-				"required":  createRequired.String(),
+				"error":            "insufficient balance",
+				"available":        available.String(),
+				"required":         createRequired.String(),
+				"outstanding_debt": heldDebt.String(), // must be cleared before new work
 			})
 			return
 		}
@@ -492,13 +494,14 @@ func (h *Handler) handleStart(c *gin.Context) {
 	startReserved := false
 	if h.balCheck != nil {
 		startRequired = h.intervalCost(cpu, memGB)
+		heldDebt := h.heldDebt(c.Request.Context(), wallet)
 		balance, err := h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
 		if err != nil {
 			h.log.Error("balance check (start)", zap.String("wallet", wallet), zap.Error(err))
 			c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 			return
 		}
-		available := availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress))
+		available := availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress), heldDebt)
 		if available.Cmp(startRequired) < 0 && h.broker != nil {
 			if berr := h.broker.registerSession(c.Request.Context(), id, wallet, int64(cpu), int64(memGB)); berr != nil {
 				h.log.Warn("broker pre-start fund", zap.String("id", id), zap.Error(berr))
@@ -510,7 +513,7 @@ func (h *Handler) handleStart(c *gin.Context) {
 					c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 					return
 				}
-				available = availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress))
+				available = availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress), heldDebt)
 			}
 		} else if h.broker != nil {
 			// Balance sufficient: register for monitoring only (non-blocking).
@@ -518,9 +521,10 @@ func (h *Handler) handleStart(c *gin.Context) {
 		}
 		if available.Cmp(startRequired) < 0 {
 			c.JSON(http.StatusPaymentRequired, gin.H{
-				"error":     "insufficient balance",
-				"available": available.String(),
-				"required":  startRequired.String(),
+				"error":            "insufficient balance",
+				"available":        available.String(),
+				"required":         startRequired.String(),
+				"outstanding_debt": heldDebt.String(), // must be cleared before new work
 			})
 			return
 		}
@@ -828,12 +832,12 @@ func (h *Handler) handleEvents(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"current_block":  currentBlock,
-		"since":          sinceTimestamp,
-		"total":          total,
-		"page":           page,
-		"page_size":      pageSize,
-		"events":         result,
+		"current_block": currentBlock,
+		"since":         sinceTimestamp,
+		"total":         total,
+		"page":          page,
+		"page_size":     pageSize,
+		"events":        result,
 	})
 }
 
@@ -1102,7 +1106,6 @@ func copyRecorder(c *gin.Context, rec *httptest.ResponseRecorder) {
 	c.Data(rec.Code, rec.Header().Get("Content-Type"), rec.Body.Bytes())
 }
 
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 // handleCatchAll dispatches all /sandbox/:id/<action> requests.
@@ -1258,12 +1261,32 @@ func extractResources(body []byte) (cpu, memGB int) {
 }
 
 // availableBalance returns chainBalance - reserved, floored at zero.
-func availableBalance(chainBalance, reserved *big.Int) *big.Int {
+// availableBalance is the balance a caller may spend on new work: the on-chain
+// balance minus in-flight reservations minus any outstanding held debt.
+// Outstanding debt is settled (oldest first) before new compute, so it is not
+// available — a user with debt must top up enough to cover it before starting
+// or creating a sandbox. Clamped at zero.
+func availableBalance(chainBalance, reserved, heldDebt *big.Int) *big.Int {
 	available := new(big.Int).Sub(chainBalance, reserved)
+	if heldDebt != nil {
+		available.Sub(available, heldDebt)
+	}
 	if available.Sign() < 0 {
 		available.SetInt64(0)
 	}
 	return available
+}
+
+// heldDebt returns the user's parked (unpayable) debt for this provider, or
+// zero if the lookup fails (logged) — a transient Redis error must not wrongly
+// block a create/start.
+func (h *Handler) heldDebt(ctx context.Context, wallet string) *big.Int {
+	d, err := voucher.HeldDebt(ctx, h.rdb, common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
+	if err != nil {
+		h.log.Warn("held debt lookup failed; treating as zero", zap.String("wallet", wallet), zap.Error(err))
+		return new(big.Int)
+	}
+	return d
 }
 
 // extractSnapshotName parses the "snapshot" field from a sandbox create request body.
