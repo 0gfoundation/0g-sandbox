@@ -28,6 +28,27 @@ import (
 	"github.com/0gfoundation/0g-sandbox/internal/registry"
 )
 
+// overrideHeaders are caller-controlled headers that some frameworks and
+// ingresses interpret as path/method/origin overrides. They must never reach
+// Daytona alongside the injected admin bearer — the proxy's authorization is
+// bound to the path and method IT routed, and any upstream reinterpretation
+// would run with admin rights on a request the gates never saw.
+var overrideHeaders = []string{
+	"X-Original-Url",
+	"X-Rewrite-Url",
+	"X-Original-Uri",
+	"X-Http-Method-Override",
+	"X-Http-Method",
+	"X-Method-Override",
+	"X-Forwarded-Host",
+	"X-Forwarded-Proto",
+	"X-Forwarded-Port",
+	"X-Forwarded-Prefix",
+	"X-Forwarded-Path",
+	"X-Real-Ip",
+	"Forwarded",
+}
+
 // BillingHooks is satisfied by billing.EventHandler.
 // Decoupled here so proxy tests can use a mock.
 type BillingHooks interface {
@@ -71,9 +92,9 @@ type Handler struct {
 	pricePerCPUPerSec   *big.Int       // per CPU core per second
 	pricePerMemGBPerSec *big.Int       // per GB memory per second
 	voucherIntervalSec  int64
-	providerAddress     string // on-chain settlement identity; used by broker client and balance lookups
+	providerAddress     string   // on-chain settlement identity; used by broker client and balance lookups
 	adminAddresses      []string // operator wallets allowed to call admin-only endpoints (lowercased hex)
-	sshGatewayHost      string // if set, replaces localhost in SSH commands
+	sshGatewayHost      string   // if set, replaces localhost in SSH commands
 	computePricePerSec  *big.Int
 	rdb                 *redis.Client
 	teeKey              *ecdsa.PrivateKey // TEE signing key; nil = sealed containers disabled
@@ -102,6 +123,17 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 	orig := rp.Director
 	rp.Director = func(req *http.Request) {
 		orig(req)
+		// Scrub caller-controlled routing / method-override headers BEFORE the
+		// admin bearer goes on. The proxy's owner gates bind to the path+method
+		// it routed; frameworks and ingresses that honor these headers would
+		// reinterpret the request upstream (different path, different method)
+		// under admin credentials — e.g. a gated POST /api/sandbox rewritten
+		// into DELETE /api/sandbox/<victim> or PUT .../labels. Whether the
+		// pinned Daytona honors them is off-repo behavior; the proxy must not
+		// forward them regardless.
+		for _, h := range overrideHeaders {
+			req.Header.Del(h)
+		}
 		req.Header.Set("Authorization", "Bearer "+dtona.AdminKey())
 		req.Host = target.Host
 	}
@@ -188,7 +220,6 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/volumes", h.handleListGeneric("daytona-owner"))
 	rg.POST("/snapshots", h.handleSnapshotCreate)
 	rg.DELETE("/snapshots/:id", h.handleSnapshotDelete)
-
 
 	// ── DELETE /sandbox/:id (no action suffix, safe to register separately) ─
 	rg.DELETE("/sandbox/:id", h.withOwnerOrAdmin(h.handleDelete))
@@ -828,12 +859,12 @@ func (h *Handler) handleEvents(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"current_block":  currentBlock,
-		"since":          sinceTimestamp,
-		"total":          total,
-		"page":           page,
-		"page_size":      pageSize,
-		"events":         result,
+		"current_block": currentBlock,
+		"since":         sinceTimestamp,
+		"total":         total,
+		"page":          page,
+		"page_size":     pageSize,
+		"events":        result,
 	})
 }
 
@@ -1101,7 +1132,6 @@ func copyRecorder(c *gin.Context, rec *httptest.ResponseRecorder) {
 	}
 	c.Data(rec.Code, rec.Header().Get("Content-Type"), rec.Body.Bytes())
 }
-
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
