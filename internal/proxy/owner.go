@@ -68,7 +68,7 @@ func InjectOwner(body []byte, walletAddr string) ([]byte, error) {
 	// unvalidated "volumes" array would let a caller mount another tenant's volume
 	// into their own sandbox — no ownership check exists. Deny-by-default until
 	// per-volume ownership validation is built (see the admin gate on
-	// GET /api/volumes and the tracking issue).
+	// GET /api/volumes and tracking issue #81).
 	for k := range m {
 		if strings.EqualFold(k, "volumes") {
 			delete(m, k)

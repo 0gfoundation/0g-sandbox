@@ -71,9 +71,9 @@ type Handler struct {
 	pricePerCPUPerSec   *big.Int       // per CPU core per second
 	pricePerMemGBPerSec *big.Int       // per GB memory per second
 	voucherIntervalSec  int64
-	providerAddress     string // on-chain settlement identity; used by broker client and balance lookups
+	providerAddress     string   // on-chain settlement identity; used by broker client and balance lookups
 	adminAddresses      []string // operator wallets allowed to call admin-only endpoints (lowercased hex)
-	sshGatewayHost      string // if set, replaces localhost in SSH commands
+	sshGatewayHost      string   // if set, replaces localhost in SSH commands
 	computePricePerSec  *big.Int
 	rdb                 *redis.Client
 	teeKey              *ecdsa.PrivateKey // TEE signing key; nil = sealed containers disabled
@@ -188,7 +188,6 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/volumes", h.handleVolumesList)
 	rg.POST("/snapshots", h.handleSnapshotCreate)
 	rg.DELETE("/snapshots/:id", h.handleSnapshotDelete)
-
 
 	// ── DELETE /sandbox/:id (no action suffix, safe to register separately) ─
 	rg.DELETE("/sandbox/:id", h.withOwnerOrAdmin(h.handleDelete))
@@ -828,12 +827,12 @@ func (h *Handler) handleEvents(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"current_block":  currentBlock,
-		"since":          sinceTimestamp,
-		"total":          total,
-		"page":           page,
-		"page_size":      pageSize,
-		"events":         result,
+		"current_block": currentBlock,
+		"since":         sinceTimestamp,
+		"total":         total,
+		"page":          page,
+		"page_size":     pageSize,
+		"events":        result,
 	})
 }
 
@@ -1111,7 +1110,6 @@ func copyRecorder(c *gin.Context, rec *httptest.ResponseRecorder) {
 	c.Data(rec.Code, rec.Header().Get("Content-Type"), rec.Body.Bytes())
 }
 
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 // handleCatchAll dispatches all /sandbox/:id/<action> requests.
@@ -1150,8 +1148,41 @@ func (h *Handler) handleCatchAll(c *gin.Context) {
 
 	// ── Transparent proxy (owner check) ───────────────────────────────────
 	default:
-		h.withOwner(h.forward)(c)
+		h.withOwner(h.stripVolumesThenForward)(c)
 	}
+}
+
+// stripVolumesThenForward removes any caller-supplied "volumes" (any case) from
+// a JSON body before the transparent forward. The catch-all forwards arbitrary
+// sandbox-scoped actions to Daytona as admin; if the backend ever accepts
+// volume attach/modify through one of them, an unvalidated volumes array would
+// reopen the cross-tenant mount closed at create (deny-by-default until
+// per-volume ownership validation lands, #81). Non-JSON or empty bodies pass
+// through untouched.
+func (h *Handler) stripVolumesThenForward(c *gin.Context) {
+	if c.Request.Body != nil && c.Request.ContentLength != 0 {
+		body, err := io.ReadAll(c.Request.Body)
+		if err == nil {
+			var m map[string]any
+			if json.Unmarshal(body, &m) == nil {
+				changed := false
+				for k := range m {
+					if strings.EqualFold(k, "volumes") {
+						delete(m, k)
+						changed = true
+					}
+				}
+				if changed {
+					if nb, err := json.Marshal(m); err == nil {
+						body = nb
+					}
+				}
+			}
+			c.Request.Body = io.NopCloser(bytes.NewReader(body))
+			c.Request.ContentLength = int64(len(body))
+		}
+	}
+	h.forward(c)
 }
 
 // withOwner wraps a handler with an ownership check.

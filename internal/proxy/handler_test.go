@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -30,23 +31,28 @@ type mockBilling struct {
 }
 
 func (m *mockBilling) OnCreate(_ context.Context, sandboxID, _ string, _, _ int) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.creates = append(m.creates, sandboxID)
 }
 func (m *mockBilling) OnStart(_ context.Context, sandboxID, _ string, _, _ int) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.starts = append(m.starts, sandboxID)
 }
 func (m *mockBilling) OnStop(_ context.Context, sandboxID string) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.stops = append(m.stops, sandboxID)
 }
 func (m *mockBilling) OnDelete(_ context.Context, sandboxID string) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.deletes = append(m.deletes, sandboxID)
 }
 func (m *mockBilling) OnArchive(_ context.Context, sandboxID string) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.archives = append(m.archives, sandboxID)
 }
 func (m *mockBilling) EnsureSession(_ context.Context, _, _ string) {}
@@ -387,7 +393,6 @@ func mockDaytonaWithSSH(t *testing.T, sandboxes []daytona.Sandbox) *httptest.Ser
 	return srv
 }
 
-
 // TestSealedOnly_RejectsUnsealedCreate exercises the SEALED_ONLY config gate.
 // When the provider runs with sealed_only=true, every create that doesn't carry
 // `"sealed": true` must fail at 400 before the body ever reaches Daytona.
@@ -507,5 +512,60 @@ func TestExtractID(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("extractID(%q) = %q, want %q", tc.body, got, tc.want)
 		}
+	}
+}
+
+// Review F2 (#82): the other half of the admin gate — an admin's GET
+// /api/volumes must be forwarded, guarding against the gate ever being
+// "fixed" into 403-for-everyone.
+func TestVolumesList_Admin_Forwarded(t *testing.T) {
+	srv, _ := mockDaytona(t, nil)
+	dtona := daytona.NewClient(srv.URL, "test-key")
+	r := gin.New()
+	api := r.Group("/api", func(c *gin.Context) {
+		c.Set("wallet_address", "0xADmin")
+		c.Next()
+	})
+	NewHandler(dtona, &mockBilling{}, nil, nil, nil, nil, nil, nil, nil, "",
+		[]string{"0xadmin"}, "", nil, zap.NewNop(), "", nil, 0).Register(api)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/volumes", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusForbidden {
+		t.Errorf("admin GET /api/volumes must be forwarded, got 403: %s", w.Body.String())
+	}
+}
+
+// Review F1 (#82): the transparent catch-all must strip caller-supplied
+// volumes (any case) before forwarding as admin — if the backend ever accepts
+// volume attach through a sandbox-scoped action, an unvalidated array would
+// reopen the cross-tenant mount closed at create.
+func TestCatchAll_StripsVolumesFromBody(t *testing.T) {
+	sandboxes := []daytona.Sandbox{{ID: "sb-1", Labels: map[string]string{"daytona-owner": "0xOWNER"}}}
+	srv, captured := mockDaytona(t, sandboxes)
+	dtona := daytona.NewClient(srv.URL, "test-key")
+	r := newTestEngine(dtona, &mockBilling{}, "0xOWNER")
+
+	body := `{"Volumes":[{"volumeId":"other-tenant"}],"volumes":[{"volumeId":"x"}],"keep":"me"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/sandbox/sb-1/update", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	var forwarded []byte
+	for _, b := range *captured {
+		if len(b) > 0 && strings.Contains(string(b), "keep") {
+			forwarded = b
+		}
+	}
+	if forwarded == nil {
+		t.Fatalf("forwarded body not captured; status=%d", w.Code)
+	}
+	s := strings.ToLower(string(forwarded))
+	if strings.Contains(s, "volumes") {
+		t.Errorf("volumes must be stripped from catch-all forward, got: %s", forwarded)
+	}
+	if !strings.Contains(string(forwarded), "keep") {
+		t.Errorf("unrelated fields must be preserved, got: %s", forwarded)
 	}
 }
