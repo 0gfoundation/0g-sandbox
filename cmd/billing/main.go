@@ -286,14 +286,14 @@ func main() {
 	// Public providers list — returns known providers with their on-chain service data.
 	r.GET("/api/providers", func(c *gin.Context) {
 		type ProviderInfo struct {
-			Address               string `json:"address"`
-			URL                   string `json:"url"`
-			AppId                 string `json:"app_id"`
-			PricePerCPUPerMin     string `json:"price_per_cpu_per_min"`
-			PricePerCPUPerSec     string `json:"price_per_cpu_per_sec"`
-			PricePerMemGBPerMin   string `json:"price_per_mem_gb_per_min"`
-			PricePerMemGBPerSec   string `json:"price_per_mem_gb_per_sec"`
-			CreateFee             string `json:"create_fee"`
+			Address             string `json:"address"`
+			URL                 string `json:"url"`
+			AppId               string `json:"app_id"`
+			PricePerCPUPerMin   string `json:"price_per_cpu_per_min"`
+			PricePerCPUPerSec   string `json:"price_per_cpu_per_sec"`
+			PricePerMemGBPerMin string `json:"price_per_mem_gb_per_min"`
+			PricePerMemGBPerSec string `json:"price_per_mem_gb_per_sec"`
+			CreateFee           string `json:"create_fee"`
 		}
 		// For now: just the configured provider.  Extend via KNOWN_PROVIDERS in the future.
 		addrs := []string{providerHex}
@@ -867,10 +867,11 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 			// otherwise re-run the ~30s stop→wait→archive round-trip against an
 			// already-terminal sandbox — the "kill storm" of #69. If it is already
 			// archived, just clean up markers and move on.
-			if archivedAlready(ctx, dtona, sig.SandboxID) {
-				log.Info("stop skipped: sandbox already archived; cleaning up markers",
+			if d := classifySandbox(ctx, dtona, sig.SandboxID); d != dispositionActive {
+				log.Info("stop skipped: sandbox already terminal; cleaning up markers",
 					zap.String("sandbox", sig.SandboxID),
 					zap.String("reason", sig.Reason),
+					zap.Bool("gone", d == dispositionGone),
 				)
 				rdb.Del(ctx, "billing:compute:"+sig.SandboxID) //nolint:errcheck
 				rdb.Del(ctx, "stop:sandbox:"+sig.SandboxID)    //nolint:errcheck
@@ -906,7 +907,7 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 			// loss). An already-archived sandbox is an idempotent success, so we
 			// still clean up (avoids a poison-pill that never converges).
 			if err := dtona.ArchiveSandbox(ctx, sig.SandboxID); err != nil {
-				if !archivedAlready(ctx, dtona, sig.SandboxID) {
+				if classifySandbox(ctx, dtona, sig.SandboxID) == dispositionActive {
 					log.Error("archive sandbox failed; preserving retry + billing state for recovery",
 						zap.String("sandbox", sig.SandboxID),
 						zap.Error(err),
@@ -951,10 +952,32 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 // state — used to distinguish an idempotent re-archive (safe to clean up) from a
 // genuine archive failure (must preserve retry state). On any lookup error it
 // returns false, biasing toward preserving state.
-func archivedAlready(ctx context.Context, dtona *daytona.Client, id string) bool {
+// sandboxDisposition classifies a sandbox for the stop pipeline.
+type sandboxDisposition int
+
+const (
+	dispositionActive   sandboxDisposition = iota // exists, not archived (or lookup failed — assume active)
+	dispositionArchived                           // terminal: archived
+	dispositionGone                               // terminal: definitive 404 — deleted or never existed
+)
+
+// classifySandbox distinguishes the three outcomes the stop pipeline cares
+// about. A definitive 404 is terminal: preserving the stop marker for a
+// deleted sandbox would re-queue it on every restart forever (stop, wait and
+// archive all fail on a nonexistent id), paging the operator each time.
+// Transient lookup errors classify as active so the preserve-on-failure path
+// keeps the retry state. State comparison is case-insensitive to match the
+// shutdown path and proxy.
+func classifySandbox(ctx context.Context, dtona *daytona.Client, id string) sandboxDisposition {
 	s, err := dtona.GetSandbox(ctx, id)
-	if err != nil || s == nil {
-		return false
+	if err != nil {
+		if errors.Is(err, daytona.ErrNotFound) {
+			return dispositionGone
+		}
+		return dispositionActive
 	}
-	return s.State == "archived"
+	if s != nil && strings.EqualFold(s.State, "archived") {
+		return dispositionArchived
+	}
+	return dispositionActive
 }

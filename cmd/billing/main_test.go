@@ -34,6 +34,7 @@ type mockDaytona struct {
 	failIDs        map[string]bool // POST /stop → 500
 	archiveFailIDs map[string]bool // POST /archive → 500
 	archived       map[string]bool // set once archive succeeds; drives GET state
+	goneIDs        map[string]bool // GET → 404 (deleted / never existed)
 	srv            *httptest.Server
 }
 
@@ -43,6 +44,7 @@ func newMockDaytona(t *testing.T) *mockDaytona {
 		failIDs:        make(map[string]bool),
 		archiveFailIDs: make(map[string]bool),
 		archived:       make(map[string]bool),
+		goneIDs:        make(map[string]bool),
 	}
 	m.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/") // ["api","sandbox",id,(action)]
@@ -70,7 +72,11 @@ func newMockDaytona(t *testing.T) *mockDaytona {
 			m.archived[id] = true
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodGet && len(parts) == 3:
-			// GetSandbox — used by WaitStopped and the archivedAlready check.
+			// GetSandbox — used by WaitStopped and the disposition check.
+			if m.goneIDs[id] {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
 			state := "stopped"
 			if m.archived[id] {
 				state = "archived"
@@ -238,7 +244,7 @@ func TestRunStopHandler_StopsAndCleansRedis(t *testing.T) {
 
 	// Pre-populate both Redis keys that the handler should delete
 	bg := context.Background()
-	rdb.Set(bg, "billing:compute:sb-1", "session", 0)          //nolint:errcheck
+	rdb.Set(bg, "billing:compute:sb-1", "session", 0)           //nolint:errcheck
 	rdb.Set(bg, "stop:sandbox:sb-1", "insufficient_balance", 0) //nolint:errcheck
 
 	go runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil)
@@ -264,7 +270,7 @@ func TestRunStopHandler_DaytonaError_StillCleansRedis(t *testing.T) {
 	stopCh := make(chan settler.StopSignal, 4)
 
 	bg := context.Background()
-	rdb.Set(bg, "billing:compute:sb-err", "session", 0)    //nolint:errcheck
+	rdb.Set(bg, "billing:compute:sb-err", "session", 0)       //nolint:errcheck
 	rdb.Set(bg, "stop:sandbox:sb-err", "not_acknowledged", 0) //nolint:errcheck
 
 	go runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil)

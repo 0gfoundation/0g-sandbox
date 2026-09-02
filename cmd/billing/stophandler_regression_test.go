@@ -6,9 +6,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
+
 	"github.com/0gfoundation/0g-sandbox/internal/alert"
 	"github.com/0gfoundation/0g-sandbox/internal/settler"
-	"go.uber.org/zap"
 )
 
 // noopAlerter satisfies alert.Alerter for tests and counts notifications.
@@ -31,7 +34,7 @@ func TestStopHandler_ArchiveFailure_PreservesRetryState(t *testing.T) {
 	defer cancel()
 
 	bg := context.Background()
-	rdb.Set(bg, "billing:compute:"+id, "session", 0)      //nolint:errcheck
+	rdb.Set(bg, "billing:compute:"+id, "session", 0)           //nolint:errcheck
 	rdb.Set(bg, "stop:sandbox:"+id, "insufficient_balance", 0) //nolint:errcheck
 
 	al := &noopAlerter{}
@@ -66,7 +69,7 @@ func TestStopHandler_AlreadyArchived_CleansUp(t *testing.T) {
 	defer cancel()
 
 	bg := context.Background()
-	rdb.Set(bg, "billing:compute:"+id, "session", 0)      //nolint:errcheck
+	rdb.Set(bg, "billing:compute:"+id, "session", 0)           //nolint:errcheck
 	rdb.Set(bg, "stop:sandbox:"+id, "insufficient_balance", 0) //nolint:errcheck
 
 	stopCh := make(chan settler.StopSignal, 1)
@@ -75,4 +78,38 @@ func TestStopHandler_AlreadyArchived_CleansUp(t *testing.T) {
 
 	waitKeyGone(t, rdb, "stop:sandbox:"+id, time.Second)
 	waitKeyGone(t, rdb, "billing:compute:"+id, time.Second)
+}
+
+// Review F1 (#68): a stop marker for a DELETED (or never-existing) sandbox must
+// converge — stop/wait/archive all fail on a nonexistent id, and preserving the
+// marker would re-queue it via recoverPendingStops on every restart, forever,
+// paging the operator each time. A definitive 404 is terminal: clean up.
+func TestRunStopHandler_GoneSandbox_CleansUpMarkers(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	m := newMockDaytona(t)
+	m.goneIDs["sb-gone"] = true
+	rdb.Set(context.Background(), "stop:sandbox:sb-gone", "insufficient_balance", 0)
+	rdb.Set(context.Background(), "billing:compute:sb-gone", "{}", 0)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stopCh := make(chan settler.StopSignal, 1)
+	stopCh <- settler.StopSignal{SandboxID: "sb-gone", Reason: "insufficient_balance"}
+	done := make(chan struct{})
+	go func() { runStopHandler(ctx, stopCh, m.client(), rdb, alert.Nop{}, zap.NewNop(), nil); close(done) }()
+
+	deadline := time.After(3 * time.Second)
+	for {
+		if n, _ := rdb.Exists(context.Background(), "stop:sandbox:sb-gone", "billing:compute:sb-gone").Result(); n == 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			cancel()
+			t.Fatal("markers for a 404 sandbox must be cleaned up, not preserved")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	cancel()
+	<-done
 }
