@@ -143,6 +143,9 @@ type CoveredResult struct {
 	// The caller stops them — they run on an account that can no longer pay and
 	// would otherwise keep generating unpayable vouchers every interval.
 	HeldSandboxIDs []string `json:"held_sandbox_ids,omitempty"`
+	// Dropped counts unparseable entries permanently discarded from the user's
+	// backlog during the rewrite. Non-zero deserves a WARN — it is data loss.
+	Dropped int `json:"dropped,omitempty"`
 }
 
 // QueuedPending returns the total fee of one (user, provider)'s vouchers
@@ -266,11 +269,15 @@ func AggregateCovered(ctx context.Context, rdb *redis.Client, queueKey string, u
 			sbSeen := map[string]bool{}
 			var heldSandboxIDs []string
 			holding := false
+			dropped := 0
 
 			for _, raw := range mine {
 				var v SandboxVoucher
 				if err := json.Unmarshal([]byte(raw), &v); err != nil {
-					continue // drop unparseable debt entries (settler couldn't process them either)
+					// Dropping an unparseable debt entry is permanent deletion —
+					// keep it auditable. (The settler couldn't process it either.)
+					dropped++
+					continue
 				}
 				fee := v.TotalFee
 				if fee == nil {
@@ -347,6 +354,7 @@ func AggregateCovered(ctx context.Context, rdb *redis.Client, queueKey string, u
 				Held:           len(heldRaws),
 				HeldFeeWei:     heldSum.String(),
 				HeldSandboxIDs: heldSandboxIDs,
+				Dropped:        dropped,
 			}
 			return nil
 		}, queueKey, heldKey)

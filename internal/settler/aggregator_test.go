@@ -225,3 +225,35 @@ func TestMaybeSweep_HeldUnchangedBalanceSkipped(t *testing.T) {
 		t.Errorf("after top-up held should be reclaimed, got %d", n)
 	}
 }
+
+// F1 regression: the balance memo must be recorded only AFTER a successful
+// split. If the split errors (Redis blip, WATCH exhaustion), the memo must not
+// be poisoned — otherwise a top-up whose first split failed would be skipped
+// on every later sweep until the balance moves again.
+func TestSweepUsersMemo_FailedSplitDoesNotPoisonMemo(t *testing.T) {
+	rdb, mr, prov, queueKey := aggSetup(t)
+	u := common.HexToAddress("0xAAA")
+	for i := 0; i < 3; i++ {
+		pushVoucher(t, rdb, queueKey, "sb-1", u, prov, 100)
+	}
+	// Park everything (balance 0), then top up.
+	chainMock := &mockAggChain{provider: prov, bal: map[common.Address]*big.Int{u: big.NewInt(0)}}
+	stopCh := make(chan StopSignal, 4)
+	lastBal := map[common.Address]*big.Int{}
+	sweepUsersMemo(context.Background(), rdb, chainMock, queueKey, stopCh, []common.Address{u}, nil, lastBal, zap.NewNop())
+	chainMock.bal[u] = big.NewInt(1000) // top-up
+
+	// Fail the next split by taking Redis down for that pass only.
+	mr.Close()
+	sweepUsersMemo(context.Background(), rdb, chainMock, queueKey, stopCh, []common.Address{u}, map[common.Address]bool{}, lastBal, zap.NewNop())
+	if v, ok := lastBal[u]; ok && v != nil && v.Cmp(big.NewInt(1000)) == 0 {
+		t.Fatal("memo recorded despite failed split — reclaim would be skipped forever")
+	}
+
+	// Redis back: same balance must still trigger the reclaim.
+	mr.Restart() //nolint:errcheck
+	sweepUsersMemo(context.Background(), rdb, chainMock, queueKey, stopCh, []common.Address{u}, map[common.Address]bool{}, lastBal, zap.NewNop())
+	if n, _ := rdb.LLen(context.Background(), fmt.Sprintf(voucher.VoucherHeldKeyFmt, strings.ToLower(u.Hex()), strings.ToLower(prov.Hex()))).Result(); n != 0 {
+		t.Errorf("held should be reclaimed after retry at same balance, got %d", n)
+	}
+}

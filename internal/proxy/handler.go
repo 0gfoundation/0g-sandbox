@@ -1326,7 +1326,10 @@ func (h *Handler) handleBalance(c *gin.Context) {
 //     misleading), so the gates and the balance endpoint must count it.
 //
 // Lookup failures degrade to zero (logged) — a transient Redis error must not
-// wrongly block a create/start.
+// wrongly block a create/start. Note this is deliberately fail-open: during a
+// Redis hiccup a debt-carrying user could pass the gate. Accepted because it
+// matches the existing GetReserved posture, a down Redis breaks session
+// creation anyway, and the on-chain settle path remains the money authority.
 func (h *Handler) outstandingDebt(ctx context.Context, wallet string) (held, pending *big.Int) {
 	user := common.HexToAddress(wallet)
 	provider := common.HexToAddress(h.providerAddress)

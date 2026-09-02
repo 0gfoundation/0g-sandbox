@@ -43,11 +43,14 @@ type AggregatorChain interface {
 //     balances are re-read so a top-up reclaims and settles the debt,
 //     oldest-first, before any newer voucher.
 //
-// lastBal memoizes the balance each held user was last split against. A held
-// user's sandboxes are already stopped (no new vouchers), so re-splitting at an
-// unchanged balance provably yields the same partition — skipping it stops the
-// sweep from rewriting the whole held list every interval while the user simply
-// hasn't topped up yet (and from oscillating between equivalent partitions).
+// lastBal memoizes the balance each held user was last split against.
+// Re-splitting a held-only user at an unchanged balance yields an equivalent
+// partition, so skipping it stops the sweep from rewriting the whole held list
+// every interval while the user simply hasn't topped up (and from oscillating
+// between equivalent partitions). Sandboxes with HELD vouchers are stopped, but
+// the user may still have covered sandboxes emitting new vouchers — that stays
+// safe because new activity reaches the memo-free paths: the rejection-targeted
+// sweep and the >threshold backlog path.
 // Users enumerated from a deep queue are always swept: same balance over a NEW
 // backlog is a different input. The memo is in-memory; a restart just costs one
 // redundant sweep per held user.
@@ -141,13 +144,20 @@ func sweepUsersMemo(ctx context.Context, rdb *redis.Client, onchain AggregatorCh
 				continue // held-only user, balance unchanged: nothing to reclaim or re-park
 			}
 		}
-		if lastBal != nil && bal != nil {
-			lastBal[u] = new(big.Int).Set(bal)
-		}
 		res, err := voucher.AggregateCovered(ctx, rdb, queueKey, u, provider, bal)
 		if err != nil {
 			log.Warn("sweep: split backlog", zap.String("user", u.Hex()), zap.Error(err))
-			continue
+			continue // memo NOT recorded: a failed split must be retried at this balance
+		}
+		// Record the memo only after a successful split — writing it first would
+		// poison the skip on error: a top-up whose split failed would then be
+		// skipped forever (until the balance moves again or a restart).
+		if lastBal != nil && bal != nil {
+			lastBal[u] = new(big.Int).Set(bal)
+		}
+		if res.Dropped > 0 {
+			log.Warn("sweep: dropped unparseable backlog entries (permanent)",
+				zap.String("user", u.Hex()), zap.Int("dropped", res.Dropped))
 		}
 		if res.Covered == 0 && res.Held == 0 {
 			continue
