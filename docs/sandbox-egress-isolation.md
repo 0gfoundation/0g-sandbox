@@ -90,10 +90,23 @@ outbound-to-public too.
 
 ## Deployment
 
-The sidecar lives inline in the sandbox stack's `docker-compose.yml`
-(`runner-firewall` service). It is kept in the base compose rather than a
-separate named override because tapp deploys one compose plus the FDE-generated
-`docker-compose.override.yml` and cannot load a second named override.
+The sidecar lives inline in the **ops repo's** sandbox-stack
+`docker-compose.yml` (`runner-firewall` service) — this repo's compose does not
+carry it; the deployment compose is the source of truth. It is kept in the base
+compose rather than a separate named override because tapp deploys one compose
+plus the FDE-generated `docker-compose.override.yml` and cannot load a second
+named override.
+
+Note the `172.25.0.0/24` subnet used throughout is the dev deployment's
+assignment — this repo's compose does not pin `app-net` to a subnet. The
+default `BLOCKED_EGRESS_CIDRS` (all RFC1918 + link-local) covers any private
+assignment, so the mitigation does not depend on that specific subnet.
+
+**IPv6**: the rules are IPv4-only by design. IPv6 is not routed on the inner
+sandbox bridge or the host network in this deployment (docker's bridge IPv6 is
+off by default; the GCP metadata service is IPv4-only), so no ip6tables rules
+are needed. If a future deployment enables IPv6 on those paths, mirror the
+denylist with `ip6tables` (ULA fc00::/7 + link-local fe80::/10).
 
 `BLOCKED_EGRESS_CIDRS` is set in the deployment env
 (`169.254.0.0/16,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`). The sidecar
