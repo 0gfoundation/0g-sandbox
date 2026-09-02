@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 )
 
@@ -130,57 +129,6 @@ func TestInjectOwner_InvalidJSON(t *testing.T) {
 	}
 }
 
-// ── StripOwnerLabel ───────────────────────────────────────────────────────────
-
-func TestStripOwnerLabel_RemovesKey(t *testing.T) {
-	body := []byte(`{"daytona-owner":"0xHACKER","env":"prod"}`)
-	out, err := StripOwnerLabel(body)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	var m map[string]any
-	json.Unmarshal(out, &m) //nolint:errcheck
-
-	if _, exists := m[ownerLabel]; exists {
-		t.Error("daytona-owner should have been stripped")
-	}
-	if m["env"] != "prod" {
-		t.Error("other keys should be preserved")
-	}
-}
-
-func TestStripOwnerLabel_KeyAbsent(t *testing.T) {
-	body := []byte(`{"foo":"bar"}`)
-	out, err := StripOwnerLabel(body)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	var m map[string]any
-	json.Unmarshal(out, &m) //nolint:errcheck
-	if m["foo"] != "bar" {
-		t.Error("existing keys should be preserved when daytona-owner is absent")
-	}
-}
-
-func TestStripOwnerLabel_InvalidJSON(t *testing.T) {
-	_, err := StripOwnerLabel([]byte(`not json`))
-	if err == nil {
-		t.Fatal("expected error for invalid JSON")
-	}
-}
-
-func TestStripOwnerLabel_EmptyObject(t *testing.T) {
-	out, err := StripOwnerLabel([]byte(`{}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(out) != "{}" {
-		t.Errorf("unexpected output: %s", out)
-	}
-}
-
 // ── Sealed container ──────────────────────────────────────────────────────────
 
 func TestInjectOwner_SealedTrue_InjectsLabel(t *testing.T) {
@@ -254,60 +202,116 @@ func TestInjectOwner_RecordsSnapshotLabel(t *testing.T) {
 	}
 }
 
-func TestStripOwnerLabel_AlsoStripsSealed(t *testing.T) {
-	body := []byte(`{"daytona-owner":"0xHACKER","0g-sealed":"true","env":"prod"}`)
-	out, err := StripOwnerLabel(body)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var m map[string]any
-	json.Unmarshal(out, &m) //nolint:errcheck
-
-	if _, exists := m[sealedLabel]; exists {
-		t.Error("0g-sealed should have been stripped (immutable once set)")
-	}
-	if m["env"] != "prod" {
-		t.Error("other keys should be preserved")
-	}
-}
-
 // Regression for the nested-label sanitization bypass: Daytona's PUT /labels
 // body nests the map under "labels" ({"labels": {...}}, SandboxLabelsDto), so a
 // top-level-only strip never touched the real payload — an owner could rewrite
 // daytona-owner, or clear 0g-sealed on a sealed sandbox to reopen SSH/toolbox
 // and exfiltrate SANDBOX_SEAL_KEY.
-func TestStripOwnerLabel_NestedLabelsStripped(t *testing.T) {
-	body := []byte(`{"labels":{"daytona-owner":"0xHACKER","0g-sealed":"false","env":"prod"}}`)
-	out, err := StripOwnerLabel(body)
+
+// Case variants must not slip through either layer.
+
+// ── MergeProtectedLabels ──────────────────────────────────────────────────────
+//
+// Daytona's replaceLabels wholesale-replaces the label map, so the guard must
+// RE-INJECT the protected labels from the live sandbox — stripping them from
+// the payload alone would have the replace delete them (ownership bricked;
+// 0g-sealed cleared → SSH/toolbox reopen on a sealed sandbox → seal key out).
+
+func mergedLabels(t *testing.T, body string, current map[string]string) map[string]any {
+	t.Helper()
+	out, err := MergeProtectedLabels([]byte(body), current)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	var m map[string]any
 	json.Unmarshal(out, &m) //nolint:errcheck
-	labels, ok := m["labels"].(map[string]any)
-	if !ok {
-		t.Fatal("labels object must survive")
+	labels, _ := m["labels"].(map[string]any)
+	if labels == nil {
+		t.Fatalf("labels object missing: %s", out)
 	}
-	if _, exists := labels[ownerLabel]; exists {
-		t.Error("nested daytona-owner must be stripped — ownership rewrite")
+	return labels
+}
+
+var sealedCurrent = map[string]string{ownerLabel: "0xOWNER", sealedLabel: "true"}
+
+// The #90 exfil payload: keep the owner, omit 0g-sealed → the replace would
+// drop the sealed flag. The merge must re-inject it.
+func TestMergeProtectedLabels_OmittedSealedReinjected(t *testing.T) {
+	labels := mergedLabels(t, `{"labels":{"env":"x","daytona-owner":"0xOWNER"}}`, sealedCurrent)
+	if labels[sealedLabel] != "true" {
+		t.Error("0g-sealed must be re-injected from the live sandbox — replace would unseal")
 	}
-	if _, exists := labels[sealedLabel]; exists {
-		t.Error("nested 0g-sealed must be stripped — unseals a sealed sandbox")
+	if labels[ownerLabel] != "0xOWNER" {
+		t.Errorf("owner must carry the live value, got %v", labels[ownerLabel])
 	}
-	if labels["env"] != "prod" {
-		t.Error("other nested labels should be preserved")
+	if labels["env"] != "x" {
+		t.Error("caller's labels must be preserved")
 	}
 }
 
-// Case variants must not slip through either layer.
-func TestStripOwnerLabel_CaseInsensitive(t *testing.T) {
-	body := []byte(`{"Daytona-Owner":"0xH","labels":{"0G-SEALED":"false","DAYTONA-OWNER":"0xH"}}`)
-	out, err := StripOwnerLabel(body)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+// Ownership rewrite attempt: caller-supplied daytona-owner must lose to the
+// live value.
+func TestMergeProtectedLabels_OwnerRewriteBlocked(t *testing.T) {
+	labels := mergedLabels(t, `{"labels":{"daytona-owner":"0xEVIL","0g-sealed":"false"}}`, sealedCurrent)
+	if labels[ownerLabel] != "0xOWNER" {
+		t.Errorf("owner: got %v want live 0xOWNER", labels[ownerLabel])
 	}
-	if s := string(out); strings.Contains(strings.ToLower(s), "owner") || strings.Contains(strings.ToLower(s), "sealed") {
-		t.Errorf("protected keys leaked through: %s", s)
+	if labels[sealedLabel] != "true" {
+		t.Errorf("sealed: got %v want live true", labels[sealedLabel])
+	}
+}
+
+// A legitimate update (add/remove own labels) must keep full replace semantics
+// over non-protected keys and never brick the sandbox.
+func TestMergeProtectedLabels_LegitUpdateKeepsProtection(t *testing.T) {
+	labels := mergedLabels(t, `{"labels":{"team":"backend"}}`, sealedCurrent)
+	if labels[ownerLabel] != "0xOWNER" || labels[sealedLabel] != "true" {
+		t.Errorf("protected labels must survive a legit update: %v", labels)
+	}
+	if labels["team"] != "backend" {
+		t.Error("caller's label lost")
+	}
+	if len(labels) != 3 {
+		t.Errorf("replace semantics for non-protected keys: got %v", labels)
+	}
+}
+
+// Unsealed sandbox: only the labels it actually has get re-injected — the merge
+// must not invent a sealed flag.
+func TestMergeProtectedLabels_UnsealedNotInvented(t *testing.T) {
+	labels := mergedLabels(t, `{"labels":{"0g-sealed":"true"}}`, map[string]string{ownerLabel: "0xOWNER"})
+	if _, exists := labels[sealedLabel]; exists {
+		t.Error("caller must not be able to INTRODUCE 0g-sealed either")
+	}
+	if labels[ownerLabel] != "0xOWNER" {
+		t.Errorf("owner: %v", labels[ownerLabel])
+	}
+}
+
+// Case variants at both layers are dropped before re-injection.
+func TestMergeProtectedLabels_CaseVariantsDropped(t *testing.T) {
+	out, err := MergeProtectedLabels([]byte(`{"Daytona-Owner":"0xE","labels":{"0G-SEALED":"false","DAYTONA-OWNER":"0xE","env":"x"}}`), sealedCurrent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	json.Unmarshal(out, &m) //nolint:errcheck
+	labels := m["labels"].(map[string]any)
+	if labels[ownerLabel] != "0xOWNER" || labels[sealedLabel] != "true" {
+		t.Errorf("live values must win: %v", labels)
+	}
+	for k := range labels {
+		if k != ownerLabel && k != sealedLabel && k != "env" {
+			t.Errorf("case variant leaked: %s", k)
+		}
+	}
+	if _, exists := m["Daytona-Owner"]; exists {
+		t.Error("top-level variant must be dropped")
+	}
+}
+
+func TestMergeProtectedLabels_InvalidJSON(t *testing.T) {
+	if _, err := MergeProtectedLabels([]byte(`not json`), sealedCurrent); err == nil {
+		t.Error("expected error for invalid JSON")
 	}
 }

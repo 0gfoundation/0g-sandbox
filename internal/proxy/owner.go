@@ -89,17 +89,25 @@ func InjectOwner(body []byte, walletAddr string) ([]byte, error) {
 	return json.Marshal(m)
 }
 
-// StripOwnerLabel removes protected labels from a label-update payload.
-// Users may not overwrite daytona-owner (ownership) or 0g-sealed (sealed flag)
-// — clearing 0g-sealed would reopen SSH/toolbox on a sealed sandbox and let the
-// owner exfiltrate SANDBOX_SEAL_KEY.
+// MergeProtectedLabels rewrites a PUT /labels payload so the protected labels
+// (daytona-owner — ownership; 0g-sealed — sealed flag) always carry the
+// sandbox's CURRENT values, regardless of what the caller sent.
 //
-// Daytona's PUT /labels body nests the map under a "labels" key
-// (SandboxLabelsDto: {"labels": {"k": "v"}}), so the protected keys must be
-// stripped INSIDE that object — a top-level delete never touches the real
-// payload. Top-level keys are stripped too in case an upstream ever flattens
-// the shape.
-func StripOwnerLabel(body []byte) ([]byte, error) {
+// Two Daytona facts force this shape:
+//   - the body nests the map under "labels" (SandboxLabelsDto:
+//     {"labels": {"k": "v"}}), so a top-level strip never touches the real
+//     payload;
+//   - replaceLabels is a wholesale REPLACE, not a merge — so merely stripping
+//     the protected keys from the payload would make every successful update
+//     DELETE them on the sandbox: ownership gone (bricked management), sealed
+//     flag gone (SSH/toolbox reopen on a sealed sandbox → SANDBOX_SEAL_KEY
+//     exfiltration). The protected keys must be re-injected from the live
+//     sandbox, not just removed from the payload.
+//
+// The caller keeps full replace semantics over every non-protected label
+// (including deletion by omission). Case variants of the protected keys are
+// dropped from the payload before re-injection.
+func MergeProtectedLabels(body []byte, current map[string]string) ([]byte, error) {
 	var m map[string]any
 	if err := json.Unmarshal(body, &m); err != nil {
 		return nil, err
@@ -112,12 +120,22 @@ func StripOwnerLabel(body []byte) ([]byte, error) {
 			delete(m, k)
 		}
 	}
-	if labels, ok := m["labels"].(map[string]any); ok {
-		for k := range labels {
-			if protected(k) {
-				delete(labels, k)
-			}
+	labels, _ := m["labels"].(map[string]any)
+	if labels == nil {
+		labels = make(map[string]any)
+	}
+	for k := range labels {
+		if protected(k) {
+			delete(labels, k)
 		}
 	}
+	// Re-inject the live values so the upstream replace cannot drop them.
+	if v, ok := current[ownerLabel]; ok {
+		labels[ownerLabel] = v
+	}
+	if v, ok := current[sealedLabel]; ok {
+		labels[sealedLabel] = v
+	}
+	m["labels"] = labels
 	return json.Marshal(m)
 }
