@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/redis/go-redis/v9"
@@ -14,60 +13,102 @@ import (
 	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
 
-// AggregatorChain is the slice of the chain client the aggregator needs: the
-// provider identity and a batched balance read. The real chain.Client satisfies
-// it alongside ChainClient.
+// backlogSweepThreshold is the queue length above which the pre-settle sweep
+// kicks in and aggregates per-user backlogs. Steady state produces one voucher
+// per session per interval and the settler drains promptly, so a queue this
+// deep means the settler has been unable to submit (outage, no gas, node not
+// registered) — exactly when per-voucher submission would burn gas on
+// guaranteed rejects. Below it, vouchers settle one-by-one and keep their
+// per-sandbox identity (sandbox_id + real usage_hash).
+const backlogSweepThreshold = 100
+
+// AggregatorChain is the slice of the chain client the sweep needs: the
+// provider identity and a batched read-only balance call (no gas required).
+// ChainClient includes both, so the settler's client can be passed directly.
 type AggregatorChain interface {
 	ProviderAddress() common.Address
 	GetBalanceBatch(ctx context.Context, users []common.Address, provider common.Address) ([]*big.Int, error)
 }
 
-// RunAggregator periodically re-splits every backlogged user's outstanding
-// vouchers (queued + already-held) against their current on-chain balance:
-// the affordable prefix is folded into one settle-now aggregate the settler
-// then drains, and the rest is parked as held debt. Users whose balance can no
-// longer cover their oldest voucher have their sandboxes stopped — they would
-// otherwise keep generating unpayable vouchers every interval.
+// maybeSweep is the settler's pre-settle preprocessing step. It is designed to
+// cost two O(1) Redis commands (LLEN + SCARD) in steady state — no chain call,
+// no queue parsing, no aggregation — and only does real work when one of two
+// signals fires:
 //
-// Running every interval also collapses a settler-outage backlog before the
-// settler ever submits it (turning thousands of guaranteed-reject settlements
-// into a handful of aggregates) and reclaims held debt after a top-up — the two
-// halves of issue #69's fix beyond the SetNX kill-order dedup.
-func RunAggregator(ctx context.Context, rdb *redis.Client, onchain AggregatorChain, stopCh chan<- StopSignal, intervalSec int64, log *zap.Logger) {
+//   - queue length > backlogSweepThreshold: a settler-outage backlog; every
+//     backlogged user's (held + queued) vouchers are re-split against their
+//     balance, folding the affordable prefix into one aggregate and parking the
+//     unpayable remainder as held debt (see voucher.AggregateCovered).
+//   - held-users index non-empty: someone has parked debt; only those users'
+//     balances are re-read so a top-up reclaims and settles the debt,
+//     oldest-first, before any newer voucher.
+//
+// Sandboxes whose owner cannot cover their oldest voucher are stopped
+// (persistStop dedups via SetNX, so re-sweeping never re-kills).
+func maybeSweep(ctx context.Context, rdb *redis.Client, onchain AggregatorChain, queueKey string, stopCh chan<- StopSignal, log *zap.Logger) {
 	provider := onchain.ProviderAddress()
-	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, provider.Hex())
-	interval := time.Duration(intervalSec) * time.Second
-	if interval <= 0 {
-		interval = time.Minute
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	heldUsersKey := fmt.Sprintf(voucher.VoucherHeldUsersKeyFmt, strings.ToLower(provider.Hex()))
 
-	log.Info("settler aggregator started", zap.Duration("interval", interval), zap.String("queue", queueKey))
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("settler aggregator stopped")
-			return
-		case <-ticker.C:
-			sweepBacklog(ctx, rdb, onchain, provider, queueKey, stopCh, log)
-		}
-	}
-}
-
-// sweepBacklog runs one aggregation pass over every candidate (user, provider).
-func sweepBacklog(ctx context.Context, rdb *redis.Client, onchain AggregatorChain, provider common.Address, queueKey string, stopCh chan<- StopSignal, log *zap.Logger) {
-	users, err := candidateUsers(ctx, rdb, queueKey, provider)
+	qlen, err := rdb.LLen(ctx, queueKey).Result()
 	if err != nil {
-		log.Warn("aggregator: enumerate users", zap.Error(err))
+		log.Warn("sweep guard: LLEN", zap.Error(err))
 		return
 	}
+	heldUserCount, err := rdb.SCard(ctx, heldUsersKey).Result()
+	if err != nil {
+		log.Warn("sweep guard: SCARD", zap.Error(err))
+		return
+	}
+	if qlen <= backlogSweepThreshold && heldUserCount == 0 {
+		return // steady state: nothing to aggregate, nothing to reclaim
+	}
+
+	seen := map[common.Address]bool{}
+	var users []common.Address
+	if qlen > backlogSweepThreshold {
+		rows, _, truncated, err := voucher.SummarizeQueue(ctx, rdb, queueKey, 1)
+		if err != nil {
+			log.Warn("sweep: summarize queue", zap.Error(err))
+			return
+		}
+		if truncated {
+			log.Info("sweep: queue larger than scan limit; further users picked up next pass", zap.Int64("qlen", qlen))
+		}
+		for _, r := range rows {
+			u := common.HexToAddress(r.User)
+			if !seen[u] {
+				seen[u] = true
+				users = append(users, u)
+			}
+		}
+	}
+	if heldUserCount > 0 {
+		held, err := voucher.HeldUsers(ctx, rdb, provider)
+		if err != nil {
+			log.Warn("sweep: held users", zap.Error(err))
+		}
+		for _, u := range held {
+			if !seen[u] {
+				seen[u] = true
+				users = append(users, u)
+			}
+		}
+	}
+	sweepUsers(ctx, rdb, onchain, queueKey, stopCh, users, log)
+}
+
+// sweepUsers re-splits the given users' outstanding backlog against their
+// current on-chain balance. Also used targeted (single user) when a settlement
+// rejects INSUFFICIENT_BALANCE, so the user's remaining queued vouchers are
+// parked as debt immediately instead of burning one nonce per interval.
+func sweepUsers(ctx context.Context, rdb *redis.Client, onchain AggregatorChain, queueKey string, stopCh chan<- StopSignal, users []common.Address, log *zap.Logger) {
 	if len(users) == 0 {
 		return
 	}
+	provider := onchain.ProviderAddress()
 	balances, err := onchain.GetBalanceBatch(ctx, users, provider)
 	if err != nil {
-		log.Warn("aggregator: batch balance read", zap.Int("users", len(users)), zap.Error(err))
+		log.Warn("sweep: batch balance read", zap.Int("users", len(users)), zap.Error(err))
 		return
 	}
 	for i, u := range users {
@@ -77,7 +118,7 @@ func sweepBacklog(ctx context.Context, rdb *redis.Client, onchain AggregatorChai
 		}
 		res, err := voucher.AggregateCovered(ctx, rdb, queueKey, u, provider, bal)
 		if err != nil {
-			log.Warn("aggregator: split backlog", zap.String("user", u.Hex()), zap.Error(err))
+			log.Warn("sweep: split backlog", zap.String("user", u.Hex()), zap.Error(err))
 			continue
 		}
 		if res.Covered == 0 && res.Held == 0 {
@@ -87,10 +128,10 @@ func sweepBacklog(ctx context.Context, rdb *redis.Client, onchain AggregatorChai
 		// SetNX, so re-holding the same sandbox next pass does not re-kill it.
 		for _, sb := range res.HeldSandboxIDs {
 			if err := persistStop(ctx, rdb, stopCh, sb, "insufficient_balance", log); err != nil {
-				log.Error("aggregator: persist stop", zap.String("sandbox", sb), zap.Error(err))
+				log.Error("sweep: persist stop", zap.String("sandbox", sb), zap.Error(err))
 			}
 		}
-		log.Info("aggregator swept backlog",
+		log.Info("sweep split backlog",
 			zap.String("user", u.Hex()),
 			zap.Int("covered", res.Covered),
 			zap.String("covered_fee", res.CoveredFeeWei),
@@ -99,53 +140,4 @@ func sweepBacklog(ctx context.Context, rdb *redis.Client, onchain AggregatorChai
 			zap.Int("stopped_sandboxes", len(res.HeldSandboxIDs)),
 		)
 	}
-}
-
-// candidateUsers is the union of users with vouchers currently queued and users
-// with a held (debt) list — the latter must be revisited each pass so a top-up
-// on an already-drained account still gets its debt reclaimed and settled.
-func candidateUsers(ctx context.Context, rdb *redis.Client, queueKey string, provider common.Address) ([]common.Address, error) {
-	seen := map[string]bool{}
-	var users []common.Address
-
-	// From the live queue.
-	rows, _, _, err := voucher.SummarizeQueue(ctx, rdb, queueKey, 1)
-	if err != nil {
-		return nil, err
-	}
-	for _, r := range rows {
-		lower := strings.ToLower(r.User)
-		if !seen[lower] {
-			seen[lower] = true
-			users = append(users, common.HexToAddress(r.User))
-		}
-	}
-
-	// From held lists: voucher:held:<user>:<provider>.
-	providerLower := strings.ToLower(provider.Hex())
-	pattern := fmt.Sprintf(voucher.VoucherHeldKeyFmt, "*", providerLower)
-	var cursor uint64
-	for {
-		keys, next, err := rdb.Scan(ctx, cursor, pattern, 256).Result()
-		if err != nil {
-			return nil, err
-		}
-		for _, k := range keys {
-			// key = voucher:held:<userLower>:<providerLower>
-			parts := strings.Split(k, ":")
-			if len(parts) != 4 {
-				continue
-			}
-			lower := parts[2]
-			if !seen[lower] {
-				seen[lower] = true
-				users = append(users, common.HexToAddress(lower))
-			}
-		}
-		if next == 0 {
-			break
-		}
-		cursor = next
-	}
-	return users, nil
 }

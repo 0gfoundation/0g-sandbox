@@ -145,6 +145,21 @@ type CoveredResult struct {
 	HeldSandboxIDs []string `json:"held_sandbox_ids,omitempty"`
 }
 
+// HeldUsers returns the users that currently have a non-empty held (debt) list
+// for this provider, from the O(1)-maintained index set.
+func HeldUsers(ctx context.Context, rdb *redis.Client, provider common.Address) ([]common.Address, error) {
+	key := fmt.Sprintf(VoucherHeldUsersKeyFmt, strings.ToLower(provider.Hex()))
+	members, err := rdb.SMembers(ctx, key).Result()
+	if err != nil {
+		return nil, err
+	}
+	users := make([]common.Address, 0, len(members))
+	for _, m := range members {
+		users = append(users, common.HexToAddress(m))
+	}
+	return users, nil
+}
+
 // AggregateCovered re-splits one (user, provider)'s entire outstanding backlog —
 // the already-parked held list PLUS what is currently queued — against the
 // balance the caller read on-chain, in a single atomic rewrite of both keys:
@@ -181,6 +196,7 @@ func AggregateCovered(ctx context.Context, rdb *redis.Client, queueKey string, u
 	userLower := strings.ToLower(user.Hex())
 	providerLower := strings.ToLower(provider.Hex())
 	heldKey := fmt.Sprintf(VoucherHeldKeyFmt, userLower, providerLower)
+	heldUsersKey := fmt.Sprintf(VoucherHeldUsersKeyFmt, providerLower)
 
 	var result *CoveredResult
 	for attempt := 0; attempt < maxRetries; attempt++ {
@@ -277,7 +293,8 @@ func AggregateCovered(ctx context.Context, rdb *redis.Client, queueKey string, u
 				if coveredCount > 0 {
 					pipe.RPush(ctx, queueKey, rawAgg)
 				}
-				// Rewrite the held list to exactly the new remainder.
+				// Rewrite the held list to exactly the new remainder, and keep the
+				// held-users index in sync so the settler's O(1) guard stays honest.
 				pipe.Del(ctx, heldKey)
 				if len(heldRaws) > 0 {
 					vals := make([]any, len(heldRaws))
@@ -285,6 +302,9 @@ func AggregateCovered(ctx context.Context, rdb *redis.Client, queueKey string, u
 						vals[i] = s
 					}
 					pipe.RPush(ctx, heldKey, vals...)
+					pipe.SAdd(ctx, heldUsersKey, userLower)
+				} else {
+					pipe.SRem(ctx, heldUsersKey, userLower)
 				}
 				return nil
 			})

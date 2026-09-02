@@ -237,13 +237,11 @@ func main() {
 	// ── Goroutines ────────────────────────────────────────────────────────────
 	// Recovery must start after stopCh is ready but before settler writes to it.
 	go recoverPendingStops(ctx, rdb, stopCh, log)
+	// settler.Run also runs the pre-settle sweep (issue #69): each interval it
+	// re-splits backlogged users' vouchers (queued + held) against their balance
+	// — affordable prefix aggregates and settles, the rest parks as held debt,
+	// unpayable sandboxes stop. O(1) guards keep steady state untouched.
 	go settler.Run(ctx, cfg, rdb, onchain, signer, stopCh, alerter, log)
-	// Aggregator: re-splits each user's backlog (queued + held) against balance,
-	// folding the affordable prefix into one settle-now aggregate and parking the
-	// rest as debt, stopping sandboxes that can no longer pay. Collapses a
-	// settler-outage backlog before it is submitted and reclaims held debt after
-	// a top-up (issue #69).
-	go settler.RunAggregator(ctx, rdb, onchain, stopCh, cfg.Billing.VoucherIntervalSec, log)
 	go billing.RunGenerator(ctx, rdb, billingHandler, log)
 
 	// Balance + queue depth + signer-mismatch monitors. All best-effort —

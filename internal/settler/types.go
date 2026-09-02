@@ -2,6 +2,7 @@ package settler
 
 import (
 	"context"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 
@@ -30,6 +31,9 @@ type ChainClient interface {
 	// operator runs add-node-onchain — holding them avoids burning gas and
 	// dead-lettering real revenue during that window.
 	IsLocalTEEActiveNode(ctx context.Context) (bool, error)
+	// GetBalanceBatch is the read-only balance call the pre-settle sweep uses
+	// to split a backlog into an affordable aggregate + held debt (no gas).
+	GetBalanceBatch(ctx context.Context, users []common.Address, provider common.Address) ([]*big.Int, error)
 }
 
 // NonceSigner assigns a monotone nonce and cryptographically signs a voucher

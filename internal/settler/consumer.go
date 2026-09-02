@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"github.com/0gfoundation/0g-sandbox/internal/alert"
+	"github.com/0gfoundation/0g-sandbox/internal/chain"
 	"github.com/0gfoundation/0g-sandbox/internal/config"
 	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
@@ -33,10 +35,26 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 	var lastNodeCheck time.Time
 	var nodeActive bool
 
+	// Pre-settle sweep throttle. The sweep itself is gas-free (Redis + a
+	// read-only balance call) and O(1) in steady state, so it runs even while
+	// the rotation gate holds submissions — a backlog collapses and unpayable
+	// sandboxes stop during an outage, not after it. lastSweep starts zero so a
+	// cold start with a pre-existing backlog aggregates before the first submit.
+	sweepInterval := time.Duration(cfg.Billing.VoucherIntervalSec) * time.Second
+	if sweepInterval <= 0 {
+		sweepInterval = time.Minute
+	}
+	var lastSweep time.Time
+
 	for {
 		if ctx.Err() != nil {
 			log.Info("settler stopped")
 			return
+		}
+
+		if time.Since(lastSweep) >= sweepInterval {
+			maybeSweep(ctx, rdb, onchain, queueKey, stopCh, log)
+			lastSweep = time.Now()
 		}
 
 		// Rotation gate: while our signer is not a registered TappRegistry
@@ -141,9 +159,9 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 			alerter.Notify(ctx, alert.KindSettlerTxFailure, sev,
 				"SettleFeesWithTEE submission failed",
 				map[string]any{
-					"err":       err.Error(),
-					"err_type":  errType,
-					"batch":     len(vouchers),
+					"err":      err.Error(),
+					"err_type": errType,
+					"batch":    len(vouchers),
 				},
 			)
 			// Re-push first item back (it was already BLPOP'd)
@@ -154,5 +172,19 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 
 		// Handle results (first item already popped; handler pops the rest)
 		HandleStatuses(ctx, rdb, stopCh, queueKey, firstItem, vouchers, statuses, alerter, log)
+
+		// Targeted sweep: a user whose settlement just rejected
+		// INSUFFICIENT_BALANCE is out of money NOW — park their remaining
+		// queued vouchers as held debt immediately instead of burning one
+		// nonce per interval until the periodic sweep catches up.
+		broke := map[common.Address]bool{}
+		var brokeUsers []common.Address
+		for i, st := range statuses {
+			if st == chain.StatusInsufficientBalance && !broke[vouchers[i].User] {
+				broke[vouchers[i].User] = true
+				brokeUsers = append(brokeUsers, vouchers[i].User)
+			}
+		}
+		sweepUsers(ctx, rdb, onchain, queueKey, stopCh, brokeUsers, log)
 	}
 }

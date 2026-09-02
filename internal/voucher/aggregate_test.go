@@ -106,8 +106,8 @@ func TestAggregate_PreservesOtherUsers(t *testing.T) {
 
 	enqueueRaw(t, rdb, voucherFor("sb-1", u, p, 100))
 	enqueueRaw(t, rdb, voucherFor("sb-2", u, p, 200))
-	enqueueRaw(t, rdb, voucherFor("sb-1", otherUser, p, 555))         // different user — keep
-	enqueueRaw(t, rdb, voucherFor("sb-1", u, otherProv, 999))         // different provider — keep
+	enqueueRaw(t, rdb, voucherFor("sb-1", otherUser, p, 555)) // different user — keep
+	enqueueRaw(t, rdb, voucherFor("sb-1", u, otherProv, 999)) // different provider — keep
 	enqueueRaw(t, rdb, voucherFor("sb-1", u, p, 300))
 
 	result, err := Aggregate(context.Background(), rdb, testQueueKey, u, p)

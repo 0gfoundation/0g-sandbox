@@ -30,4 +30,10 @@ const (
 	// them. They are moved back to the queue when the user tops up. %s = user
 	// (lowercase hex), %s = provider (lowercase hex).
 	VoucherHeldKeyFmt = "voucher:held:%s:%s"
+	// VoucherHeldUsersKeyFmt is a SET of users (lowercase hex) that currently
+	// have a non-empty held list for this provider — an O(1) index so the
+	// settler's steady-state guard (SCARD) never has to SCAN or parse anything.
+	// Maintained atomically by AggregateCovered in the same MULTI that rewrites
+	// the held list. %s = provider (lowercase hex).
+	VoucherHeldUsersKeyFmt = "voucher:held-users:%s"
 )
