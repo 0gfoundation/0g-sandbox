@@ -90,13 +90,34 @@ func InjectOwner(body []byte, walletAddr string) ([]byte, error) {
 }
 
 // StripOwnerLabel removes protected labels from a label-update payload.
-// Users may not overwrite daytona-owner (ownership) or 0g-sealed (sealed flag).
+// Users may not overwrite daytona-owner (ownership) or 0g-sealed (sealed flag)
+// — clearing 0g-sealed would reopen SSH/toolbox on a sealed sandbox and let the
+// owner exfiltrate SANDBOX_SEAL_KEY.
+//
+// Daytona's PUT /labels body nests the map under a "labels" key
+// (SandboxLabelsDto: {"labels": {"k": "v"}}), so the protected keys must be
+// stripped INSIDE that object — a top-level delete never touches the real
+// payload. Top-level keys are stripped too in case an upstream ever flattens
+// the shape.
 func StripOwnerLabel(body []byte) ([]byte, error) {
 	var m map[string]any
 	if err := json.Unmarshal(body, &m); err != nil {
 		return nil, err
 	}
-	delete(m, ownerLabel)
-	delete(m, sealedLabel) // sealed is immutable once set
+	protected := func(k string) bool {
+		return strings.EqualFold(k, ownerLabel) || strings.EqualFold(k, sealedLabel)
+	}
+	for k := range m {
+		if protected(k) {
+			delete(m, k)
+		}
+	}
+	if labels, ok := m["labels"].(map[string]any); ok {
+		for k := range labels {
+			if protected(k) {
+				delete(labels, k)
+			}
+		}
+	}
 	return json.Marshal(m)
 }

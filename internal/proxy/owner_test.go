@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -271,3 +272,42 @@ func TestStripOwnerLabel_AlsoStripsSealed(t *testing.T) {
 	}
 }
 
+// Regression for the nested-label sanitization bypass: Daytona's PUT /labels
+// body nests the map under "labels" ({"labels": {...}}, SandboxLabelsDto), so a
+// top-level-only strip never touched the real payload — an owner could rewrite
+// daytona-owner, or clear 0g-sealed on a sealed sandbox to reopen SSH/toolbox
+// and exfiltrate SANDBOX_SEAL_KEY.
+func TestStripOwnerLabel_NestedLabelsStripped(t *testing.T) {
+	body := []byte(`{"labels":{"daytona-owner":"0xHACKER","0g-sealed":"false","env":"prod"}}`)
+	out, err := StripOwnerLabel(body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var m map[string]any
+	json.Unmarshal(out, &m) //nolint:errcheck
+	labels, ok := m["labels"].(map[string]any)
+	if !ok {
+		t.Fatal("labels object must survive")
+	}
+	if _, exists := labels[ownerLabel]; exists {
+		t.Error("nested daytona-owner must be stripped — ownership rewrite")
+	}
+	if _, exists := labels[sealedLabel]; exists {
+		t.Error("nested 0g-sealed must be stripped — unseals a sealed sandbox")
+	}
+	if labels["env"] != "prod" {
+		t.Error("other nested labels should be preserved")
+	}
+}
+
+// Case variants must not slip through either layer.
+func TestStripOwnerLabel_CaseInsensitive(t *testing.T) {
+	body := []byte(`{"Daytona-Owner":"0xH","labels":{"0G-SEALED":"false","DAYTONA-OWNER":"0xH"}}`)
+	out, err := StripOwnerLabel(body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s := string(out); strings.Contains(strings.ToLower(s), "owner") || strings.Contains(strings.ToLower(s), "sealed") {
+		t.Errorf("protected keys leaked through: %s", s)
+	}
+}
