@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
@@ -246,5 +247,117 @@ func TestSummarizeQueue_GroupsByUserProvider(t *testing.T) {
 	r2 := byUser[otherUser.Hex()]
 	if r2.Count != 4 || r2.TotalFeeWei != "800" {
 		t.Errorf("(otherUser,p) row: count=%d total=%s want 4 / 800", r2.Count, r2.TotalFeeWei)
+	}
+}
+
+// helper: read the aggregated (SandboxID == "") voucher's fee from the queue, and
+// the count of non-aggregated queue entries.
+func queueAggFeeAndRest(t *testing.T, rdb *redis.Client) (aggFee *big.Int, rest int) {
+	t.Helper()
+	items, err := rdb.LRange(context.Background(), testQueueKey, 0, -1).Result()
+	if err != nil {
+		t.Fatalf("lrange: %v", err)
+	}
+	for _, raw := range items {
+		var v SandboxVoucher
+		if err := json.Unmarshal([]byte(raw), &v); err != nil {
+			continue
+		}
+		if v.IsAggregated() {
+			aggFee = v.TotalFee
+		} else {
+			rest++
+		}
+	}
+	return aggFee, rest
+}
+
+func heldLen(t *testing.T, rdb *redis.Client, user, prov common.Address) int64 {
+	t.Helper()
+	key := fmt.Sprintf(VoucherHeldKeyFmt, strings.ToLower(user.Hex()), strings.ToLower(prov.Hex()))
+	n, err := rdb.LLen(context.Background(), key).Result()
+	if err != nil {
+		t.Fatalf("held llen: %v", err)
+	}
+	return n
+}
+
+func TestAggregateCovered_PartialPrefix(t *testing.T) {
+	rdb, mr := setup(t)
+	defer mr.Close()
+	user := common.HexToAddress("0xAAA")
+	prov := common.HexToAddress("0xBBB")
+	other := common.HexToAddress("0xCCC")
+
+	for i := 0; i < 4; i++ {
+		enqueueRaw(t, rdb, voucherFor(fmt.Sprintf("sb-%d", i), user, prov, 100))
+	}
+	enqueueRaw(t, rdb, voucherFor("other", other, prov, 500)) // must be untouched
+
+	// balance 250 covers the first two (sum 200); the third would overflow (300>250).
+	res, err := AggregateCovered(context.Background(), rdb, testQueueKey, user, prov, big.NewInt(250))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Covered != 2 || res.CoveredFeeWei != "200" {
+		t.Errorf("covered: %d / %s want 2 / 200", res.Covered, res.CoveredFeeWei)
+	}
+	if res.Held != 2 || res.HeldFeeWei != "200" {
+		t.Errorf("held: %d / %s want 2 / 200", res.Held, res.HeldFeeWei)
+	}
+	aggFee, rest := queueAggFeeAndRest(t, rdb)
+	if aggFee == nil || aggFee.String() != "200" {
+		t.Errorf("queue aggregate fee: %v want 200", aggFee)
+	}
+	if rest != 1 { // only the other user's voucher remains non-aggregated
+		t.Errorf("non-aggregated queue entries: %d want 1 (other user)", rest)
+	}
+	if got := heldLen(t, rdb, user, prov); got != 2 {
+		t.Errorf("held list len: %d want 2", got)
+	}
+}
+
+func TestAggregateCovered_FullCoverageHoldsNothing(t *testing.T) {
+	rdb, mr := setup(t)
+	defer mr.Close()
+	user := common.HexToAddress("0xAAA")
+	prov := common.HexToAddress("0xBBB")
+	for i := 0; i < 4; i++ {
+		enqueueRaw(t, rdb, voucherFor(fmt.Sprintf("sb-%d", i), user, prov, 100))
+	}
+	res, err := AggregateCovered(context.Background(), rdb, testQueueKey, user, prov, big.NewInt(1000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Covered != 4 || res.CoveredFeeWei != "400" || res.Held != 0 {
+		t.Errorf("got covered=%d/%s held=%d want 4/400/0", res.Covered, res.CoveredFeeWei, res.Held)
+	}
+	if got := heldLen(t, rdb, user, prov); got != 0 {
+		t.Errorf("held list len: %d want 0", got)
+	}
+}
+
+func TestAggregateCovered_ZeroCoverageParksAll(t *testing.T) {
+	rdb, mr := setup(t)
+	defer mr.Close()
+	user := common.HexToAddress("0xAAA")
+	prov := common.HexToAddress("0xBBB")
+	for i := 0; i < 3; i++ {
+		enqueueRaw(t, rdb, voucherFor(fmt.Sprintf("sb-%d", i), user, prov, 100))
+	}
+	// balance below the first voucher's fee → nothing settles, whole backlog parked.
+	res, err := AggregateCovered(context.Background(), rdb, testQueueKey, user, prov, big.NewInt(50))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Covered != 0 || res.Held != 3 {
+		t.Errorf("got covered=%d held=%d want 0/3", res.Covered, res.Held)
+	}
+	aggFee, rest := queueAggFeeAndRest(t, rdb)
+	if aggFee != nil || rest != 0 {
+		t.Errorf("queue should be empty: aggFee=%v rest=%d", aggFee, rest)
+	}
+	if got := heldLen(t, rdb, user, prov); got != 3 {
+		t.Errorf("held list len: %d want 3", got)
 	}
 }

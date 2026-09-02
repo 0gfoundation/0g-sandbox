@@ -108,6 +108,154 @@ type AggregateResult struct {
 	TotalFeeWei string `json:"total_fee_wei"`
 }
 
+// CoveredResult is what AggregateCovered returns: how the backlog for one
+// (user, provider) was split against the current balance.
+type CoveredResult struct {
+	Covered       int    `json:"covered"`         // vouchers folded into the settle-now aggregate
+	CoveredFeeWei string `json:"covered_fee_wei"` // the aggregate's total_fee (0 if none covered)
+	Held          int    `json:"held"`            // vouchers parked in the held (debt) list
+	HeldFeeWei    string `json:"held_fee_wei"`
+}
+
+// AggregateCovered splits one (user, provider)'s queued backlog against the
+// balance the caller read on-chain, in a single atomic queue rewrite:
+//
+//   - The longest chronological prefix whose summed fee is ≤ balance is folded
+//     into ONE aggregated voucher left on the queue for immediate settlement.
+//   - Every voucher after that prefix is moved to the held list
+//     (VoucherHeldKeyFmt) — the debt, parked out of the settle path so the
+//     settler never submits a guaranteed-reject settlement. It stays collectable
+//     and is moved back to the queue when the user tops up.
+//
+// Ordering matters: on-chain nonces settle strictly increasing and the contract
+// sweeps the whole remaining balance on the first INSUFFICIENT_BALANCE, so we
+// must take a contiguous prefix (oldest first) — never cherry-pick cheaper
+// vouchers out of order. Once one voucher would overflow the balance, all
+// subsequent ones are held even if a later, cheaper one would have fit.
+//
+// A balance that covers the entire backlog holds nothing; a balance below the
+// first voucher's fee covers nothing and parks the whole backlog (the caller
+// then stops the sandbox). Other users' vouchers are preserved untouched.
+//
+// Uses WATCH/MULTI/EXEC for atomicity against concurrent BLPOP by the settler.
+func AggregateCovered(ctx context.Context, rdb *redis.Client, queueKey string, user, provider common.Address, balance *big.Int) (*CoveredResult, error) {
+	const maxRetries = 5
+	if balance == nil {
+		balance = new(big.Int)
+	}
+	userLower := strings.ToLower(user.Hex())
+	providerLower := strings.ToLower(provider.Hex())
+	heldKey := fmt.Sprintf(VoucherHeldKeyFmt, userLower, providerLower)
+
+	var result *CoveredResult
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		txErr := rdb.Watch(ctx, func(tx *redis.Tx) error {
+			items, err := tx.LRange(ctx, queueKey, 0, -1).Result()
+			if err != nil {
+				return err
+			}
+
+			kept := make([]string, 0, len(items))
+			coveredSum := new(big.Int)
+			coveredCount := 0
+			heldSum := new(big.Int)
+			var heldRaws []string
+			holding := false
+
+			for _, raw := range items {
+				var v SandboxVoucher
+				if err := json.Unmarshal([]byte(raw), &v); err != nil {
+					kept = append(kept, raw) // malformed: leave in place, don't lose it
+					continue
+				}
+				if !strings.EqualFold(v.User.Hex(), userLower) ||
+					!strings.EqualFold(v.Provider.Hex(), providerLower) {
+					kept = append(kept, raw)
+					continue
+				}
+				fee := v.TotalFee
+				if fee == nil {
+					fee = new(big.Int)
+				}
+				if !holding {
+					next := new(big.Int).Add(coveredSum, fee)
+					if next.Cmp(balance) <= 0 {
+						coveredSum = next
+						coveredCount++
+						continue
+					}
+					holding = true // first overflow — everything from here is debt
+				}
+				heldRaws = append(heldRaws, raw)
+				heldSum.Add(heldSum, fee)
+			}
+
+			if coveredCount == 0 && len(heldRaws) == 0 {
+				result = &CoveredResult{CoveredFeeWei: "0", HeldFeeWei: "0"}
+				return nil
+			}
+
+			var rawAgg string
+			if coveredCount > 0 {
+				now := time.Now().Unix()
+				agg := SandboxVoucher{
+					SandboxID: AggregatedSandboxID,
+					User:      user,
+					Provider:  provider,
+					TotalFee:  coveredSum,
+					UsageHash: BuildUsageHash(AggregatedSandboxID, now, now, 0),
+				}
+				b, err := json.Marshal(agg)
+				if err != nil {
+					return fmt.Errorf("marshal aggregated: %w", err)
+				}
+				rawAgg = string(b)
+			}
+
+			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				pipe.Del(ctx, queueKey)
+				if len(kept) > 0 {
+					vals := make([]any, len(kept))
+					for i, s := range kept {
+						vals[i] = s
+					}
+					pipe.RPush(ctx, queueKey, vals...)
+				}
+				if coveredCount > 0 {
+					pipe.RPush(ctx, queueKey, rawAgg)
+				}
+				if len(heldRaws) > 0 {
+					vals := make([]any, len(heldRaws))
+					for i, s := range heldRaws {
+						vals[i] = s
+					}
+					pipe.RPush(ctx, heldKey, vals...)
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+			result = &CoveredResult{
+				Covered:       coveredCount,
+				CoveredFeeWei: coveredSum.String(),
+				Held:          len(heldRaws),
+				HeldFeeWei:    heldSum.String(),
+			}
+			return nil
+		}, queueKey)
+
+		if txErr == nil {
+			return result, nil
+		}
+		if !errors.Is(txErr, redis.TxFailedErr) {
+			return nil, txErr
+		}
+		// retry on conflict
+	}
+	return nil, fmt.Errorf("aggregate-covered failed after %d retries (queue churning?)", maxRetries)
+}
+
 // AggregatedSandboxID is the sentinel value placed in SandboxVoucher.SandboxID
 // after Aggregate merges across sandboxes. Empty string is the unambiguous
 // signal "this voucher does not correspond to a single sandbox" — picking

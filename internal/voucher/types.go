@@ -24,4 +24,10 @@ const (
 	VoucherQueueKeyFmt = "voucher:queue:%s" // %s = provider address (checksummed)
 	VoucherDLQKeyFmt   = "voucher:dlq:%s"
 	NonceKeyFmt        = "billing:nonce:%s:%s" // %s = owner, provider
+	// VoucherHeldKeyFmt holds the debt backlog for one (user, provider): vouchers
+	// beyond what the user's on-chain balance currently covers, parked out of the
+	// settle path so the settler never submits guaranteed-reject settlements for
+	// them. They are moved back to the queue when the user tops up. %s = user
+	// (lowercase hex), %s = provider (lowercase hex).
+	VoucherHeldKeyFmt = "voucher:held:%s:%s"
 )
