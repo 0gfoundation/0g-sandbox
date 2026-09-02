@@ -252,6 +252,11 @@ func main() {
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
+	// Reject non-canonical paths (dot-segments, duplicate slashes) before any
+	// routing: authorization binds to the :id param while the raw path is
+	// forwarded to Daytona as admin, so a normalizing upstream would otherwise
+	// execute a traversal against a different sandbox than the one authorized.
+	r.Use(proxy.PathTraversalGuard())
 	r.RedirectTrailingSlash = false // prevent 307 redirect on CORS preflight for /sandbox/:id
 	r.Use(gin.Recovery())
 	r.Use(func(c *gin.Context) {
@@ -286,14 +291,14 @@ func main() {
 	// Public providers list — returns known providers with their on-chain service data.
 	r.GET("/api/providers", func(c *gin.Context) {
 		type ProviderInfo struct {
-			Address               string `json:"address"`
-			URL                   string `json:"url"`
-			AppId                 string `json:"app_id"`
-			PricePerCPUPerMin     string `json:"price_per_cpu_per_min"`
-			PricePerCPUPerSec     string `json:"price_per_cpu_per_sec"`
-			PricePerMemGBPerMin   string `json:"price_per_mem_gb_per_min"`
-			PricePerMemGBPerSec   string `json:"price_per_mem_gb_per_sec"`
-			CreateFee             string `json:"create_fee"`
+			Address             string `json:"address"`
+			URL                 string `json:"url"`
+			AppId               string `json:"app_id"`
+			PricePerCPUPerMin   string `json:"price_per_cpu_per_min"`
+			PricePerCPUPerSec   string `json:"price_per_cpu_per_sec"`
+			PricePerMemGBPerMin string `json:"price_per_mem_gb_per_min"`
+			PricePerMemGBPerSec string `json:"price_per_mem_gb_per_sec"`
+			CreateFee           string `json:"create_fee"`
 		}
 		// For now: just the configured provider.  Extend via KNOWN_PROVIDERS in the future.
 		addrs := []string{providerHex}
