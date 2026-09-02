@@ -85,6 +85,7 @@ Construct this JSON object and serialize it **with fields in this order**:
   "expires_at":  1709500000,
   "nonce":       "a3f8c2d1e4b7069512345678abcdef01",
   "payload":     {},
+  "provider":    "0x47a8C0Ca5cCEC440b17fd859Dee6a72438aCc31e",
   "resource_id": ""
 }
 ```
@@ -95,7 +96,17 @@ Construct this JSON object and serialize it **with fields in this order**:
 | `expires_at` | int64 | Unix timestamp (seconds). Must be `> now` and `≤ now + 5 minutes`. |
 | `nonce` | string | 32-char hex (16 random bytes). Each nonce is accepted only once (stored in Redis until expiry). |
 | `payload` | JSON | Request body as JSON object. Use `{}` for requests with no body. |
-| `resource_id` | string | Sandbox ID for resource-specific operations; empty string for `create` / `list`. |
+| `provider` | string | The **destination provider's on-chain address** (`provider_address` from `GET /api/info`). Binds the signature to that provider so a captured request cannot be replayed at another one. **Omit the key entirely** (not `""`) for legacy-compatible unbound messages. |
+| `resource_id` | string | Sandbox ID for resource-specific operations; empty string for `create` / `list`. When set, it must equal the `:id` in the request path. |
+
+> **Migration — `AUTH_STRICT`.** Servers currently accept messages without
+> `provider` (and without `resource_id` on `:id` routes) for compatibility with
+> clients that predate the binding. Once a provider sets `AUTH_STRICT=true`,
+> such messages are rejected with `401 {"error": "signed message must include
+> the provider address"}` — third-party clients must add both fields (in the
+> alphabetical position shown above, since the signature covers the exact
+> bytes). All first-party clients (cmd/user, cmd/provider, TS SDK ≥ the version
+> shipping this change, web UIs) already send them.
 
 ### Signing Algorithm
 

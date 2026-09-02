@@ -135,8 +135,10 @@ func MiddlewareWithOptions(rdb *redis.Client, opts Options) gin.HandlerFunc {
 			}
 		}
 
-		// Nonce dedup via Redis SET NX
-		nonceKey := "nonce:" + req.Nonce
+		// Nonce dedup via Redis SET NX, scoped per wallet so two users who
+		// happen to generate the same nonce string don't collide (128-bit
+		// random makes that theoretical, but scoping costs nothing).
+		nonceKey := "nonce:" + strings.ToLower(walletAddr) + ":" + req.Nonce
 		ttl := time.Duration(req.ExpiresAt-now) * time.Second
 		set, err := rdb.SetNX(context.Background(), nonceKey, 1, ttl).Result()
 		if err != nil {

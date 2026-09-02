@@ -154,7 +154,7 @@ func TestMiddleware_NonceReplay(t *testing.T) {
 	_, _, r := testSetup(t)
 
 	req1, _ := buildRequest(t, 2*time.Minute, "nonce-replay-1")
-	req2, _ := buildRequest(t, 2*time.Minute, "nonce-replay-1") // same nonce, different key
+	otherWallet, _ := buildRequest(t, 2*time.Minute, "nonce-replay-1") // same nonce string, different wallet
 
 	// First request: OK
 	w1 := httptest.NewRecorder()
@@ -163,10 +163,9 @@ func TestMiddleware_NonceReplay(t *testing.T) {
 		t.Fatalf("first request: expected 200, got %d: %s", w1.Code, w1.Body.String())
 	}
 
-	// Second request with the same nonce: 401
-	// Note: req2 has a different wallet+signature but same nonce — still blocked
+	// Exact replay (same wallet, same signed message): 401.
 	w2 := httptest.NewRecorder()
-	r.ServeHTTP(w2, req2)
+	r.ServeHTTP(w2, req1)
 	if w2.Code != http.StatusUnauthorized {
 		t.Fatalf("replay: expected 401, got %d: %s", w2.Code, w2.Body.String())
 	}
@@ -174,6 +173,14 @@ func TestMiddleware_NonceReplay(t *testing.T) {
 	json.Unmarshal(w2.Body.Bytes(), &resp)
 	if resp["error"] != "nonce already used" {
 		t.Errorf("unexpected error: %s", resp["error"])
+	}
+
+	// Nonces are scoped per wallet: an unrelated wallet that happens to pick
+	// the same nonce string must NOT be locked out by someone else's use.
+	w3 := httptest.NewRecorder()
+	r.ServeHTTP(w3, otherWallet)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("other wallet, same nonce string: expected 200, got %d: %s", w3.Code, w3.Body.String())
 	}
 }
 
