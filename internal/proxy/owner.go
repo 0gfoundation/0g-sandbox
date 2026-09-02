@@ -58,8 +58,7 @@ func InjectOwner(body []byte, walletAddr string) ([]byte, error) {
 	labels[ownerLabel] = walletAddr
 
 	// Handle sealed flag: convert to label, strip from body (Daytona doesn't know this field).
-	sealed, _ := m["sealed"].(bool)
-	if sealed {
+	if sealed, _ := m["sealed"].(bool); sealed {
 		labels[sealedLabel] = "true"
 	}
 	delete(m, "sealed")
@@ -85,12 +84,16 @@ func InjectOwner(body []byte, walletAddr string) ([]byte, error) {
 	//   - sealed, no publicPorts → expose only the attested agent proxy on :8080.
 	//   - otherwise → private.
 	//
+	// Sealed detection uses extractSealed — the same case-insensitive parse that
+	// drives seal-key injection in handleCreate — so a mixed-case {"Sealed":true}
+	// still gets :8080 exposed rather than being treated as private.
+	//
 	// A first-class way to expose a port after create (opt-in UI / API) is a
 	// known gap, tracked as follow-up; for now exposure is chosen at create via
 	// publicPorts. System ports (22222/2280/33333) stay protected regardless.
 	if pp, ok := m["publicPorts"]; ok && pp != nil {
 		m["public"] = true
-	} else if sealed {
+	} else if extractSealed(body) {
 		m["public"] = true
 		m["publicPorts"] = []int{agentPort}
 	} else {

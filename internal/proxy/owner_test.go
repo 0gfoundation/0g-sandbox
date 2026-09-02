@@ -52,6 +52,7 @@ func TestInjectOwner_PrivateByDefault_PublicOnOptIn(t *testing.T) {
 		{"caller sets public:true, no ports", []byte(`{"public":true}`), false, nil},
 		{"publicPorts given", []byte(`{"publicPorts":[8080,3000]}`), true, nil},
 		{"sealed, no ports", []byte(`{"image":"my-img","sealed":true}`), true, []int{8080}},
+		{"mixed-case Sealed, no ports", []byte(`{"image":"my-img","Sealed":true}`), true, []int{8080}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
