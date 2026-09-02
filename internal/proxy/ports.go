@@ -32,7 +32,7 @@ func ValidatePublicPorts(body []byte, sealed bool) error {
 		return nil
 	}
 	if len(ports) == 0 {
-		return fmt.Errorf("publicPorts must not be empty; omit it for a fully public sandbox")
+		return fmt.Errorf("publicPorts must not be empty; omit it to keep every user port private")
 	}
 	if len(ports) > maxPublicPorts {
 		return fmt.Errorf("publicPorts allows at most %d entries", maxPublicPorts)

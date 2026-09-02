@@ -91,8 +91,26 @@ func InjectOwner(body []byte, walletAddr string) ([]byte, error) {
 	// A first-class way to expose a port after create (opt-in UI / API) is a
 	// known gap, tracked as follow-up; for now exposure is chosen at create via
 	// publicPorts. System ports (22222/2280/33333) stay protected regardless.
-	if pp, ok := m["publicPorts"]; ok && pp != nil {
+	// Normalize case first: keep the exact-case publicPorts value (validated by
+	// ValidatePublicPorts) and delete every other case variant of public /
+	// publicPorts, so no caller-supplied casing survives to Daytona where a
+	// case-insensitive consumer could resurrect the all-ports hole (#80 fixed
+	// the same class for "sealed").
+	var pp any
+	hasPP := false
+	for k, v := range m {
+		if strings.EqualFold(k, "publicPorts") {
+			if k == "publicPorts" && v != nil {
+				pp, hasPP = v, true
+			}
+			delete(m, k)
+		} else if strings.EqualFold(k, "public") {
+			delete(m, k)
+		}
+	}
+	if hasPP {
 		m["public"] = true
+		m["publicPorts"] = pp
 	} else if extractSealed(body) {
 		m["public"] = true
 		m["publicPorts"] = []int{agentPort}

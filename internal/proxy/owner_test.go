@@ -289,3 +289,23 @@ func TestStripOwnerLabel_AlsoStripsSealed(t *testing.T) {
 	}
 }
 
+// Review F1: caller-supplied case variants of public/publicPorts must not
+// survive into the forwarded body — a case-insensitive consumer downstream
+// could otherwise resurrect the all-ports-public hole via {"PublicPorts": ...}.
+func TestInjectOwner_MixedCasePortFieldsStripped(t *testing.T) {
+	out, err := InjectOwner([]byte(`{"PublicPorts":[3284],"Public":true}`), "0xW")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	json.Unmarshal(out, &m) //nolint:errcheck
+	if _, exists := m["PublicPorts"]; exists {
+		t.Error("mixed-case PublicPorts must be stripped from the forwarded body")
+	}
+	if _, exists := m["Public"]; exists {
+		t.Error("mixed-case Public must be stripped from the forwarded body")
+	}
+	if m["public"] != false {
+		t.Errorf("mixed-case fields must not grant public; got %v", m["public"])
+	}
+}
