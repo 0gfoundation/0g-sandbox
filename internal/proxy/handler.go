@@ -34,6 +34,7 @@ import (
 // bound to the path and method IT routed, and any upstream reinterpretation
 // would run with admin rights on a request the gates never saw.
 var overrideHeaders = []string{
+	// Routing / method overrides.
 	"X-Original-Url",
 	"X-Rewrite-Url",
 	"X-Original-Uri",
@@ -45,8 +46,19 @@ var overrideHeaders = []string{
 	"X-Forwarded-Port",
 	"X-Forwarded-Prefix",
 	"X-Forwarded-Path",
+	"X-Forwarded-For",
 	"X-Real-Ip",
 	"Forwarded",
+	// Session material foreign to Daytona.
+	"Cookie",
+	// The caller's OWN auth headers: the proxy consumed them at the gate;
+	// forwarding EIP-191 signature triples to Daytona hands valid signed
+	// requests to the upstream operator and anyone on that path — widening the
+	// replay-capture surface (#92/#93) for zero benefit, Daytona has no use
+	// for them.
+	"X-Wallet-Address",
+	"X-Signed-Message",
+	"X-Wallet-Signature",
 }
 
 // BillingHooks is satisfied by billing.EventHandler.
