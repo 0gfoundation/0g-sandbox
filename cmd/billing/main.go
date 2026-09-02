@@ -238,6 +238,12 @@ func main() {
 	// Recovery must start after stopCh is ready but before settler writes to it.
 	go recoverPendingStops(ctx, rdb, stopCh, log)
 	go settler.Run(ctx, cfg, rdb, onchain, signer, stopCh, alerter, log)
+	// Aggregator: re-splits each user's backlog (queued + held) against balance,
+	// folding the affordable prefix into one settle-now aggregate and parking the
+	// rest as debt, stopping sandboxes that can no longer pay. Collapses a
+	// settler-outage backlog before it is submitted and reclaims held debt after
+	// a top-up (issue #69).
+	go settler.RunAggregator(ctx, rdb, onchain, stopCh, cfg.Billing.VoucherIntervalSec, log)
 	go billing.RunGenerator(ctx, rdb, billingHandler, log)
 
 	// Balance + queue depth + signer-mismatch monitors. All best-effort —
@@ -286,14 +292,14 @@ func main() {
 	// Public providers list — returns known providers with their on-chain service data.
 	r.GET("/api/providers", func(c *gin.Context) {
 		type ProviderInfo struct {
-			Address               string `json:"address"`
-			URL                   string `json:"url"`
-			AppId                 string `json:"app_id"`
-			PricePerCPUPerMin     string `json:"price_per_cpu_per_min"`
-			PricePerCPUPerSec     string `json:"price_per_cpu_per_sec"`
-			PricePerMemGBPerMin   string `json:"price_per_mem_gb_per_min"`
-			PricePerMemGBPerSec   string `json:"price_per_mem_gb_per_sec"`
-			CreateFee             string `json:"create_fee"`
+			Address             string `json:"address"`
+			URL                 string `json:"url"`
+			AppId               string `json:"app_id"`
+			PricePerCPUPerMin   string `json:"price_per_cpu_per_min"`
+			PricePerCPUPerSec   string `json:"price_per_cpu_per_sec"`
+			PricePerMemGBPerMin string `json:"price_per_mem_gb_per_min"`
+			PricePerMemGBPerSec string `json:"price_per_mem_gb_per_sec"`
+			CreateFee           string `json:"create_fee"`
 		}
 		// For now: just the configured provider.  Extend via KNOWN_PROVIDERS in the future.
 		addrs := []string{providerHex}
