@@ -30,22 +30,28 @@ func TestInjectOwner_EmptyBody(t *testing.T) {
 	if m["autoArchiveInterval"] != float64(60) {
 		t.Errorf("autoArchiveInterval: got %v want 60", m["autoArchiveInterval"])
 	}
-	if m["public"] != true {
-		t.Errorf("public: got %v want true", m["public"])
+	// Private by default: a plain create with no publicPorts must not be public.
+	if m["public"] != false {
+		t.Errorf("public: got %v want false", m["public"])
 	}
 }
 
-func TestInjectOwner_AlwaysPublic(t *testing.T) {
-	// All sandboxes must be public=true: Daytona OIDC is not used in 0G;
-	// user-defined service ports must be reachable via proxy URL.
+func TestInjectOwner_PrivateByDefault_PublicOnOptIn(t *testing.T) {
+	// Port exposure is private by default; the sandbox is only made public when
+	// the caller opts specific ports in via publicPorts (or it is sealed, which
+	// exposes just the agent port :8080). A bare {"public":true} must NOT reopen
+	// the all-ports-public hole.
 	cases := []struct {
-		name string
-		body []byte
+		name          string
+		body          []byte
+		wantPublic    bool
+		wantPortsOnly []int // if non-nil, publicPorts must equal exactly this
 	}{
-		{"empty body", nil},
-		{"with image", []byte(`{"image":"ubuntu:22.04"}`)},
-		{"sealed sandbox", []byte(`{"image":"my-img","sealed":true}`)},
-		{"user explicitly sets false", []byte(`{"public":false}`)},
+		{"empty body", nil, false, nil},
+		{"with image, no ports", []byte(`{"image":"ubuntu:22.04"}`), false, nil},
+		{"caller sets public:true, no ports", []byte(`{"public":true}`), false, nil},
+		{"publicPorts given", []byte(`{"publicPorts":[8080,3000]}`), true, nil},
+		{"sealed, no ports", []byte(`{"image":"my-img","sealed":true}`), true, []int{8080}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -55,8 +61,19 @@ func TestInjectOwner_AlwaysPublic(t *testing.T) {
 			}
 			var m map[string]any
 			json.Unmarshal(out, &m) //nolint:errcheck
-			if m["public"] != true {
-				t.Errorf("public should always be true, got %v", m["public"])
+			if m["public"] != tc.wantPublic {
+				t.Errorf("public: got %v want %v", m["public"], tc.wantPublic)
+			}
+			if tc.wantPortsOnly != nil {
+				pp, ok := m["publicPorts"].([]any)
+				if !ok || len(pp) != len(tc.wantPortsOnly) {
+					t.Fatalf("publicPorts: got %v want %v", m["publicPorts"], tc.wantPortsOnly)
+				}
+				for i, want := range tc.wantPortsOnly {
+					if int(pp[i].(float64)) != want {
+						t.Errorf("publicPorts[%d]: got %v want %d", i, pp[i], want)
+					}
+				}
 			}
 		})
 	}
