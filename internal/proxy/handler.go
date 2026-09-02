@@ -183,6 +183,9 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	// ── Create sandbox ─────────────────────────────────────────────────────
 	rg.POST("/sandbox", h.handleCreate)
 
+	// ── Balance: the caller's spendable balance as the gates see it ───────
+	rg.GET("/balance", h.handleBalance)
+
 	// ── List / paginated (filter by owner) ────────────────────────────────
 	rg.GET("/sandbox", h.handleList)
 	rg.GET("/sandbox/paginated", h.handleList)
@@ -1275,6 +1278,34 @@ func availableBalance(chainBalance, reserved, heldDebt *big.Int) *big.Int {
 		available.SetInt64(0)
 	}
 	return available
+}
+
+// handleBalance returns the caller's balance exactly as the create/start gates
+// compute it, so a user can see WHY a launch is rejected instead of only
+// hitting the 402: on-chain balance, in-flight reservations, outstanding held
+// debt (must be topped up and settled before new work), and the resulting
+// spendable remainder.
+func (h *Handler) handleBalance(c *gin.Context) {
+	wallet := c.GetString("wallet_address")
+	if h.balCheck == nil {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "balance check not configured"})
+		return
+	}
+	balance, err := h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
+	if err != nil {
+		h.log.Error("balance lookup", zap.String("wallet", wallet), zap.Error(err))
+		c.JSON(http.StatusBadGateway, gin.H{"error": "balance lookup failed"})
+		return
+	}
+	reserved := billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress)
+	debt := h.heldDebt(c.Request.Context(), wallet)
+	c.JSON(http.StatusOK, gin.H{
+		"provider":         h.providerAddress,
+		"balance":          balance.String(),
+		"reserved":         reserved.String(),
+		"outstanding_debt": debt.String(),
+		"available":        availableBalance(balance, reserved, debt).String(),
+	})
 }
 
 // heldDebt returns the user's parked (unpayable) debt for this provider, or

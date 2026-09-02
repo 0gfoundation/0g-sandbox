@@ -274,6 +274,7 @@ The server starts on port 8080 (`PORT` env var) and exposes:
 - `GET /api/registry/images` — list images in internal registry
 
 **Authenticated (EIP-191 wallet signature):**
+- `GET /api/balance` — caller's spendable balance as the gates compute it: on-chain balance, reservations, outstanding held debt, available
 - `POST /api/sandbox` — create sandbox (billing: create-fee voucher)
 - `GET /api/sandbox` — list sandboxes (filtered to caller's own)
 - `GET /api/sandbox/paginated` — paginated list
