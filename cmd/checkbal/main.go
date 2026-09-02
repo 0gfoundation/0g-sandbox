@@ -16,6 +16,13 @@ import (
 	"github.com/0gfoundation/0g-sandbox/internal/chain"
 )
 
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
 // resolveAddr returns the account to inspect. checkbal is read-only — it never
 // signs — so an ADDRESS is all it needs; a private key (CHECK_KEY / USER_KEY
 // env) is accepted only as a convenience and is never required. Never hardcode
@@ -48,6 +55,7 @@ func main() {
 	addrFlag := flag.String("addr", "", "account address to inspect (read-only; preferred over a key)")
 	keyFlag := flag.String("key", "", "private key (address is derived; never required — checkbal only reads)")
 	rpcFlag := flag.String("rpc", "https://evmrpc-testnet.0g.ai", "RPC endpoint")
+	contractFlag := flag.String("contract", envOr("SETTLEMENT_CONTRACT", "0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c"), "SandboxServing proxy address")
 	flag.Parse()
 
 	eth, err := ethclient.Dial(*rpcFlag)
@@ -56,7 +64,7 @@ func main() {
 		os.Exit(1)
 	}
 	addr := resolveAddr(*addrFlag, *keyFlag)
-	c, _ := chain.NewSandboxServing(common.HexToAddress("0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c"), eth)
+	c, _ := chain.NewSandboxServing(common.HexToAddress(*contractFlag), eth)
 	opts := &bind.CallOpts{Context: context.Background()}
 
 	bal, _ := c.GetBalance(opts, addr, addr)
@@ -85,7 +93,7 @@ func main() {
 	fmt.Println()
 	fmt.Println("=== Recent VoucherSettled events (last 5000 blocks) ===")
 	ctx := context.Background()
-	chainClient := &chainReader{eth: eth, c: c, addr: common.HexToAddress("0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c")}
+	chainClient := &chainReader{eth: eth, c: c, addr: common.HexToAddress(*contractFlag)}
 	_ = chainClient
 	_ = ctx
 }
