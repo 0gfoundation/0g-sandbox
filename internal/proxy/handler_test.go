@@ -537,6 +537,13 @@ func TestBalanceEndpoint_SubtractsDebtAndReserved(t *testing.T) {
 	raw, _ := json.Marshal(hv)
 	rdb.RPush(context.Background(), heldKey, string(raw))
 
+	// And 200 wei still queued for settlement (accrued, will be charged).
+	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, common.HexToAddress(provider).Hex())
+	qv := hv
+	qv.TotalFee = big.NewInt(200)
+	rawQ, _ := json.Marshal(qv)
+	rdb.RPush(context.Background(), queueKey, string(rawQ))
+
 	srv, _ := mockDaytona(t, nil)
 	dtona := daytona.NewClient(srv.URL, "test-key")
 	r := gin.New()
@@ -559,10 +566,11 @@ func TestBalanceEndpoint_SubtractsDebtAndReserved(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	want := map[string]string{
-		"balance":          "1000",
-		"reserved":         "0",
-		"outstanding_debt": "300",
-		"available":        "700",
+		"balance":            "1000",
+		"reserved":           "0",
+		"outstanding_debt":   "300",
+		"pending_settlement": "200",
+		"available":          "500",
 	}
 	for k, v := range want {
 		if resp[k] != v {

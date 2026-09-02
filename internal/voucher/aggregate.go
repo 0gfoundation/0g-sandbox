@@ -145,6 +145,36 @@ type CoveredResult struct {
 	HeldSandboxIDs []string `json:"held_sandbox_ids,omitempty"`
 }
 
+// QueuedPending returns the total fee of one (user, provider)'s vouchers
+// currently sitting in the settle queue — usage already accrued but not yet
+// charged on-chain. Callers subtract it (together with held debt) from the
+// on-chain balance to get the truly spendable amount: while the settler is
+// stalled this window is unbounded, and the raw chain balance badly overstates
+// what the user still owns.
+func QueuedPending(ctx context.Context, rdb *redis.Client, queueKey string, user, provider common.Address) (*big.Int, error) {
+	items, err := rdb.LRange(ctx, queueKey, 0, -1).Result()
+	if err != nil {
+		return nil, err
+	}
+	userLower := strings.ToLower(user.Hex())
+	providerLower := strings.ToLower(provider.Hex())
+	total := new(big.Int)
+	for _, raw := range items {
+		var v SandboxVoucher
+		if err := json.Unmarshal([]byte(raw), &v); err != nil {
+			continue
+		}
+		if !strings.EqualFold(v.User.Hex(), userLower) ||
+			!strings.EqualFold(v.Provider.Hex(), providerLower) {
+			continue
+		}
+		if v.TotalFee != nil {
+			total.Add(total, v.TotalFee)
+		}
+	}
+	return total, nil
+}
+
 // HeldUsers returns the users that currently have a non-empty held (debt) list
 // for this provider, from the O(1)-maintained index set.
 func HeldUsers(ctx context.Context, rdb *redis.Client, provider common.Address) ([]common.Address, error) {

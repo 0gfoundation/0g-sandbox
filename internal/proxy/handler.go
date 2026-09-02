@@ -274,7 +274,8 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	createReserved := false
 	if h.balCheck != nil {
 		createRequired = new(big.Int).Add(h.createFee, h.intervalCost(reqCPU, reqMemGB))
-		heldDebt := h.heldDebt(c.Request.Context(), wallet)
+		held, pending := h.outstandingDebt(c.Request.Context(), wallet)
+		heldDebt := new(big.Int).Add(held, pending)
 		balance, err := h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
 		if err != nil {
 			h.log.Error("balance check", zap.String("wallet", wallet), zap.Error(err))
@@ -497,7 +498,8 @@ func (h *Handler) handleStart(c *gin.Context) {
 	startReserved := false
 	if h.balCheck != nil {
 		startRequired = h.intervalCost(cpu, memGB)
-		heldDebt := h.heldDebt(c.Request.Context(), wallet)
+		held, pending := h.outstandingDebt(c.Request.Context(), wallet)
+		heldDebt := new(big.Int).Add(held, pending)
 		balance, err := h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
 		if err != nil {
 			h.log.Error("balance check (start)", zap.String("wallet", wallet), zap.Error(err))
@@ -1298,26 +1300,46 @@ func (h *Handler) handleBalance(c *gin.Context) {
 		return
 	}
 	reserved := billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress)
-	debt := h.heldDebt(c.Request.Context(), wallet)
+	held, pending := h.outstandingDebt(c.Request.Context(), wallet)
+	debt := new(big.Int).Add(held, pending)
 	c.JSON(http.StatusOK, gin.H{
-		"provider":         h.providerAddress,
-		"balance":          balance.String(),
-		"reserved":         reserved.String(),
-		"outstanding_debt": debt.String(),
-		"available":        availableBalance(balance, reserved, debt).String(),
+		"provider": h.providerAddress,
+		"balance":  balance.String(),
+		"reserved": reserved.String(),
+		// held debt (parked, needs top-up) + pending settlement (queued, will be
+		// charged as soon as the settler submits) — both already owed.
+		"outstanding_debt":   held.String(),
+		"pending_settlement": pending.String(),
+		"available":          availableBalance(balance, reserved, debt).String(),
 	})
 }
 
-// heldDebt returns the user's parked (unpayable) debt for this provider, or
-// zero if the lookup fails (logged) — a transient Redis error must not wrongly
-// block a create/start.
-func (h *Handler) heldDebt(ctx context.Context, wallet string) *big.Int {
-	d, err := voucher.HeldDebt(ctx, h.rdb, common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
+// outstandingDebt returns what the user already owes this provider but has not
+// yet been charged on-chain, in two parts:
+//
+//   - held: parked unpayable debt (voucher:held:<user>:<provider>);
+//   - pending: vouchers still sitting in the settle queue — accrued usage that
+//     WILL be deducted as soon as the settler submits it. While the settler is
+//     stalled this can be large (and the raw chain balance correspondingly
+//     misleading), so the gates and the balance endpoint must count it.
+//
+// Lookup failures degrade to zero (logged) — a transient Redis error must not
+// wrongly block a create/start.
+func (h *Handler) outstandingDebt(ctx context.Context, wallet string) (held, pending *big.Int) {
+	user := common.HexToAddress(wallet)
+	provider := common.HexToAddress(h.providerAddress)
+	held, err := voucher.HeldDebt(ctx, h.rdb, user, provider)
 	if err != nil {
 		h.log.Warn("held debt lookup failed; treating as zero", zap.String("wallet", wallet), zap.Error(err))
-		return new(big.Int)
+		held = new(big.Int)
 	}
-	return d
+	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, provider.Hex())
+	pending, err = voucher.QueuedPending(ctx, h.rdb, queueKey, user, provider)
+	if err != nil {
+		h.log.Warn("queued pending lookup failed; treating as zero", zap.String("wallet", wallet), zap.Error(err))
+		pending = new(big.Int)
+	}
+	return held, pending
 }
 
 // extractSnapshotName parses the "snapshot" field from a sandbox create request body.
