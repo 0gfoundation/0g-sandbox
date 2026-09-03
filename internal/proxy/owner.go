@@ -150,14 +150,53 @@ func InjectOwner(body []byte, walletAddr string) ([]byte, error) {
 	return json.Marshal(m)
 }
 
-// StripOwnerLabel removes protected labels from a label-update payload.
-// Users may not overwrite daytona-owner (ownership) or 0g-sealed (sealed flag).
-func StripOwnerLabel(body []byte) ([]byte, error) {
+// MergeProtectedLabels rewrites a PUT /labels payload so the protected labels
+// (daytona-owner — ownership; 0g-sealed — sealed flag) always carry the
+// sandbox's CURRENT values, regardless of what the caller sent.
+//
+// Two Daytona facts force this shape:
+//   - the body nests the map under "labels" (SandboxLabelsDto:
+//     {"labels": {"k": "v"}}), so a top-level strip never touches the real
+//     payload;
+//   - replaceLabels is a wholesale REPLACE, not a merge — so merely stripping
+//     the protected keys from the payload would make every successful update
+//     DELETE them on the sandbox: ownership gone (bricked management), sealed
+//     flag gone (SSH/toolbox reopen on a sealed sandbox → SANDBOX_SEAL_KEY
+//     exfiltration). The protected keys must be re-injected from the live
+//     sandbox, not just removed from the payload.
+//
+// The caller keeps full replace semantics over every non-protected label
+// (including deletion by omission). Case variants of the protected keys are
+// dropped from the payload before re-injection.
+func MergeProtectedLabels(body []byte, current map[string]string) ([]byte, error) {
 	var m map[string]any
 	if err := json.Unmarshal(body, &m); err != nil {
 		return nil, err
 	}
-	delete(m, ownerLabel)
-	delete(m, sealedLabel) // sealed is immutable once set
+	protected := func(k string) bool {
+		return strings.EqualFold(k, ownerLabel) || strings.EqualFold(k, sealedLabel)
+	}
+	for k := range m {
+		if protected(k) {
+			delete(m, k)
+		}
+	}
+	labels, _ := m["labels"].(map[string]any)
+	if labels == nil {
+		labels = make(map[string]any)
+	}
+	for k := range labels {
+		if protected(k) {
+			delete(labels, k)
+		}
+	}
+	// Re-inject the live values so the upstream replace cannot drop them.
+	if v, ok := current[ownerLabel]; ok {
+		labels[ownerLabel] = v
+	}
+	if v, ok := current[sealedLabel]; ok {
+		labels[sealedLabel] = v
+	}
+	m["labels"] = labels
 	return json.Marshal(m)
 }

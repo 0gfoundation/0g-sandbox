@@ -335,17 +335,23 @@ func TestHandleDelete_OwnerCheck_Fail(t *testing.T) {
 
 // ── Labels: strip daytona-owner ───────────────────────────────────────────────
 
-func TestHandleLabels_StripsOwnerLabel(t *testing.T) {
+// End-to-end merge semantics for PUT /labels: Daytona's replaceLabels is a
+// wholesale replace, so the forwarded body must DELIBERATELY carry the
+// protected labels with their LIVE values (re-injected from the sandbox), with
+// caller-supplied values for them discarded — not merely have them stripped,
+// which would make the replace delete them (unseal + brick).
+func TestHandleLabels_MergesLiveProtectedLabels(t *testing.T) {
 	sb := daytona.Sandbox{
 		ID:     "sb-mine",
-		Labels: map[string]string{ownerLabel: "0xOWNER"},
+		Labels: map[string]string{ownerLabel: "0xOWNER", sealedLabel: "true"},
 	}
 	srv, captured := mockDaytona(t, []daytona.Sandbox{sb})
 	dtona := daytona.NewClient(srv.URL, "key")
 	r := newTestEngine(dtona, &mockBilling{}, "0xOWNER")
 
-	// Attacker tries to hijack the sandbox via label update
-	payload := []byte(`{"daytona-owner":"0xATTACKER","env":"staging"}`)
+	// The real #90 exfil shape: nested labels, owner echoed, 0g-sealed omitted
+	// (replace would unseal) — plus a rewrite attempt for good measure.
+	payload := []byte(`{"labels":{"daytona-owner":"0xATTACKER","env":"staging"}}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/sandbox/sb-mine/labels", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -355,18 +361,27 @@ func TestHandleLabels_StripsOwnerLabel(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// The body forwarded to Daytona must NOT contain daytona-owner
-	if len(*captured) == 0 {
-		t.Fatal("no body captured")
-	}
-	// captured[0] = GET sandbox (owner check), captured[1] = PUT labels
-	var fwdBody map[string]any
+	// Find the forwarded PUT body (the one carrying a labels object).
+	var labels map[string]any
 	for _, b := range *captured {
-		if err := json.Unmarshal(b, &fwdBody); err == nil {
-			if _, has := fwdBody[ownerLabel]; has {
-				t.Errorf("daytona-owner must not be forwarded to Daytona: %v", fwdBody)
+		var m map[string]any
+		if json.Unmarshal(b, &m) == nil {
+			if l, ok := m["labels"].(map[string]any); ok {
+				labels = l
 			}
 		}
+	}
+	if labels == nil {
+		t.Fatal("forwarded labels body not captured")
+	}
+	if labels[ownerLabel] != "0xOWNER" {
+		t.Errorf("owner must be forwarded with the LIVE value, got %v", labels[ownerLabel])
+	}
+	if labels[sealedLabel] != "true" {
+		t.Errorf("0g-sealed must be re-injected (omission would unseal via replace), got %v", labels[sealedLabel])
+	}
+	if labels["env"] != "staging" {
+		t.Errorf("caller's label must survive, got %v", labels["env"])
 	}
 }
 

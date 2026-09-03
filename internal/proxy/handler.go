@@ -928,14 +928,23 @@ func (h *Handler) handleCloseSession(c *gin.Context) {
 // ── Labels ──────────────────────────────────────────────────────────────────
 
 func (h *Handler) handleLabels(c *gin.Context) {
+	// Daytona's replaceLabels is a wholesale replace, so the protected labels
+	// must be re-injected from the live sandbox — a payload-only strip would
+	// have the replace DELETE them (ownership bricked; sealed flag cleared →
+	// SSH/toolbox reopen and the seal key becomes readable).
+	sb, err := h.dtona.GetSandbox(c.Request.Context(), c.Param("id"))
+	if err != nil || sb == nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "sandbox lookup failed"})
+		return
+	}
 	body, _ := io.ReadAll(c.Request.Body)
-	stripped, err := StripOwnerLabel(body)
+	merged, err := MergeProtectedLabels(body, sb.Labels)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid label payload"})
 		return
 	}
-	c.Request.Body = io.NopCloser(bytes.NewReader(stripped))
-	c.Request.ContentLength = int64(len(stripped))
+	c.Request.Body = io.NopCloser(bytes.NewReader(merged))
+	c.Request.ContentLength = int64(len(merged))
 	h.forward(c)
 }
 
