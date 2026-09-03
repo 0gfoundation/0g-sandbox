@@ -180,6 +180,11 @@ func (h *Handler) BrokerDeregister(ctx context.Context, sandboxID string) {
 //   - All /sandbox/:id/* routes go through a single catch-all handler to avoid
 //     Gin's restriction on mixing static segments and wildcard catch-alls.
 func (h *Handler) Register(rg *gin.RouterGroup) {
+	// The traversal guard ships WITH the package: every engine that mounts
+	// these routes gets it, not just binaries that remember the engine-wide
+	// mount (authorization binds to :id while the raw path is forwarded as
+	// admin — see PathTraversalGuard).
+	rg.Use(PathTraversalGuard())
 	// ── Create sandbox ─────────────────────────────────────────────────────
 	rg.POST("/sandbox", h.handleCreate)
 
@@ -225,6 +230,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 // the auth.Middleware-protected group so dashboards/explorers can hit them
 // without a signed request.
 func (h *Handler) RegisterPublic(rg *gin.RouterGroup) {
+	rg.Use(PathTraversalGuard())
 	// On-chain VoucherSettled events. Anyone can derive the same data from
 	// the public RPC + contract address; no value in gating it.
 	rg.GET("/events", h.handleEvents)

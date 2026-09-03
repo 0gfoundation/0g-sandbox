@@ -256,6 +256,11 @@ func main() {
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
+	// Reject non-canonical paths (dot-segments, duplicate slashes) before any
+	// routing: authorization binds to the :id param while the raw path is
+	// forwarded to Daytona as admin, so a normalizing upstream would otherwise
+	// execute a traversal against a different sandbox than the one authorized.
+	r.Use(proxy.PathTraversalGuard())
 	r.RedirectTrailingSlash = false // prevent 307 redirect on CORS preflight for /sandbox/:id
 	r.Use(gin.Recovery())
 	r.Use(func(c *gin.Context) {
