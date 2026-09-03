@@ -3,6 +3,7 @@ package chain
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"math/big"
 	"sync"
@@ -292,6 +293,16 @@ func (c *Client) ResolveTxFate(ctx context.Context, txHash common.Hash, accountN
 		return TxPending, nil, nerr
 	}
 	if confirmed > accountNonce {
+		// The account nonce advanced past this tx with no receipt. That is
+		// usually a drop — but receipt lookup and NonceAt are two RPCs, and an
+		// LB-fronted or mid-import node can serve a nonce that reflects a block
+		// whose receipt the first call missed. Re-fetch the receipt once,
+		// fresh, before declaring dropped: if the tx actually mined, this
+		// catches it and avoids re-signing settled usage (double charge). The
+		// caller additionally requires two consecutive dropped observations.
+		if r2, e2 := c.eth.TransactionReceipt(ctx, txHash); e2 == nil && r2 != nil {
+			return TxMined, r2, nil
+		}
 		return TxDropped, nil, nil
 	}
 	return TxPending, nil, nil
@@ -301,9 +312,15 @@ func (c *Client) ResolveTxFate(ctx context.Context, txHash common.Hash, accountN
 // mined settlement tx's receipt (VoucherSettled events + preview fallback for
 // vouchers that emitted none). Receipt with status 0 (whole tx reverted) means
 // NO voucher was consumed — callers may safely re-sign and resubmit.
+// ErrTxReverted marks a settlement tx that mined with status 0 — the whole tx
+// reverted, so NO voucher was consumed on-chain and re-signing is safe. It is
+// deliberately distinct from a status-extraction (preview) failure on a MINED
+// tx, where events already settled and re-signing would double-charge.
+var ErrTxReverted = errors.New("settlement tx reverted")
+
 func (c *Client) SettleStatusesFromReceipt(ctx context.Context, receipt *types.Receipt, vouchers []voucher.SandboxVoucher) ([]SettlementStatus, error) {
 	if receipt.Status == 0 {
-		return nil, fmt.Errorf("tx reverted: %s", receipt.TxHash.Hex())
+		return nil, fmt.Errorf("%w: %s", ErrTxReverted, receipt.TxHash.Hex())
 	}
 
 	// Step 1: parse VoucherSettled events → (user, nonce) → status.
