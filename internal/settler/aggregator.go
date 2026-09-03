@@ -43,6 +43,15 @@ type AggregatorChain interface {
 //     balances are re-read so a top-up reclaims and settles the debt,
 //     oldest-first, before any newer voucher.
 //
+// force bypasses the backlogSweepThreshold guard: the caller knows submissions
+// are currently impossible (tx submission failed, or the rotation gate is
+// holding the queue) and wants the sweep's protection now, on a queue of any
+// size. Without it, a small deployment — a single user, a handful of vouchers —
+// never crosses the threshold, so the sweep stays dormant and an unpayable
+// sandbox runs unbilled for as long as the outage lasts. Forced sweeps are
+// gas-free like periodic ones (Redis + a read-only balance call), so they are
+// safe to run exactly while the settler cannot pay for anything else.
+//
 // lastBal memoizes the balance each held user was last split against.
 // Re-splitting a held-only user at an unchanged balance yields an equivalent
 // partition, so skipping it stops the sweep from rewriting the whole held list
@@ -57,7 +66,7 @@ type AggregatorChain interface {
 //
 // Sandboxes whose owner cannot cover their oldest voucher are stopped
 // (persistStop dedups via SetNX, so re-sweeping never re-kills).
-func maybeSweep(ctx context.Context, rdb *redis.Client, onchain AggregatorChain, queueKey string, stopCh chan<- StopSignal, lastBal map[common.Address]*big.Int, log *zap.Logger) {
+func maybeSweep(ctx context.Context, rdb *redis.Client, onchain AggregatorChain, queueKey string, stopCh chan<- StopSignal, lastBal map[common.Address]*big.Int, log *zap.Logger, force bool) {
 	provider := onchain.ProviderAddress()
 	heldUsersKey := fmt.Sprintf(voucher.VoucherHeldUsersKeyFmt, strings.ToLower(provider.Hex()))
 
@@ -71,14 +80,14 @@ func maybeSweep(ctx context.Context, rdb *redis.Client, onchain AggregatorChain,
 		log.Warn("sweep guard: SCARD", zap.Error(err))
 		return
 	}
-	if qlen <= backlogSweepThreshold && heldUserCount == 0 {
+	if !force && qlen <= backlogSweepThreshold && heldUserCount == 0 {
 		return // steady state: nothing to aggregate, nothing to reclaim
 	}
 
 	seen := map[common.Address]bool{}
 	fromQueue := map[common.Address]bool{}
 	var users []common.Address
-	if qlen > backlogSweepThreshold {
+	if force || qlen > backlogSweepThreshold {
 		rows, _, truncated, err := voucher.SummarizeQueue(ctx, rdb, queueKey, 1)
 		if err != nil {
 			log.Warn("sweep: summarize queue", zap.Error(err))

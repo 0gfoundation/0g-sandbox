@@ -46,6 +46,11 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 		sweepInterval = time.Minute
 	}
 	var lastSweep time.Time
+	// Forced-sweep throttle: while the settler cannot submit (tx failure or
+	// rotation hold), maybeSweep is forced at the same cadence so unpayable
+	// sandboxes are stopped during the outage, not after it. Separate from
+	// lastSweep so a just-run periodic sweep cannot delay the first forced one.
+	var lastForcedSweep time.Time
 	// Balance memo for held users: skip re-splitting a held-only user whose
 	// balance hasn't changed (their sandboxes are stopped, so the partition
 	// couldn't change either — re-sweeping would just churn the held list).
@@ -58,7 +63,7 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 		}
 
 		if time.Since(lastSweep) >= sweepInterval {
-			maybeSweep(ctx, rdb, onchain, queueKey, stopCh, lastBal, log)
+			maybeSweep(ctx, rdb, onchain, queueKey, stopCh, lastBal, log, false)
 			lastSweep = time.Now()
 		}
 
@@ -84,6 +89,14 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 			lastNodeCheck = time.Now()
 		}
 		if !nodeActive {
+			// Degraded-mode stop, rotation flavor: submissions are held for as
+			// long as the operator has not run add-node-onchain, and the
+			// periodic sweep's threshold guard leaves small queues dormant —
+			// force the gas-free sweep so unpayable sandboxes stop meanwhile.
+			if time.Since(lastForcedSweep) >= sweepInterval {
+				maybeSweep(ctx, rdb, onchain, queueKey, stopCh, lastBal, log, true)
+				lastForcedSweep = time.Now()
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -171,6 +184,20 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 			)
 			// Re-push first item back (it was already BLPOP'd)
 			_ = rdb.LPush(ctx, queueKey, firstItem)
+			// Degraded-mode stop: the on-chain stop path is unreachable while
+			// we cannot submit — a bounced voucher is what triggers
+			// persistStop, and nothing bounces when nothing settles. Meanwhile
+			// the periodic sweep's threshold guard (qlen > 100) leaves small
+			// queues dormant, so a single user's sandbox runs unbilled for the
+			// whole outage (observed live: 12 minutes on an empty bucket while
+			// the settler wallet was dry). Force the gas-free sweep on every
+			// failed submit, throttled to one per interval: it re-splits each
+			// user's backlog against their on-chain balance, parks the
+			// unpayable part as held debt and stops those sandboxes now.
+			if time.Since(lastForcedSweep) >= sweepInterval {
+				maybeSweep(ctx, rdb, onchain, queueKey, stopCh, lastBal, log, true)
+				lastForcedSweep = time.Now()
+			}
 			time.Sleep(5 * time.Second)
 			continue
 		}
