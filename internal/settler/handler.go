@@ -85,8 +85,16 @@ func HandleStatuses(
 			}
 
 		case chain.StatusNotAcknowledged:
+			// The contract rejects NOT_ACKNOWLEDGED before consuming the nonce,
+			// so this revenue is collectable once the user acknowledges — park
+			// it in the held list instead of dropping it with the pop. The
+			// sweep reclaims it on the user's next balance change after ack.
+			if err := voucher.PushHeld(ctx, rdb, v); err != nil {
+				log.Error("failed to park not-acknowledged voucher; revenue dropped",
+					zap.String("user", v.User.Hex()), zap.String("fee", v.TotalFee.String()), zap.Error(err))
+			}
 			if v.IsAggregated() {
-				log.Warn("aggregated voucher rejected: user not acknowledged",
+				log.Warn("aggregated voucher rejected: user not acknowledged — parked as held",
 					zap.String("user", v.User.Hex()),
 					zap.String("provider", v.Provider.Hex()),
 				)
@@ -112,11 +120,11 @@ func HandleStatuses(
 			alerter.Notify(ctx, alert.KindVoucherRejected, alert.SeverityCritical,
 				"Voucher rejected — system config issue",
 				map[string]any{
-					"status":    status.String(),
-					"user":      v.User.Hex(),
-					"provider":  v.Provider.Hex(),
-					"sandbox":   sandboxID,
-					"nonce":     v.Nonce.String(),
+					"status":   status.String(),
+					"user":     v.User.Hex(),
+					"provider": v.Provider.Hex(),
+					"sandbox":  sandboxID,
+					"nonce":    v.Nonce.String(),
 				},
 			)
 
