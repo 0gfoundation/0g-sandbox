@@ -42,8 +42,16 @@ func Reserve(ctx context.Context, rdb *redis.Client, user, provider string, amou
 
 // Release subtracts amount from the reservation. If the result drops to zero or
 // below the key is deleted. Best-effort: errors are silently ignored.
+// releaseScript decrements by at most the CURRENT value, so an over-large
+// release (reserve/release amount asymmetry) can never drive the counter
+// negative and DEL it — which would wipe OTHER concurrent reservations under
+// the same key and briefly re-open the create TOCTOU. Clamped, the worst case
+// is releasing down to zero, never below.
 var releaseScript = redis.NewScript(`
-	local v = redis.call('DECRBY', KEYS[1], ARGV[1])
+	local cur = tonumber(redis.call('GET', KEYS[1]) or '0')
+	local dec = tonumber(ARGV[1])
+	if dec > cur then dec = cur end
+	local v = redis.call('DECRBY', KEYS[1], dec)
 	if tonumber(v) <= 0 then
 		redis.call('DEL', KEYS[1])
 	end
