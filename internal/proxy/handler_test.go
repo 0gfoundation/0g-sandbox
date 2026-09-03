@@ -896,3 +896,36 @@ func TestCreateGate_RejectionRollsBackReservation(t *testing.T) {
 		t.Fatalf("rejected creates must leave zero reservation, got %s", got)
 	}
 }
+
+// Review #116 F1: a start against an already-open billing session is a billing
+// no-op (OnStart returns early), so it must NOT take a reservation — that would
+// leak for the TTL. Assert the reservation counter stays at whatever it was.
+func TestStartGate_OpenSession_NoReservationTaken(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
+	// Seed an open billing session for the sandbox.
+	billing.CreateSession(context.Background(), rdb, billing.Session{ //nolint:errcheck
+		SandboxID: "sb-open", Owner: "0xW", Provider: "0xPROV", PricePerSec: "100",
+	})
+
+	srv, _ := mockDaytona(t, []daytona.Sandbox{{ID: "sb-open", CPU: 2, Memory: 4, State: "stopped", Labels: map[string]string{"daytona-owner": "0xW"}}})
+	dtona := daytona.NewClient(srv.URL, "test-key")
+	r := gin.New()
+	api := r.Group("/api", func(c *gin.Context) { c.Set("wallet_address", "0xW"); c.Next() })
+	NewHandler(dtona, &mockBilling{}, &mockBalChecker{bal: big.NewInt(1000)}, nil, nil,
+		big.NewInt(100), big.NewInt(1), new(big.Int), new(big.Int), "0xPROV",
+		nil, "", rdb, zap.NewNop(), "", nil, 60).Register(api)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sandbox/sb-open/start", nil)
+	r.ServeHTTP(w, req)
+
+	if got := billing.GetReserved(context.Background(), rdb, "0xW", "0xPROV"); got.Sign() != 0 {
+		t.Fatalf("start on an open session must take no reservation, got %s", got)
+	}
+}

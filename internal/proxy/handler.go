@@ -627,12 +627,23 @@ func (h *Handler) handleStart(c *gin.Context) {
 		cpu, memGB = sb.CPU, sb.Memory
 	}
 
+	// A start against an ALREADY-OPEN billing session (create-then-start with
+	// no stop in between) is a billing no-op: OnStart returns early and emits
+	// no voucher. Skip the whole reserve/gate then — taking a reservation here
+	// would leak for its TTL, since OnStart's release only runs when it opens a
+	// session (review #116 F1). Redis error → treat as absent and gate as
+	// usual (safe direction).
+	sessionOpen := false
+	if existing, gerr := billing.GetSession(c.Request.Context(), h.rdb, id); gerr == nil && existing != nil {
+		sessionOpen = true
+	}
+
 	// Pre-check: reject if on-chain balance is below one voucher interval for this sandbox's spec.
 	// If insufficient and broker is configured, request a top-up and wait for it to land.
 	// available = chainBalance - reserved prevents concurrent requests from double-spending.
 	var startRequired *big.Int
 	startReserved := false
-	if h.balCheck != nil {
+	if h.balCheck != nil && !sessionOpen {
 		startRequired = h.intervalCost(cpu, memGB)
 		held, pending := h.outstandingDebt(c.Request.Context(), wallet)
 		heldDebt := new(big.Int).Add(held, pending)
