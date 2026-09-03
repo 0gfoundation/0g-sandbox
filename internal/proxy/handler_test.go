@@ -9,10 +9,12 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/0gfoundation/0g-sandbox/internal/chain"
 	"github.com/0gfoundation/0g-sandbox/internal/daytona"
 )
 
@@ -30,23 +32,28 @@ type mockBilling struct {
 }
 
 func (m *mockBilling) OnCreate(_ context.Context, sandboxID, _ string, _, _ int) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.creates = append(m.creates, sandboxID)
 }
 func (m *mockBilling) OnStart(_ context.Context, sandboxID, _ string, _, _ int) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.starts = append(m.starts, sandboxID)
 }
 func (m *mockBilling) OnStop(_ context.Context, sandboxID string) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.stops = append(m.stops, sandboxID)
 }
 func (m *mockBilling) OnDelete(_ context.Context, sandboxID string) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.deletes = append(m.deletes, sandboxID)
 }
 func (m *mockBilling) OnArchive(_ context.Context, sandboxID string) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.archives = append(m.archives, sandboxID)
 }
 func (m *mockBilling) EnsureSession(_ context.Context, _, _ string) {}
@@ -370,7 +377,6 @@ func mockDaytonaWithSSH(t *testing.T, sandboxes []daytona.Sandbox) *httptest.Ser
 	return srv
 }
 
-
 // TestSealedOnly_RejectsUnsealedCreate exercises the SEALED_ONLY config gate.
 // When the provider runs with sealed_only=true, every create that doesn't carry
 // `"sealed": true` must fail at 400 before the body ever reaches Daytona.
@@ -490,5 +496,46 @@ func TestExtractID(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("extractID(%q) = %q, want %q", tc.body, got, tc.want)
 		}
+	}
+}
+
+// ── GET /api/events default window ───────────────────────────────────────────
+
+type capturingEventFetcher struct{ gotSince uint64 }
+
+func (f *capturingEventFetcher) GetVoucherEvents(_ context.Context, sinceTimestamp uint64, _, _ int) ([]chain.VoucherEvent, int, uint64, error) {
+	f.gotSince = sinceTimestamp
+	return nil, 0, 0, nil
+}
+
+// An omitted/zero since must NOT mean "all history": on any contract with real
+// history an unbounded event query blows past RPC response limits and 502s
+// every time (observed live at nonce 514k). The default is a 7-day window.
+func TestEvents_DefaultSinceIsBounded(t *testing.T) {
+	fetcher := &capturingEventFetcher{}
+	srv, _ := mockDaytona(t, nil)
+	dtona := daytona.NewClient(srv.URL, "test-key")
+	r := gin.New()
+	api := r.Group("/api", func(c *gin.Context) { c.Set("wallet_address", "0xWALLET"); c.Next() })
+	NewHandler(dtona, &mockBilling{}, nil, nil, fetcher, nil, nil, nil, nil, "",
+		nil, "", nil, zap.NewNop(), "", nil, 0).RegisterPublic(api)
+
+	for _, q := range []string{"", "?since=0"} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/events"+q, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("%q: status %d body %s", q, w.Code, w.Body.String())
+		}
+		weekAgo := uint64(time.Now().Add(-7 * 24 * time.Hour).Unix())
+		if fetcher.gotSince < weekAgo-60 || fetcher.gotSince > weekAgo+60 {
+			t.Errorf("%q: since=%d, want ~%d (7-day window)", q, fetcher.gotSince, weekAgo)
+		}
+	}
+
+	// Explicit since is honored untouched.
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/events?since=1700000000", nil))
+	if fetcher.gotSince != 1700000000 {
+		t.Errorf("explicit since not honored: %d", fetcher.gotSince)
 	}
 }

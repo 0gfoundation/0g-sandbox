@@ -71,9 +71,9 @@ type Handler struct {
 	pricePerCPUPerSec   *big.Int       // per CPU core per second
 	pricePerMemGBPerSec *big.Int       // per GB memory per second
 	voucherIntervalSec  int64
-	providerAddress     string // on-chain settlement identity; used by broker client and balance lookups
+	providerAddress     string   // on-chain settlement identity; used by broker client and balance lookups
 	adminAddresses      []string // operator wallets allowed to call admin-only endpoints (lowercased hex)
-	sshGatewayHost      string // if set, replaces localhost in SSH commands
+	sshGatewayHost      string   // if set, replaces localhost in SSH commands
 	computePricePerSec  *big.Int
 	rdb                 *redis.Client
 	teeKey              *ecdsa.PrivateKey // TEE signing key; nil = sealed containers disabled
@@ -188,7 +188,6 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/volumes", h.handleListGeneric("daytona-owner"))
 	rg.POST("/snapshots", h.handleSnapshotCreate)
 	rg.DELETE("/snapshots/:id", h.handleSnapshotDelete)
-
 
 	// ── DELETE /sandbox/:id (no action suffix, safe to register separately) ─
 	rg.DELETE("/sandbox/:id", h.withOwnerOrAdmin(h.handleDelete))
@@ -770,7 +769,12 @@ func (h *Handler) handleEvents(c *gin.Context) {
 		c.JSON(http.StatusNotImplemented, gin.H{"error": "events not configured"})
 		return
 	}
-	// ?since=<unix_ts>: return events with block.timestamp >= since. 0 or omitted = all history.
+	// ?since=<unix_ts>: return events with block.timestamp >= since.
+	// 0 or omitted defaults to a 7-day window — "all history" blows past RPC
+	// response limits on any contract with real history (observed: a contract
+	// past nonce 514k 502s on every unbounded query), so an explicit recent
+	// window is the only default that always works. Callers wanting deeper
+	// history page backwards with explicit since values.
 	var sinceTimestamp uint64
 	if s := c.Query("since"); s != "" {
 		n, err := strconv.ParseUint(s, 10, 64)
@@ -779,6 +783,9 @@ func (h *Handler) handleEvents(c *gin.Context) {
 			return
 		}
 		sinceTimestamp = n
+	}
+	if sinceTimestamp == 0 {
+		sinceTimestamp = uint64(time.Now().Add(-7 * 24 * time.Hour).Unix())
 	}
 	page := 0
 	if s := c.Query("page"); s != "" {
@@ -828,12 +835,12 @@ func (h *Handler) handleEvents(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"current_block":  currentBlock,
-		"since":          sinceTimestamp,
-		"total":          total,
-		"page":           page,
-		"page_size":      pageSize,
-		"events":         result,
+		"current_block": currentBlock,
+		"since":         sinceTimestamp,
+		"total":         total,
+		"page":          page,
+		"page_size":     pageSize,
+		"events":        result,
 	})
 }
 
@@ -1101,7 +1108,6 @@ func copyRecorder(c *gin.Context, rec *httptest.ResponseRecorder) {
 	}
 	c.Data(rec.Code, rec.Header().Get("Content-Type"), rec.Body.Bytes())
 }
-
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
