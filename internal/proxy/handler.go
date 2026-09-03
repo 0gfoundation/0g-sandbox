@@ -71,9 +71,9 @@ type Handler struct {
 	pricePerCPUPerSec   *big.Int       // per CPU core per second
 	pricePerMemGBPerSec *big.Int       // per GB memory per second
 	voucherIntervalSec  int64
-	providerAddress     string // on-chain settlement identity; used by broker client and balance lookups
+	providerAddress     string   // on-chain settlement identity; used by broker client and balance lookups
 	adminAddresses      []string // operator wallets allowed to call admin-only endpoints (lowercased hex)
-	sshGatewayHost      string // if set, replaces localhost in SSH commands
+	sshGatewayHost      string   // if set, replaces localhost in SSH commands
 	computePricePerSec  *big.Int
 	rdb                 *redis.Client
 	teeKey              *ecdsa.PrivateKey // TEE signing key; nil = sealed containers disabled
@@ -189,7 +189,6 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/snapshots", h.handleSnapshotCreate)
 	rg.DELETE("/snapshots/:id", h.handleSnapshotDelete)
 
-
 	// ── DELETE /sandbox/:id (no action suffix, safe to register separately) ─
 	rg.DELETE("/sandbox/:id", h.withOwnerOrAdmin(h.handleDelete))
 
@@ -246,15 +245,32 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	reqCPU, reqMemGB := extractResources(body)
-	// For snapshot creates the request body has no cpu/memory fields.
-	// Look up the snapshot spec so the broker pre-create call uses the real resource cost.
-	if reqCPU == 0 && reqMemGB == 0 {
-		if snapName := extractSnapshotName(body); snapName != "" {
-			if snap, err := h.dtona.GetSnapshot(c.Request.Context(), snapName); err == nil && snap != nil {
-				reqCPU, reqMemGB = snap.CPU, snap.Mem
-			}
-		}
+	// Snapshot-only policy guarantees no custom cpu/memory in the body, so the
+	// snapshot record is the ONLY billing spec source. Look it up and FAIL
+	// CLOSED when billing is on: a transient GetSnapshot error must not admit
+	// on createFee alone while Daytona provisions the snapshot's real spec
+	// (that reopens #77). This matches the sealed path, which already fails
+	// closed on a snapshot-resolution error. Best-effort only when billing is
+	// disabled (balCheck nil, e.g. unit tests that don't exercise the gate).
+	reqCPU, reqMemGB := 0, 0
+	snapName := extractSnapshotName(body)
+	snap, snapErr := h.dtona.GetSnapshot(c.Request.Context(), snapName)
+	switch {
+	case snapErr == nil && snap != nil:
+		reqCPU, reqMemGB = snap.CPU, snap.Mem
+	case h.balCheck == nil:
+		// Billing disabled — spec is not needed; best-effort, don't block.
+	case snapErr != nil:
+		// Transient lookup failure: fail closed, do NOT admit on createFee
+		// alone while Daytona provisions the real spec (reopens #77). Mirrors
+		// the sealed path, which already fails closed on snapshot resolution.
+		h.log.Error("create: snapshot spec lookup failed; failing closed to protect billing",
+			zap.String("snapshot", snapName), zap.Error(snapErr))
+		c.JSON(http.StatusBadGateway, gin.H{"error": "could not resolve snapshot spec for billing"})
+		return
+	default: // snap == nil: snapshot not found
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("snapshot %q not found", snapName)})
+		return
 	}
 
 	// Pre-check: reject if user has not acknowledged the TEE signer.
@@ -441,7 +457,15 @@ func (h *Handler) handleCreate(c *gin.Context) {
 
 	if result.StatusCode >= 200 && result.StatusCode < 300 {
 		if id := extractID(upstream.Body.Bytes()); id != "" {
-			cpu, memGB := extractResources(upstream.Body.Bytes())
+			// Bill the snapshot spec the gate resolved (reqCPU/reqMemGB),
+			// falling back only if Daytona echoed a spec. Depending on the
+			// response echo alone was fragile: if Daytona stops echoing cpu/mem
+			// the session would open at 0 rate and #77 returns silently. The
+			// gate-resolved spec is authoritative and matches the reservation.
+			cpu, memGB := reqCPU, reqMemGB
+			if rc, rm := extractResources(upstream.Body.Bytes()); rc != 0 || rm != 0 {
+				cpu, memGB = rc, rm
+			}
 			go func() {
 				ctx := context.WithoutCancel(c.Request.Context())
 				// Register the real sandbox ID with the broker for ongoing
@@ -835,12 +859,12 @@ func (h *Handler) handleEvents(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"current_block":  currentBlock,
-		"since":          sinceTimestamp,
-		"total":          total,
-		"page":           page,
-		"page_size":      pageSize,
-		"events":         result,
+		"current_block": currentBlock,
+		"since":         sinceTimestamp,
+		"total":         total,
+		"page":          page,
+		"page_size":     pageSize,
+		"events":        result,
 	})
 }
 
@@ -1108,7 +1132,6 @@ func copyRecorder(c *gin.Context, rec *httptest.ResponseRecorder) {
 	}
 	c.Data(rec.Code, rec.Header().Get("Content-Type"), rec.Body.Bytes())
 }
-
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

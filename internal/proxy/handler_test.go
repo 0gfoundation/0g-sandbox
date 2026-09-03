@@ -5,10 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -21,32 +24,40 @@ func init() { gin.SetMode(gin.TestMode) }
 // ── Mock billing hooks ────────────────────────────────────────────────────────
 
 type mockBilling struct {
-	mu       sync.Mutex
-	creates  []string
-	starts   []string
-	stops    []string
-	deletes  []string
-	archives []string
+	mu        sync.Mutex
+	creates   []string
+	starts    []string
+	stops     []string
+	deletes   []string
+	archives  []string
+	createCPU int // cpu of the last OnCreate — pins the billed spec (#118 nit)
+	createMem int
 }
 
-func (m *mockBilling) OnCreate(_ context.Context, sandboxID, _ string, _, _ int) {
-	m.mu.Lock(); defer m.mu.Unlock()
+func (m *mockBilling) OnCreate(_ context.Context, sandboxID, _ string, cpu, memGB int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.creates = append(m.creates, sandboxID)
+	m.createCPU, m.createMem = cpu, memGB
 }
 func (m *mockBilling) OnStart(_ context.Context, sandboxID, _ string, _, _ int) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.starts = append(m.starts, sandboxID)
 }
 func (m *mockBilling) OnStop(_ context.Context, sandboxID string) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.stops = append(m.stops, sandboxID)
 }
 func (m *mockBilling) OnDelete(_ context.Context, sandboxID string) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.deletes = append(m.deletes, sandboxID)
 }
 func (m *mockBilling) OnArchive(_ context.Context, sandboxID string) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.archives = append(m.archives, sandboxID)
 }
 func (m *mockBilling) EnsureSession(_ context.Context, _, _ string) {}
@@ -370,7 +381,6 @@ func mockDaytonaWithSSH(t *testing.T, sandboxes []daytona.Sandbox) *httptest.Ser
 	return srv
 }
 
-
 // TestSealedOnly_RejectsUnsealedCreate exercises the SEALED_ONLY config gate.
 // When the provider runs with sealed_only=true, every create that doesn't carry
 // `"sealed": true` must fail at 400 before the body ever reaches Daytona.
@@ -490,5 +500,55 @@ func TestExtractID(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("extractID(%q) = %q, want %q", tc.body, got, tc.want)
 		}
+	}
+}
+
+// Review #118 nit: pin that a snapshot create bills the SNAPSHOT's spec, not 0.
+// The gate resolves cpu/mem from GetSnapshot; OnCreate must receive them (the
+// response-echo behavior this PR's correctness leans on). A Daytona that stops
+// echoing spec would silently reopen #77 — this test fires if it does.
+func TestSnapshotCreate_BillsSnapshotSpec(t *testing.T) {
+	// mock Daytona: snapshot lookup returns 4c/8g; create returns the sandbox.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/snapshots/big-4c", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"big-4c","name":"big-4c","cpu":4,"mem":8,"state":"active"}`)) //nolint:errcheck
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"sb-x","state":"started","labels":{"daytona-owner":"0xW"}}`)) //nolint:errcheck
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	dtona := daytona.NewClient(srv.URL, "test-key")
+	mb := &mockBilling{}
+	r := gin.New()
+	api := r.Group("/api", func(c *gin.Context) { c.Set("wallet_address", "0xW"); c.Next() })
+	NewHandler(dtona, mb, nil, nil, nil, big.NewInt(1), new(big.Int), new(big.Int), new(big.Int),
+		"0xPROV", nil, "", nil, zap.NewNop(), "", nil, 60).Register(api)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"big-4c"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK && w.Code != http.StatusCreated {
+		t.Fatalf("create status %d: %s", w.Code, w.Body.String())
+	}
+	// OnCreate runs in a goroutine — wait for it.
+	var cpu, mem int
+	for i := 0; i < 100; i++ {
+		mb.mu.Lock()
+		cpu, mem = mb.createCPU, mb.createMem
+		done := len(mb.creates) > 0
+		mb.mu.Unlock()
+		if done {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if cpu != 4 || mem != 8 {
+		t.Fatalf("OnCreate billed spec = %dc/%dg, want the snapshot's 4c/8g", cpu, mem)
 	}
 }
