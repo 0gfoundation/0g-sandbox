@@ -73,6 +73,18 @@ func InjectOwner(body []byte, walletAddr string) ([]byte, error) {
 		}
 	}
 
+	// Strip any caller-supplied volume mounts. Volumes are not a supported feature
+	// in 0g-sandbox yet, and the proxy forwards to Daytona as admin, so an
+	// unvalidated "volumes" array would let a caller mount another tenant's volume
+	// into their own sandbox — no ownership check exists. Deny-by-default until
+	// per-volume ownership validation is built (see the admin gate on
+	// GET /api/volumes and tracking issue #81).
+	for k := range m {
+		if strings.EqualFold(k, "volumes") {
+			delete(m, k)
+		}
+	}
+
 	// Record image reference for TEE attestation.
 	if img, _ := m["image"].(string); img != "" {
 		labels[imageLabel] = img

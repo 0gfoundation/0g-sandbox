@@ -247,6 +247,24 @@ func TestInjectOwner_SealedFalse_NoLabel(t *testing.T) {
 	}
 }
 
+// Deny-by-default: a caller-supplied volumes array must never be forwarded to
+// Daytona — the proxy speaks as admin and does not validate volume ownership, so
+// forwarding it would let a caller mount another tenant's volume. Any case.
+func TestInjectOwner_StripsVolumes(t *testing.T) {
+	for _, key := range []string{"volumes", "Volumes", "VOLUMES"} {
+		body := []byte(`{"image":"ubuntu","` + key + `":[{"volumeId":"victim-vol","mountPath":"/mnt/v"}]}`)
+		out, err := InjectOwner(body, "0xW")
+		if err != nil {
+			t.Fatalf("%s: %v", key, err)
+		}
+		var m map[string]any
+		json.Unmarshal(out, &m) //nolint:errcheck
+		if _, exists := m[key]; exists {
+			t.Errorf("%s: volumes must be stripped from forwarded body", key)
+		}
+	}
+}
+
 func TestInjectOwner_RecordsImageLabel(t *testing.T) {
 	body := []byte(`{"image":"ubuntu:22.04"}`)
 	out, err := InjectOwner(body, "0xW")

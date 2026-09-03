@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/gin-gonic/gin"
@@ -19,7 +20,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/0gfoundation/0g-sandbox/internal/daytona"
-	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
 
 func init() { gin.SetMode(gin.TestMode) }
@@ -151,6 +151,23 @@ func TestBlockedEndpoints(t *testing.T) {
 				t.Errorf("%s %s: expected 403, got %d", method, path, w.Code)
 			}
 		}
+	}
+}
+
+// ── GET /api/volumes: admin-only (deny-by-default) ─────────────────────────────
+
+func TestVolumesList_NonAdmin_Forbidden(t *testing.T) {
+	srv, _ := mockDaytona(t, nil)
+	dtona := daytona.NewClient(srv.URL, "test-key")
+	// newTestEngine passes nil adminAddresses + no app-owner fn, so no wallet is admin.
+	r := newTestEngine(dtona, &mockBilling{}, "0xNOTADMIN")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/volumes", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("non-admin GET /api/volumes: expected 403, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -500,6 +517,61 @@ func TestExtractID(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("extractID(%q) = %q, want %q", tc.body, got, tc.want)
 		}
+	}
+}
+
+// Review F2 (#82): the other half of the admin gate — an admin's GET
+// /api/volumes must be forwarded, guarding against the gate ever being
+// "fixed" into 403-for-everyone.
+func TestVolumesList_Admin_Forwarded(t *testing.T) {
+	srv, _ := mockDaytona(t, nil)
+	dtona := daytona.NewClient(srv.URL, "test-key")
+	r := gin.New()
+	api := r.Group("/api", func(c *gin.Context) {
+		c.Set("wallet_address", "0xADmin")
+		c.Next()
+	})
+	NewHandler(dtona, &mockBilling{}, nil, nil, nil, nil, nil, nil, nil, "",
+		[]string{"0xadmin"}, "", nil, zap.NewNop(), "", nil, 0).Register(api)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/volumes", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusForbidden {
+		t.Errorf("admin GET /api/volumes must be forwarded, got 403: %s", w.Body.String())
+	}
+}
+
+// Review F1 (#82): the transparent catch-all must strip caller-supplied
+// volumes (any case) before forwarding as admin — if the backend ever accepts
+// volume attach through a sandbox-scoped action, an unvalidated array would
+// reopen the cross-tenant mount closed at create.
+func TestCatchAll_StripsVolumesFromBody(t *testing.T) {
+	sandboxes := []daytona.Sandbox{{ID: "sb-1", Labels: map[string]string{"daytona-owner": "0xOWNER"}}}
+	srv, captured := mockDaytona(t, sandboxes)
+	dtona := daytona.NewClient(srv.URL, "test-key")
+	r := newTestEngine(dtona, &mockBilling{}, "0xOWNER")
+
+	body := `{"Volumes":[{"volumeId":"other-tenant"}],"volumes":[{"volumeId":"x"}],"keep":"me"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/sandbox/sb-1/update", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	var forwarded []byte
+	for _, b := range *captured {
+		if len(b) > 0 && strings.Contains(string(b), "keep") {
+			forwarded = b
+		}
+	}
+	if forwarded == nil {
+		t.Fatalf("forwarded body not captured; status=%d", w.Code)
+	}
+	s := strings.ToLower(string(forwarded))
+	if strings.Contains(s, "volumes") {
+		t.Errorf("volumes must be stripped from catch-all forward, got: %s", forwarded)
+	}
+	if !strings.Contains(string(forwarded), "keep") {
+		t.Errorf("unrelated fields must be preserved, got: %s", forwarded)
 	}
 }
 
