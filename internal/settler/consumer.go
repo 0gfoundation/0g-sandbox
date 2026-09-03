@@ -31,6 +31,18 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 
 	log.Info("settler started", zap.String("queue", queueKey))
 
+	// Startup recovery: a crash between broadcast and receipt leaves a
+	// persisted pending tx. Resolve its fate BEFORE consuming the queue —
+	// consuming first would re-sign the same usage while the old tx may still
+	// mine (double charge).
+	if p, err := loadPendingTx(ctx, rdb, onchain.ProviderAddress()); err != nil {
+		log.Error("settler: load pending tx failed", zap.Error(err))
+	} else if p != nil {
+		log.Warn("settler: unresolved settlement tx from previous run — resolving before consuming",
+			zap.String("tx", p.TxHash.Hex()), zap.Int("batch", len(p.Vouchers)))
+		resolvePendingTx(ctx, rdb, onchain, queueKey, stopCh, onchain.ProviderAddress(), p, alerter, log)
+	}
+
 	// Rotation gate state: throttle the on-chain node check and the warn log
 	// so a long not-yet-registered window doesn't spam RPC or logs.
 	var lastNodeCheck time.Time
@@ -152,10 +164,14 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 			continue
 		}
 
-		// Submit to chain
-		statuses, err := onchain.SettleFeesWithTEE(ctx, vouchers)
+		// Submit to chain: broadcast, persist the in-flight tx, then resolve
+		// its fate. A broadcast error means nothing reached the chain — safe
+		// to re-queue and re-sign. Past broadcast, the ONLY safe paths are
+		// through resolvePendingTx: re-signing while the tx may still mine
+		// settles the same usage twice.
+		tx, err := onchain.SubmitSettleFees(ctx, vouchers)
 		if err != nil {
-			log.Error("settler: SettleFeesWithTEE", zap.Error(err))
+			log.Error("settler: SubmitSettleFees", zap.Error(err))
 			errType := alert.ClassifyChainErr(err)
 			sev := alert.SeverityCritical
 			if errType == "timeout" || errType == "rpc_unreachable" {
@@ -174,9 +190,16 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 			time.Sleep(5 * time.Second)
 			continue
 		}
-
-		// Handle results (first item already popped; handler pops the rest)
-		HandleStatuses(ctx, rdb, stopCh, queueKey, firstItem, vouchers, statuses, alerter, log)
+		p := pendingTx{TxHash: tx.Hash(), AccountNonce: tx.Nonce(), Vouchers: vouchers, FirstItem: firstItem}
+		if err := savePendingTx(ctx, rdb, onchain.ProviderAddress(), p); err != nil {
+			// Redis down right after broadcast: resolve in-memory — do NOT
+			// re-queue (the tx is in flight).
+			log.Error("settler: persist pending tx failed; resolving in-memory", zap.Error(err))
+		}
+		statuses := resolvePendingTx(ctx, rdb, onchain, queueKey, stopCh, onchain.ProviderAddress(), &p, alerter, log)
+		if statuses == nil {
+			continue // re-queued (dropped/reverted) or ctx done — nothing settled
+		}
 
 		// Targeted sweep: a user whose settlement just rejected
 		// INSUFFICIENT_BALANCE is out of money NOW — park their remaining
