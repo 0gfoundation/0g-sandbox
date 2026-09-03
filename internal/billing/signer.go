@@ -128,15 +128,14 @@ func (s *Signer) IncrNonce(ctx context.Context, owner, provider string) (*big.In
 		common.HexToAddress(provider),
 	)
 	if err != nil {
-		// Chain unreachable: fall back to seeding from 0.
-		// The emitted nonce will be 1, which is only correct if no voucher has
-		// ever been settled for this pair. Log a warning so operators notice.
-		s.log.Warn("IncrNonce: cannot read chain nonce, seeding from 0 — voucher may be rejected if on-chain nonce > 0",
-			zap.String("owner", owner),
-			zap.String("provider", provider),
-			zap.Error(err),
-		)
-		chainNonce = big.NewInt(0)
+		// Chain unreachable: FAIL, do not guess. Seeding from 0 emitted
+		// nonce=1, which the contract rejects INVALID_NONCE whenever the pair
+		// has settled before — and the settler discards INVALID_NONCE (it
+		// normally means a replay), so every subsequent voucher was rejected
+		// and dropped: unbilled compute for as long as nobody reseeded. The
+		// voucher is simply not emitted this period; the generator's backlog
+		// catch-up bills the missed periods once the chain read recovers.
+		return nil, fmt.Errorf("seed nonce for %s/%s: chain read failed (refusing to guess): %w", owner, provider, err)
 	}
 
 	// Atomically: SET key chainNonce NX; INCR key.

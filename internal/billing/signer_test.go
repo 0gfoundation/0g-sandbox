@@ -177,10 +177,12 @@ func TestIncrNonce_SubsequentCallsAfterSeed(t *testing.T) {
 	}
 }
 
-// TestIncrNonce_ChainUnavailable_FallsBackToZero verifies that when the chain
-// is unreachable the signer falls back to seeding from 0 (nonce = 1) rather
-// than blocking or erroring.
-func TestIncrNonce_ChainUnavailable_FallsBackToZero(t *testing.T) {
+// Finding #30 (#79): when the chain is unreachable the signer must FAIL, not
+// guess 0 — nonce=1 is rejected INVALID_NONCE whenever the pair has settled
+// before, and the settler discards those: unbilled compute with no recovery.
+// Failing skips this period's voucher; the generator's backlog catch-up bills
+// it once the chain read recovers.
+func TestIncrNonce_ChainUnavailable_FailsClosed(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 
@@ -194,12 +196,14 @@ func TestIncrNonce_ChainUnavailable_FallsBackToZero(t *testing.T) {
 		zap.NewNop(),
 	)
 
-	n, err := s.IncrNonce(context.Background(), testOwner, testProvider)
-	if err != nil {
-		t.Fatalf("IncrNonce must not error when chain is down: %v", err)
+	if _, err := s.IncrNonce(context.Background(), testOwner, testProvider); err == nil {
+		t.Fatal("IncrNonce must fail closed when the seed read fails — guessing 0 emits permanently-rejected vouchers")
 	}
-	if n.Int64() != 1 {
-		t.Errorf("fallback nonce: got %d want 1", n.Int64())
+
+	// No poisoned counter left behind: once the chain recovers, seeding works
+	// and the first emitted nonce continues from on-chain state.
+	if mr.Exists("billing:nonce:" + testOwner + ":" + testProvider) {
+		t.Error("failed seed must not leave a counter key")
 	}
 }
 
