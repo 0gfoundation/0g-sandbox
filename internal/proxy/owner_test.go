@@ -202,6 +202,32 @@ func TestInjectOwner_SealedTrue_InjectsLabel(t *testing.T) {
 	}
 }
 
+// Regression for the case-mismatch bug: extractSealed (which drives seal-key
+// injection in handleCreate) matches "sealed" case-insensitively, so a mixed-case
+// {"Sealed":true} injects the key. InjectOwner must set 0g-sealed for the SAME
+// input — otherwise SSH/toolbox stay open on a sealed workload — and strip the
+// field regardless of case so it never reaches Daytona.
+func TestInjectOwner_SealedMixedCase_InjectsLabelAndStrips(t *testing.T) {
+	for _, key := range []string{"Sealed", "SEALED", "sEaLeD"} {
+		body := []byte(`{"image":"ubuntu:22.04","` + key + `":true}`)
+		out, err := InjectOwner(body, "0xW")
+		if err != nil {
+			t.Fatalf("%s: %v", key, err)
+		}
+
+		var m map[string]any
+		json.Unmarshal(out, &m) //nolint:errcheck
+
+		labels := m["labels"].(map[string]any)
+		if labels[sealedLabel] != "true" {
+			t.Errorf("%s: 0g-sealed label not set — SSH/toolbox would stay open: labels=%v", key, labels)
+		}
+		if _, exists := m[key]; exists {
+			t.Errorf("%s: sealed field (any case) must be stripped from forwarded body", key)
+		}
+	}
+}
+
 func TestInjectOwner_SealedFalse_NoLabel(t *testing.T) {
 	body := []byte(`{"image":"ubuntu:22.04","sealed":false}`)
 	out, err := InjectOwner(body, "0xW")

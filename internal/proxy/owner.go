@@ -57,11 +57,21 @@ func InjectOwner(body []byte, walletAddr string) ([]byte, error) {
 	}
 	labels[ownerLabel] = walletAddr
 
-	// Handle sealed flag: convert to label, strip from body (Daytona doesn't know this field).
-	if sealed, _ := m["sealed"].(bool); sealed {
+	// Handle sealed flag: convert to label, strip from body (Daytona doesn't know
+	// this field). Detection MUST use the same canonical, case-insensitive parse as
+	// extractSealed — the value that drives seal-key/attestation injection in
+	// handleCreate. A case-sensitive map lookup here (m["sealed"]) previously let a
+	// mixed-case {"Sealed":true} inject the seal key while leaving 0g-sealed unset,
+	// so SSH and toolbox stayed open on a sealed workload.
+	if extractSealed(body) {
 		labels[sealedLabel] = "true"
 	}
-	delete(m, "sealed")
+	// Strip every case variant so the field never reaches Daytona.
+	for k := range m {
+		if strings.EqualFold(k, "sealed") {
+			delete(m, k)
+		}
+	}
 
 	// Record image reference for TEE attestation.
 	if img, _ := m["image"].(string); img != "" {
