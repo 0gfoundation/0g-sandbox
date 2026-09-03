@@ -593,11 +593,14 @@ func (h *Handler) handleCreate(c *gin.Context) {
 
 	if result.StatusCode >= 200 && result.StatusCode < 300 {
 		if id := extractID(upstream.Body.Bytes()); id != "" {
-			// Bill the snapshot spec the gate resolved (reqCPU/reqMemGB),
-			// falling back only if Daytona echoed a spec. Depending on the
-			// response echo alone was fragile: if Daytona stops echoing cpu/mem
-			// the session would open at 0 rate and #77 returns silently. The
-			// gate-resolved spec is authoritative and matches the reservation.
+			// Bill the provisioned spec: prefer what Daytona reports in the
+			// create response (the actual provisioned truth), and fall back to
+			// the gate-resolved snapshot spec when the response omits it.
+			// Depending on the response echo ALONE was the bug — if Daytona
+			// stops echoing cpu/mem the session would open at 0 rate and #77
+			// returns silently; the gate-resolved fallback prevents that. Under
+			// snapshot-only the two agree, and #116's clamped release makes any
+			// residual reserve/release asymmetry harmless.
 			cpu, memGB := reqCPU, reqMemGB
 			if rc, rm := extractResources(upstream.Body.Bytes()); rc != 0 || rm != 0 {
 				cpu, memGB = rc, rm

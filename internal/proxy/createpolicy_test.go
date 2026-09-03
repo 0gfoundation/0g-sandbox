@@ -23,6 +23,9 @@ func TestRequireSnapshotCreate(t *testing.T) {
 		`{"snapshot":"x","gpu":1}`,          // custom gpu
 		`{"image":"ubuntu:22.04"}`,          // bare image — the #77 vector
 		`{"snapshot":"x","image":"ubuntu"}`, // image alongside snapshot
+		`{"snapshot":"x","class":"large"}`,  // class size-tier selector
+		`{"snapshot":"x","Class":"large"}`,  // class case variant
+		`{"snapshot":"x","buildInfo":{}}`,   // declarative build path
 		`{"name":"nosnap"}`,                 // no snapshot at all
 		`{}`,                                // empty
 		`{"snapshot":""}`,                   // empty snapshot
