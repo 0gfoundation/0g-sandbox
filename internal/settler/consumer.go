@@ -38,9 +38,14 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 	if p, err := loadPendingTx(ctx, rdb, onchain.ProviderAddress()); err != nil {
 		log.Error("settler: load pending tx failed", zap.Error(err))
 	} else if p != nil {
-		log.Warn("settler: unresolved settlement tx from previous run — resolving before consuming",
-			zap.String("tx", p.TxHash.Hex()), zap.Int("batch", len(p.Vouchers)))
-		resolvePendingTx(ctx, rdb, onchain, queueKey, stopCh, onchain.ProviderAddress(), p, alerter, log)
+		if p.TxHash == (common.Hash{}) {
+			log.Warn("settler: hashless intent record from previous run — reconciling against chain nonces")
+			reconcileIntent(ctx, rdb, onchain, queueKey, onchain.ProviderAddress(), p, log)
+		} else {
+			log.Warn("settler: unresolved settlement tx from previous run — resolving before consuming",
+				zap.String("tx", p.TxHash.Hex()), zap.Int("batch", len(p.Vouchers)))
+			resolvePendingTx(ctx, rdb, onchain, queueKey, stopCh, onchain.ProviderAddress(), p, alerter, log)
+		}
 	}
 
 	// Rotation gate state: throttle the on-chain node check and the warn log
@@ -169,8 +174,21 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 		// to re-queue and re-sign. Past broadcast, the ONLY safe paths are
 		// through resolvePendingTx: re-signing while the tx may still mine
 		// settles the same usage twice.
+		// Intent record BEFORE broadcast: a crash in the instant between the
+		// broadcast returning and the hash being persisted would otherwise
+		// lose the in-flight tx and re-sign on restart (the double-charge
+		// shape again, just a much smaller window). A hashless record is
+		// reconciled at startup against on-chain lastNonce per voucher.
+		intent := pendingTx{Vouchers: vouchers, FirstItem: firstItem}
+		if err := savePendingTx(ctx, rdb, onchain.ProviderAddress(), intent); err != nil {
+			log.Error("settler: persist intent failed; holding batch", zap.Error(err))
+			_ = rdb.LPush(ctx, queueKey, firstItem)
+			time.Sleep(5 * time.Second)
+			continue
+		}
 		tx, err := onchain.SubmitSettleFees(ctx, vouchers)
 		if err != nil {
+			clearPendingTx(ctx, rdb, onchain.ProviderAddress())
 			log.Error("settler: SubmitSettleFees", zap.Error(err))
 			errType := alert.ClassifyChainErr(err)
 			sev := alert.SeverityCritical
@@ -191,7 +209,7 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 			continue
 		}
 		p := pendingTx{TxHash: tx.Hash(), AccountNonce: tx.Nonce(), Vouchers: vouchers, FirstItem: firstItem}
-		if err := savePendingTx(ctx, rdb, onchain.ProviderAddress(), p); err != nil {
+		if err := savePendingTx(ctx, rdb, onchain.ProviderAddress(), p); err != nil { // backfill hash onto the intent
 			// Redis down right after broadcast: resolve in-memory — do NOT
 			// re-queue (the tx is in flight).
 			log.Error("settler: persist pending tx failed; resolving in-memory", zap.Error(err))

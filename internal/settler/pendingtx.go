@@ -14,6 +14,7 @@ import (
 	"github.com/0gfoundation/0g-sandbox/internal/alert"
 	"github.com/0gfoundation/0g-sandbox/internal/chain"
 	"github.com/0gfoundation/0g-sandbox/internal/voucher"
+	"math/big"
 )
 
 // PendingTxKeyFmt persists the settler's single in-flight settlement tx:
@@ -40,6 +41,37 @@ type pendingTx struct {
 type fateResolver interface {
 	ResolveTxFate(ctx context.Context, txHash common.Hash, accountNonce uint64) (chain.TxFate, *types.Receipt, error)
 	SettleStatusesFromReceipt(ctx context.Context, receipt *types.Receipt, vouchers []voucher.SandboxVoucher) ([]chain.SettlementStatus, error)
+	// GetLastNonce reconciles intent records that never got a tx hash: a
+	// voucher whose contract nonce is already <= lastNonce settled on-chain.
+	GetLastNonce(ctx context.Context, user, provider common.Address) (*big.Int, error)
+}
+
+// reconcileIntent handles a pending record with NO tx hash — the crash
+// happened between building the intent and recording the broadcast result, so
+// whether the tx went out is unknown. The vouchers carry their CONTRACT nonces
+// (they were signed before the intent was written), which makes the chain
+// itself the arbiter: nonce consumed → that voucher settled, drop it; nonce
+// unconsumed → it can never settle behind lastNonce, safe to re-queue raw.
+func reconcileIntent(ctx context.Context, rdb *redis.Client, resolver fateResolver, queueKey string, provider common.Address, p *pendingTx, log *zap.Logger) {
+	settled := 0
+	for i := range p.Vouchers {
+		v := &p.Vouchers[i]
+		last, err := resolver.GetLastNonce(ctx, v.User, v.Provider)
+		if err != nil {
+			log.Error("settler: intent reconcile nonce read failed; keeping record for next startup", zap.Error(err))
+			return
+		}
+		if v.Nonce != nil && last.Cmp(v.Nonce) >= 0 {
+			settled++
+		}
+	}
+	if settled == 0 {
+		requeueRaw(ctx, rdb, queueKey, p, log)
+	}
+	log.Warn("settler: reconciled hashless intent record",
+		zap.Int("batch", len(p.Vouchers)), zap.Int("settled_on_chain", settled),
+		zap.Bool("requeued", settled == 0))
+	clearPendingTx(ctx, rdb, provider)
 }
 
 func savePendingTx(ctx context.Context, rdb *redis.Client, provider common.Address, p pendingTx) error {
