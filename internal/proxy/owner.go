@@ -94,12 +94,51 @@ func InjectOwner(body []byte, walletAddr string) ([]byte, error) {
 
 	m["labels"] = labels
 
-	// public=true: Daytona OIDC is not used in 0G; all sandbox management is
-	// controlled via EIP-191 (billing proxy layer). Setting public=true makes
-	// user-defined service ports (e.g. 8080, 9090) reachable via the proxy URL
-	// without an OIDC session. System ports (22222/TERMINAL, 2280/TOOLBOX,
-	// 33333/RECORDING) remain protected by Daytona regardless of this flag.
-	m["public"] = true
+	// Port exposure: private by default, public only on explicit opt-in.
+	//
+	// Marking every sandbox public — the previous behavior — exposed every
+	// non-system port, so anyone who could enumerate a sandbox ID could reach an
+	// unauthenticated service on any port (e.g. an OpenClaw gateway on :3284).
+	// The public flag is now derived, and the caller's own "public" value is
+	// ignored so a bare {"public": true} cannot reopen the hole:
+	//
+	//   - publicPorts given → public; the fork restricts exposure to those ports.
+	//   - sealed, no publicPorts → expose only the attested agent proxy on :8080.
+	//   - otherwise → private.
+	//
+	// Sealed detection uses extractSealed — the same case-insensitive parse that
+	// drives seal-key injection in handleCreate — so a mixed-case {"Sealed":true}
+	// still gets :8080 exposed rather than being treated as private.
+	//
+	// A first-class way to expose a port after create (opt-in UI / API) is a
+	// known gap, tracked as follow-up; for now exposure is chosen at create via
+	// publicPorts. System ports (22222/2280/33333) stay protected regardless.
+	// Normalize case first: keep the exact-case publicPorts value (validated by
+	// ValidatePublicPorts) and delete every other case variant of public /
+	// publicPorts, so no caller-supplied casing survives to Daytona where a
+	// case-insensitive consumer could resurrect the all-ports hole (#80 fixed
+	// the same class for "sealed").
+	var pp any
+	hasPP := false
+	for k, v := range m {
+		if strings.EqualFold(k, "publicPorts") {
+			if k == "publicPorts" && v != nil {
+				pp, hasPP = v, true
+			}
+			delete(m, k)
+		} else if strings.EqualFold(k, "public") {
+			delete(m, k)
+		}
+	}
+	if hasPP {
+		m["public"] = true
+		m["publicPorts"] = pp
+	} else if extractSealed(body) {
+		m["public"] = true
+		m["publicPorts"] = []int{agentPort}
+	} else {
+		m["public"] = false
+	}
 
 	// autoStopInterval=0: disable Daytona's autostop; billing proxy owns shutdown.
 	// autoArchiveInterval=60: fallback safety net — if billing proxy crashes and
