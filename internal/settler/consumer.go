@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"github.com/0gfoundation/0g-sandbox/internal/alert"
+	"github.com/0gfoundation/0g-sandbox/internal/chain"
 	"github.com/0gfoundation/0g-sandbox/internal/config"
 	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
@@ -28,15 +31,57 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 
 	log.Info("settler started", zap.String("queue", queueKey))
 
+	// Startup recovery: a crash between broadcast and receipt leaves a
+	// persisted pending tx. Resolve its fate BEFORE consuming the queue —
+	// consuming first would re-sign the same usage while the old tx may still
+	// mine (double charge).
+	if p, err := loadPendingTx(ctx, rdb, onchain.ProviderAddress()); err != nil {
+		log.Error("settler: load pending tx failed", zap.Error(err))
+	} else if p != nil {
+		if p.TxHash == (common.Hash{}) {
+			log.Warn("settler: hashless intent record from previous run — reconciling against chain nonces")
+			reconcileIntent(ctx, rdb, onchain, queueKey, onchain.ProviderAddress(), p, log)
+		} else {
+			log.Warn("settler: unresolved settlement tx from previous run — resolving before consuming",
+				zap.String("tx", p.TxHash.Hex()), zap.Int("batch", len(p.Vouchers)))
+			resolvePendingTx(ctx, rdb, onchain, queueKey, stopCh, onchain.ProviderAddress(), p, alerter, log)
+		}
+	}
+
 	// Rotation gate state: throttle the on-chain node check and the warn log
 	// so a long not-yet-registered window doesn't spam RPC or logs.
 	var lastNodeCheck time.Time
 	var nodeActive bool
 
+	// Pre-settle sweep throttle. The sweep itself is gas-free (Redis + a
+	// read-only balance call) and O(1) in steady state, so it runs even while
+	// the rotation gate holds submissions — a backlog collapses and unpayable
+	// sandboxes stop during an outage, not after it. lastSweep starts zero so a
+	// cold start with a pre-existing backlog aggregates before the first submit.
+	sweepInterval := time.Duration(cfg.Billing.VoucherIntervalSec) * time.Second
+	if sweepInterval <= 0 {
+		sweepInterval = time.Minute
+	}
+	var lastSweep time.Time
+	// Forced-sweep throttle: while the settler cannot submit (tx failure or
+	// rotation hold), maybeSweep is forced at the same cadence so unpayable
+	// sandboxes are stopped during the outage, not after it. Separate from
+	// lastSweep so a just-run periodic sweep cannot delay the first forced one.
+	var lastForcedSweep time.Time
+	// Balance memo for held users: skip re-splitting a held-only user whose
+	// balance hasn't changed (their sandboxes are stopped, so the partition
+	// couldn't change either — re-sweeping would just churn the held list).
+	lastBal := map[common.Address]*big.Int{}
+
 	for {
 		if ctx.Err() != nil {
 			log.Info("settler stopped")
 			return
+		}
+
+		if time.Since(lastSweep) >= sweepInterval {
+			maybeSweep(ctx, rdb, onchain, queueKey, stopCh, lastBal, log, false)
+			lastSweep = time.Now()
 		}
 
 		// Rotation gate: while our signer is not a registered TappRegistry
@@ -61,6 +106,14 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 			lastNodeCheck = time.Now()
 		}
 		if !nodeActive {
+			// Degraded-mode stop, rotation flavor: submissions are held for as
+			// long as the operator has not run add-node-onchain, and the
+			// periodic sweep's threshold guard leaves small queues dormant —
+			// force the gas-free sweep so unpayable sandboxes stop meanwhile.
+			if time.Since(lastForcedSweep) >= sweepInterval {
+				maybeSweep(ctx, rdb, onchain, queueKey, stopCh, lastBal, log, true)
+				lastForcedSweep = time.Now()
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -129,10 +182,27 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 			continue
 		}
 
-		// Submit to chain
-		statuses, err := onchain.SettleFeesWithTEE(ctx, vouchers)
+		// Submit to chain: broadcast, persist the in-flight tx, then resolve
+		// its fate. A broadcast error means nothing reached the chain — safe
+		// to re-queue and re-sign. Past broadcast, the ONLY safe paths are
+		// through resolvePendingTx: re-signing while the tx may still mine
+		// settles the same usage twice.
+		// Intent record BEFORE broadcast: a crash in the instant between the
+		// broadcast returning and the hash being persisted would otherwise
+		// lose the in-flight tx and re-sign on restart (the double-charge
+		// shape again, just a much smaller window). A hashless record is
+		// reconciled at startup against on-chain lastNonce per voucher.
+		intent := pendingTx{Vouchers: vouchers, FirstItem: firstItem}
+		if err := savePendingTx(ctx, rdb, onchain.ProviderAddress(), intent); err != nil {
+			log.Error("settler: persist intent failed; holding batch", zap.Error(err))
+			_ = rdb.LPush(ctx, queueKey, firstItem)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		tx, err := onchain.SubmitSettleFees(ctx, vouchers)
 		if err != nil {
-			log.Error("settler: SettleFeesWithTEE", zap.Error(err))
+			clearPendingTx(ctx, rdb, onchain.ProviderAddress())
+			log.Error("settler: SubmitSettleFees", zap.Error(err))
 			errType := alert.ClassifyChainErr(err)
 			sev := alert.SeverityCritical
 			if errType == "timeout" || errType == "rpc_unreachable" {
@@ -141,18 +211,53 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 			alerter.Notify(ctx, alert.KindSettlerTxFailure, sev,
 				"SettleFeesWithTEE submission failed",
 				map[string]any{
-					"err":       err.Error(),
-					"err_type":  errType,
-					"batch":     len(vouchers),
+					"err":      err.Error(),
+					"err_type": errType,
+					"batch":    len(vouchers),
 				},
 			)
 			// Re-push first item back (it was already BLPOP'd)
 			_ = rdb.LPush(ctx, queueKey, firstItem)
+			// Degraded-mode stop: the on-chain stop path is unreachable while
+			// we cannot submit — a bounced voucher is what triggers
+			// persistStop, and nothing bounces when nothing settles. Meanwhile
+			// the periodic sweep's threshold guard (qlen > 100) leaves small
+			// queues dormant, so a single user's sandbox runs unbilled for the
+			// whole outage (observed live: 12 minutes on an empty bucket while
+			// the settler wallet was dry). Force the gas-free sweep on every
+			// failed submit, throttled to one per interval: it re-splits each
+			// user's backlog against their on-chain balance, parks the
+			// unpayable part as held debt and stops those sandboxes now.
+			if time.Since(lastForcedSweep) >= sweepInterval {
+				maybeSweep(ctx, rdb, onchain, queueKey, stopCh, lastBal, log, true)
+				lastForcedSweep = time.Now()
+			}
 			time.Sleep(5 * time.Second)
 			continue
 		}
+		p := pendingTx{TxHash: tx.Hash(), AccountNonce: tx.Nonce(), Vouchers: vouchers, FirstItem: firstItem}
+		if err := savePendingTx(ctx, rdb, onchain.ProviderAddress(), p); err != nil { // backfill hash onto the intent
+			// Redis down right after broadcast: resolve in-memory — do NOT
+			// re-queue (the tx is in flight).
+			log.Error("settler: persist pending tx failed; resolving in-memory", zap.Error(err))
+		}
+		statuses := resolvePendingTx(ctx, rdb, onchain, queueKey, stopCh, onchain.ProviderAddress(), &p, alerter, log)
+		if statuses == nil {
+			continue // re-queued (dropped/reverted) or ctx done — nothing settled
+		}
 
-		// Handle results (first item already popped; handler pops the rest)
-		HandleStatuses(ctx, rdb, stopCh, queueKey, firstItem, vouchers, statuses, alerter, log)
+		// Targeted sweep: a user whose settlement just rejected
+		// INSUFFICIENT_BALANCE is out of money NOW — park their remaining
+		// queued vouchers as held debt immediately instead of burning one
+		// nonce per interval until the periodic sweep catches up.
+		broke := map[common.Address]bool{}
+		var brokeUsers []common.Address
+		for i, st := range statuses {
+			if st == chain.StatusInsufficientBalance && !broke[vouchers[i].User] {
+				broke[vouchers[i].User] = true
+				brokeUsers = append(brokeUsers, vouchers[i].User)
+			}
+		}
+		sweepUsers(ctx, rdb, onchain, queueKey, stopCh, brokeUsers, log)
 	}
 }

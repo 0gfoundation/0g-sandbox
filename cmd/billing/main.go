@@ -87,32 +87,7 @@ func main() {
 	if backendAppName == "" {
 		log.Warn("BACKEND_APP_NAME not set — app owner cannot be resolved; only ADMIN_ADDRESSES wallets are admins")
 	}
-	var ownerMu sync.Mutex
-	var ownerCached string
-	var ownerCachedAt time.Time
-	appOwnerFn := func(ctx context.Context) (string, error) {
-		ownerMu.Lock()
-		defer ownerMu.Unlock()
-		if ownerCached != "" && time.Since(ownerCachedAt) < time.Minute {
-			return ownerCached, nil
-		}
-		if backendAppName == "" {
-			return "", fmt.Errorf("BACKEND_APP_NAME not set")
-		}
-		owner, err := onchain.GetAppOwner(ctx, backendAppName)
-		if err != nil {
-			if ownerCached != "" {
-				return ownerCached, nil // serve stale over failing closed
-			}
-			return "", err
-		}
-		if owner == (common.Address{}) {
-			return "", fmt.Errorf("app %q not registered in TappRegistry", backendAppName)
-		}
-		ownerCached = strings.ToLower(owner.Hex())
-		ownerCachedAt = time.Now()
-		return ownerCached, nil
-	}
+	appOwnerFn := newAppOwnerResolver(onchain, backendAppName, appOwnerTTL, appOwnerStaleCap, appOwnerRetryEvery, log)
 	if owner, err := appOwnerFn(ctx); err != nil {
 		log.Warn("app owner not resolvable yet", zap.String("app_id", backendAppName), zap.Error(err))
 	} else {
@@ -237,6 +212,10 @@ func main() {
 	// ── Goroutines ────────────────────────────────────────────────────────────
 	// Recovery must start after stopCh is ready but before settler writes to it.
 	go recoverPendingStops(ctx, rdb, stopCh, log)
+	// settler.Run also runs the pre-settle sweep (issue #69): each interval it
+	// re-splits backlogged users' vouchers (queued + held) against their balance
+	// — affordable prefix aggregates and settles, the rest parks as held debt,
+	// unpayable sandboxes stop. O(1) guards keep steady state untouched.
 	go settler.Run(ctx, cfg, rdb, onchain, signer, stopCh, alerter, log)
 	go billing.RunGenerator(ctx, rdb, billingHandler, log)
 
@@ -252,6 +231,11 @@ func main() {
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
+	// Reject non-canonical paths (dot-segments, duplicate slashes) before any
+	// routing: authorization binds to the :id param while the raw path is
+	// forwarded to Daytona as admin, so a normalizing upstream would otherwise
+	// execute a traversal against a different sandbox than the one authorized.
+	r.Use(proxy.PathTraversalGuard())
 	r.RedirectTrailingSlash = false // prevent 307 redirect on CORS preflight for /sandbox/:id
 	r.Use(gin.Recovery())
 	r.Use(func(c *gin.Context) {
@@ -286,14 +270,14 @@ func main() {
 	// Public providers list — returns known providers with their on-chain service data.
 	r.GET("/api/providers", func(c *gin.Context) {
 		type ProviderInfo struct {
-			Address               string `json:"address"`
-			URL                   string `json:"url"`
-			AppId                 string `json:"app_id"`
-			PricePerCPUPerMin     string `json:"price_per_cpu_per_min"`
-			PricePerCPUPerSec     string `json:"price_per_cpu_per_sec"`
-			PricePerMemGBPerMin   string `json:"price_per_mem_gb_per_min"`
-			PricePerMemGBPerSec   string `json:"price_per_mem_gb_per_sec"`
-			CreateFee             string `json:"create_fee"`
+			Address             string `json:"address"`
+			URL                 string `json:"url"`
+			AppId               string `json:"app_id"`
+			PricePerCPUPerMin   string `json:"price_per_cpu_per_min"`
+			PricePerCPUPerSec   string `json:"price_per_cpu_per_sec"`
+			PricePerMemGBPerMin string `json:"price_per_mem_gb_per_min"`
+			PricePerMemGBPerSec string `json:"price_per_mem_gb_per_sec"`
+			CreateFee           string `json:"create_fee"`
 		}
 		// For now: just the configured provider.  Extend via KNOWN_PROVIDERS in the future.
 		addrs := []string{providerHex}
@@ -491,13 +475,16 @@ func main() {
 	// Public read-only API surface — no wallet signature required.
 	// Anything mounted here should be derivable from public chain RPC.
 	apiPublic := r.Group("/api")
-	api := r.Group("/api", auth.Middleware(rdb))
+	api := r.Group("/api", auth.MiddlewareWithOptions(rdb, auth.Options{
+		ProviderAddress: providerHex,
+		Strict:          cfg.Server.AuthStrict,
+	}))
 	proxyHandler := proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec, providerHex, cfg.Chain.AdminList(), cfg.Server.SSHGatewayHost, rdb, log, cfg.Server.BrokerURL, onchain.PrivateKey(), cfg.Billing.VoucherIntervalSec)
 	proxyHandler.SealedOnly = cfg.Server.SealedOnly
 	proxyHandler.AppOwner = appOwnerFn
 	proxyHandler.RegisterPublic(apiPublic)
 	proxyHandler.Register(api)
-	go runStopHandler(ctx, stopCh, dtona, rdb, log, proxyHandler.BrokerDeregister)
+	go runStopHandler(ctx, stopCh, dtona, rdb, alerter, log, proxyHandler.BrokerDeregister)
 
 	// Admin-only: pull an image from an external registry into the internal registry.
 	// The import runs synchronously (crane.Copy) — may take minutes for large images.
@@ -857,10 +844,29 @@ func recoverPendingStops(ctx context.Context, rdb *redis.Client, stopCh chan<- s
 
 // runStopHandler consumes StopSignals, archives the sandbox (preserving state in
 // object storage so it can be restarted later), and cleans up Redis.
-func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona *daytona.Client, rdb *redis.Client, log *zap.Logger, deregisterBroker func(context.Context, string)) {
+func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona *daytona.Client, rdb *redis.Client, alerter alert.Alerter, log *zap.Logger, deregisterBroker func(context.Context, string)) {
 	for {
 		select {
 		case sig := <-stopCh:
+			// Step 0: skip stale/duplicate kill orders. A backlog of
+			// INSUFFICIENT_BALANCE rejections for the same sandbox (or a marker
+			// recovered on restart after the sandbox was already archived) would
+			// otherwise re-run the ~30s stop→wait→archive round-trip against an
+			// already-terminal sandbox — the "kill storm" of #69. If it is already
+			// archived, just clean up markers and move on.
+			if d := classifySandbox(ctx, dtona, sig.SandboxID); d != dispositionActive {
+				log.Info("stop skipped: sandbox already terminal; cleaning up markers",
+					zap.String("sandbox", sig.SandboxID),
+					zap.String("reason", sig.Reason),
+					zap.Bool("gone", d == dispositionGone),
+				)
+				rdb.Del(ctx, "billing:compute:"+sig.SandboxID) //nolint:errcheck
+				rdb.Del(ctx, "stop:sandbox:"+sig.SandboxID)    //nolint:errcheck
+				if deregisterBroker != nil {
+					deregisterBroker(ctx, sig.SandboxID)
+				}
+				continue
+			}
 			// Daytona requires stopped state before archive.
 			// Step 1: stop (removes container from runner).
 			if err := dtona.StopSandbox(ctx, sig.SandboxID); err != nil {
@@ -880,8 +886,31 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 			}
 			cancel()
 			// Step 3: archive (backup filesystem to MinIO for later restore).
+			// Only tear down billing + retry state once the sandbox is durably in
+			// a terminal archived state. If archive fails and the sandbox is NOT
+			// already archived, PRESERVE stop:sandbox:<id> so recoverPendingStops
+			// retries on the next restart — deleting it here would strand a
+			// still-running sandbox with no billing session (state drift + billing
+			// loss). An already-archived sandbox is an idempotent success, so we
+			// still clean up (avoids a poison-pill that never converges).
 			if err := dtona.ArchiveSandbox(ctx, sig.SandboxID); err != nil {
-				log.Warn("archive sandbox failed (may already be archived)",
+				if classifySandbox(ctx, dtona, sig.SandboxID) == dispositionActive {
+					log.Error("archive sandbox failed; preserving retry + billing state for recovery",
+						zap.String("sandbox", sig.SandboxID),
+						zap.Error(err),
+					)
+					alerter.Notify(ctx, alert.KindArchiveFailure, alert.SeverityCritical,
+						"Sandbox archive failed — retry state preserved, will retry on restart",
+						map[string]any{"sandbox": sig.SandboxID, "reason": sig.Reason, "error": err.Error()},
+					)
+					_ = events.Push(ctx, rdb, events.Event{
+						Type:      events.TypeError,
+						Message:   fmt.Sprintf("Sandbox %s archive failed: %s (retry state preserved)", sig.SandboxID, err.Error()),
+						SandboxID: sig.SandboxID,
+					})
+					continue // leave stop:sandbox:<id> + billing:compute:<id> in place
+				}
+				log.Warn("archive returned error but sandbox is already archived; proceeding to cleanup",
 					zap.String("sandbox", sig.SandboxID),
 					zap.Error(err),
 				)
@@ -903,5 +932,112 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 		case <-ctx.Done():
 			return
 		}
+	}
+}
+
+// sandboxDisposition classifies a sandbox for the stop pipeline.
+type sandboxDisposition int
+
+const (
+	dispositionActive   sandboxDisposition = iota // exists, not archived (or lookup failed — assume active)
+	dispositionArchived                           // terminal: archived
+	dispositionGone                               // terminal: definitive 404 — deleted or never existed
+)
+
+// classifySandbox distinguishes the three outcomes the stop pipeline cares
+// about. A definitive 404 is terminal: preserving the stop marker for a
+// deleted sandbox would re-queue it on every restart forever (stop, wait and
+// archive all fail on a nonexistent id), paging the operator each time.
+// Transient lookup errors classify as active so the preserve-on-failure path
+// keeps the retry state. State comparison is case-insensitive to match the
+// shutdown path and proxy.
+func classifySandbox(ctx context.Context, dtona *daytona.Client, id string) sandboxDisposition {
+	s, err := dtona.GetSandbox(ctx, id)
+	if err != nil {
+		if errors.Is(err, daytona.ErrNotFound) {
+			return dispositionGone
+		}
+		return dispositionActive
+	}
+	if s != nil && strings.EqualFold(s.State, "archived") {
+		return dispositionArchived
+	}
+	return dispositionActive
+}
+
+// appOwnerReader is the slice of the chain client the owner resolver needs.
+type appOwnerReader interface {
+	GetAppOwner(ctx context.Context, appId string) (common.Address, error)
+}
+
+const (
+	// appOwnerTTL is how long a successful owner lookup is trusted. The
+	// resolver's value gates ADMIN checks, so the TTL is also the window in
+	// which an on-chain ownership transfer has not yet propagated — an
+	// ex-owner keeps admin (archive-all, force-stop/delete across tenants)
+	// for at most this long. Keep it short.
+	appOwnerTTL = 15 * time.Second
+	// appOwnerRetryEvery rate-limits probes at the dead RPC during an outage
+	// (negative caching) so post-TTL requests don't serialize behind failing
+	// fetches under the resolver mutex.
+	appOwnerRetryEvery = 5 * time.Second
+	// appOwnerStaleCap bounds how long the LAST GOOD value may be served when
+	// the RPC is failing. Serving stale keeps a flaky RPC from locking the
+	// real owner out mid-incident, but unbounded staleness let a REMOVED
+	// owner keep provider-wide destructive admin for as long as the RPC
+	// stayed degraded. Past the cap the resolver fails closed for the owner
+	// path — static ADMIN_ADDRESSES wallets are unaffected.
+	appOwnerStaleCap = 10 * time.Minute
+)
+
+// newAppOwnerResolver returns a TTL-cached resolver of the appId's TappRegistry
+// owner with bounded stale-serving (see the constants above for the exact
+// trust windows — the returned value is an ADMIN identity).
+func newAppOwnerResolver(chainReader appOwnerReader, backendAppName string, ttl, staleCap, retryEvery time.Duration, log *zap.Logger) func(ctx context.Context) (string, error) {
+	var mu sync.Mutex
+	var cached string
+	var fetchedAt time.Time
+	var lastErr error
+	var lastTry time.Time
+	return func(ctx context.Context) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if cached != "" && time.Since(fetchedAt) < ttl {
+			return cached, nil
+		}
+		if backendAppName == "" {
+			return "", fmt.Errorf("BACKEND_APP_NAME not set")
+		}
+		// Negative caching: during an RPC outage every post-TTL request would
+		// otherwise run its own failing (up to caller-timeout) fetch,
+		// serialized under this mutex — every withOwnerOrAdmin route queueing
+		// behind a lock draining at one request per timeout. Reuse the last
+		// failure for a short window so at most one probe per interval hits
+		// the dead RPC; the stale/fail-closed decision below is unchanged.
+		if lastErr != nil && time.Since(lastTry) < retryEvery {
+			if cached != "" && time.Since(fetchedAt) < staleCap {
+				return cached, nil
+			}
+			return "", lastErr
+		}
+		owner, err := chainReader.GetAppOwner(ctx, backendAppName)
+		lastTry = time.Now()
+		lastErr = err
+		if err != nil {
+			if cached != "" && time.Since(fetchedAt) < staleCap {
+				return cached, nil // bounded stale-over-fail-closed
+			}
+			if cached != "" {
+				log.Error("app owner lookup failing beyond stale cap — owner-based admin fails closed until RPC recovers (static ADMIN_ADDRESSES unaffected)",
+					zap.Duration("stale_for", time.Since(fetchedAt)), zap.Error(err))
+			}
+			return "", err
+		}
+		if owner == (common.Address{}) {
+			return "", fmt.Errorf("app %q not registered in TappRegistry", backendAppName)
+		}
+		cached = strings.ToLower(owner.Hex())
+		fetchedAt = time.Now()
+		return cached, nil
 	}
 }

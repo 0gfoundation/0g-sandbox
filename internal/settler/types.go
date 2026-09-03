@@ -2,10 +2,11 @@ package settler
 
 import (
 	"context"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 
-	"github.com/0gfoundation/0g-sandbox/internal/chain"
 	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
 
@@ -19,7 +20,12 @@ type StopSignal struct {
 // Satisfied by *chain.Client; decoupled here so the settler can be tested
 // without a live RPC connection.
 type ChainClient interface {
-	SettleFeesWithTEE(ctx context.Context, vouchers []voucher.SandboxVoucher) ([]chain.SettlementStatus, error)
+	// SubmitSettleFees broadcasts without waiting; the settler persists the
+	// returned tx before its fate is known (see PendingTxKeyFmt) so a
+	// WaitMined failure or crash can never lead to re-signing usage that the
+	// original tx later settles (double charge).
+	SubmitSettleFees(ctx context.Context, vouchers []voucher.SandboxVoucher) (*types.Transaction, error)
+	fateResolver
 	// ProviderAddress is this deployment's provider identity (= the TEE
 	// signer address); it keys the voucher queue the settler drains.
 	ProviderAddress() common.Address
@@ -30,6 +36,9 @@ type ChainClient interface {
 	// operator runs add-node-onchain — holding them avoids burning gas and
 	// dead-lettering real revenue during that window.
 	IsLocalTEEActiveNode(ctx context.Context) (bool, error)
+	// GetBalanceBatch is the read-only balance call the pre-settle sweep uses
+	// to split a backlog into an affordable aggregate + held debt (no gas).
+	GetBalanceBatch(ctx context.Context, users []common.Address, provider common.Address) ([]*big.Int, error)
 }
 
 // NonceSigner assigns a monotone nonce and cryptographically signs a voucher

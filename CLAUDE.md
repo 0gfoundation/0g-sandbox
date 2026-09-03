@@ -166,20 +166,31 @@ clients can pre-check.
 - `go build -tags sealdebug`: `sealed: true` → TEE attestation injected but SSH/toolbox remain open
 - Dockerfile: `--build-arg BUILD_TAGS=sealdebug`
 
-### `public: true` for All Sandboxes
+### Port Exposure: Private by Default, Public on Opt-In
 
-`InjectOwner` always injects `"public": true` into every sandbox create request. Daytona OIDC
-is not used in 0G — sandbox management is controlled via EIP-191 (billing proxy). With
-`public: true`, user-defined service ports (e.g. 8080, 9090) are accessible via the Daytona
-proxy URL without an OIDC session. System ports (22222/TERMINAL, 2280/TOOLBOX, 33333/RECORDING)
-remain protected by Daytona regardless of this flag.
+`InjectOwner` derives the sandbox's `public` flag from the create request — it does
+**not** blanket-expose every sandbox. Marking every sandbox public — the previous behavior
+— exposed every non-system port, so anyone who could enumerate a sandbox ID could reach an
+unauthenticated service on any port (e.g. an OpenClaw gateway on :3284). The caller's own
+`public` value is ignored (opting in is via `publicPorts`):
+
+- **`publicPorts` given** → `public: true`; the fork restricts exposure to exactly those ports.
+- **sealed, no `publicPorts`** → `public: true` with `publicPorts` defaulted to `[8080]`, so
+  the attested agent-fronting proxy stays reachable but no other port is exposed.
+- **otherwise** → `public: false` (private).
+
+System ports (22222/TERMINAL, 2280/TOOLBOX, 33333/RECORDING) remain protected regardless.
+
+A first-class way to expose a port (opt-in UI / post-create API) is a **known missing
+feature**, tracked as follow-up and to be built next; for now exposure is chosen at create
+time via `publicPorts` and is immutable afterward.
 
 **Proxy URL format:** `http://<port>-<sandboxId>.<PROXY_DOMAIN>/<path>`
 
 **`publicPorts` (per-port public preview)** — a create request may include
 `"publicPorts": [8080, 3000]`: only listed ports are publicly reachable; all other
 ports fall back to Daytona's private-sandbox auth (owner preview tokens still work).
-Omit for the default all-ports-public behavior. Requires the 0g-daytona fork images
+Omit to keep every user port private. Requires the 0g-daytona fork images
 (compose defaults to them via `REGISTRY_PREFIX`); against stock Daytona images
 the billing proxy rejects such creates with 502 instead of silently ignoring the
 restriction. Rules: max 16 ports, system ports (22222/2280/33333) rejected, immutable
@@ -274,6 +285,7 @@ The server starts on port 8080 (`PORT` env var) and exposes:
 - `GET /api/registry/images` — list images in internal registry
 
 **Authenticated (EIP-191 wallet signature):**
+- `GET /api/balance` — caller's spendable balance as the gates compute it: on-chain balance, reservations, outstanding held debt, available
 - `POST /api/sandbox` — create sandbox (billing: create-fee voucher)
 - `GET /api/sandbox` — list sandboxes (filtered to caller's own)
 - `GET /api/sandbox/paginated` — paginated list

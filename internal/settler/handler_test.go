@@ -2,17 +2,21 @@ package settler
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"github.com/0gfoundation/0g-sandbox/internal/alert"
+	"github.com/0gfoundation/0g-sandbox/internal/billing"
 	"github.com/0gfoundation/0g-sandbox/internal/chain"
 	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
@@ -342,7 +346,9 @@ func TestPersistStop_WritesKeyAndSignals(t *testing.T) {
 	stopCh := make(chan StopSignal, 2)
 	ctx := context.Background()
 
-	persistStop(ctx, rdb, stopCh, "sb-direct", "insufficient_balance", zap.NewNop())
+	if err := persistStop(ctx, rdb, stopCh, "sb-direct", "insufficient_balance", zap.NewNop()); err != nil {
+		t.Fatalf("persistStop: unexpected error: %v", err)
+	}
 
 	val, err := rdb.Get(ctx, "stop:sandbox:sb-direct").Result()
 	if err != nil || val != "insufficient_balance" {
@@ -385,4 +391,123 @@ func TestHandleStatuses_DLQEntry_IsValidVoucher(t *testing.T) {
 	if got.Nonce.Int64() != 42 {
 		t.Errorf("DLQ Nonce: got %d want 42", got.Nonce.Int64())
 	}
+}
+
+// NOT_ACKNOWLEDGED rejects BEFORE the contract consumes the nonce — the
+// revenue is collectable once the user acknowledges. The voucher must be
+// parked in the held list (nonce/signature cleared), not dropped with the pop.
+func TestHandleStatuses_NotAcknowledged_ParksVoucher(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	stopCh := make(chan StopSignal, 4)
+
+	v := voucher.SandboxVoucher{
+		SandboxID: "sb-nack",
+		User:      common.HexToAddress("0xAAA"),
+		Provider:  common.HexToAddress("0xBBB"),
+		TotalFee:  big.NewInt(777),
+		Nonce:     big.NewInt(42),
+		Signature: []byte{1, 2, 3},
+	}
+	HandleStatuses(context.Background(), rdb, stopCh, "q", "raw", []voucher.SandboxVoucher{v},
+		[]chain.SettlementStatus{chain.StatusNotAcknowledged}, alert.Nop{}, zap.NewNop())
+
+	heldKey := fmt.Sprintf(voucher.VoucherHeldKeyFmt,
+		strings.ToLower(v.User.Hex()), strings.ToLower(v.Provider.Hex()))
+	items, _ := rdb.LRange(context.Background(), heldKey, 0, -1).Result()
+	if len(items) != 1 {
+		t.Fatalf("not-acked voucher must be parked in held, got %d items", len(items))
+	}
+	var parked voucher.SandboxVoucher
+	if err := json.Unmarshal([]byte(items[0]), &parked); err != nil {
+		t.Fatal(err)
+	}
+	if parked.TotalFee.String() != "777" {
+		t.Errorf("parked fee %s want 777", parked.TotalFee)
+	}
+	if parked.Nonce != nil || parked.Signature != nil {
+		t.Error("settle-attempt artifacts (nonce/signature) must be cleared before parking")
+	}
+	// held-users index maintained → sweep will revisit after ack + balance change
+	users, _ := voucher.HeldUsers(context.Background(), rdb, v.Provider)
+	if len(users) != 1 {
+		t.Errorf("held-users index: %v", users)
+	}
+}
+
+// Finding #30 (#79) self-heal: INVALID_NONCE means the local counter disagrees
+// with the chain. The counter must be deleted so the NEXT voucher reseeds from
+// on-chain lastNonce — otherwise every subsequent voucher for the pair keeps
+// getting rejected and discarded.
+func TestHandleStatuses_InvalidNonce_ResetsCounter(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	stopCh := make(chan StopSignal, 1)
+
+	v := voucher.SandboxVoucher{
+		SandboxID: "sb-n", User: common.HexToAddress("0xAAA"), Provider: common.HexToAddress("0xBBB"),
+		TotalFee: big.NewInt(9), Nonce: big.NewInt(1),
+	}
+	nonceKey := fmt.Sprintf(voucher.NonceKeyFmt,
+		strings.ToLower(v.User.Hex()), strings.ToLower(v.Provider.Hex()))
+	rdb.Set(context.Background(), nonceKey, "1", 0) // the stale counter that produced nonce=1
+
+	HandleStatuses(context.Background(), rdb, stopCh, "q", "raw", []voucher.SandboxVoucher{v},
+		[]chain.SettlementStatus{chain.StatusInvalidNonce}, alert.Nop{}, zap.NewNop())
+
+	if mr.Exists(nonceKey) {
+		t.Fatal("INVALID_NONCE must delete the stale counter so the next voucher reseeds from chain")
+	}
+}
+
+// Review #117 nit: the self-heal's key must be the SAME one the signer creates,
+// or the Del silently no-ops. Seed a counter via the signer's own IncrNonce,
+// then feed the settler an INVALID_NONCE voucher for that pair and assert the
+// signer-created key is gone — pinning the cross-package key-derivation coupling
+// as a contract, not a coincidence.
+func TestHandleStatuses_InvalidNonce_DeletesSignerCreatedKey(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
+	owner := "0xAaBbCcDdEeFf00112233445566778899aAbBcCdD"
+	prov := "0x00112233445566778899aAbBcCdDeEfF00112233"
+
+	// The signer derives and creates the counter key from its own logic.
+	sgn := billing.NewSigner(testSignerKey(t), big.NewInt(1),
+		common.HexToAddress("0x0000000000000000000000000000000000000abc"),
+		common.HexToAddress(prov), rdb, &zeroNonceReader{}, zap.NewNop())
+	if _, err := sgn.IncrNonce(context.Background(), owner, prov); err != nil {
+		t.Fatalf("seed via signer: %v", err)
+	}
+	signerKey := fmt.Sprintf(voucher.NonceKeyFmt, strings.ToLower(owner), strings.ToLower(prov))
+	if !mr.Exists(signerKey) {
+		t.Fatalf("precondition: signer must have created %s", signerKey)
+	}
+
+	// The settler processes an INVALID_NONCE voucher for the SAME pair.
+	v := voucher.SandboxVoucher{
+		SandboxID: "sb", User: common.HexToAddress(owner), Provider: common.HexToAddress(prov),
+		TotalFee: big.NewInt(1), Nonce: big.NewInt(1),
+	}
+	HandleStatuses(context.Background(), rdb, make(chan StopSignal, 1), "q", "raw",
+		[]voucher.SandboxVoucher{v}, []chain.SettlementStatus{chain.StatusInvalidNonce}, alert.Nop{}, zap.NewNop())
+
+	if mr.Exists(signerKey) {
+		t.Fatal("settler must delete the exact key the signer created (key-derivation contract broken)")
+	}
+}
+
+type zeroNonceReader struct{}
+
+func (zeroNonceReader) GetLastNonce(context.Context, common.Address, common.Address) (*big.Int, error) {
+	return big.NewInt(0), nil
+}
+
+func testSignerKey(t *testing.T) *ecdsa.PrivateKey {
+	t.Helper()
+	k, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
 }

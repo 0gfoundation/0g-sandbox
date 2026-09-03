@@ -18,6 +18,19 @@ import (
 // failure.
 var ErrTagSharesManifest = errors.New("tag shares manifest with another tag")
 
+// PinRef rewrites imageRef to its digest-pinned form "repo@<digest>" —
+// content-addressed, so the reference cannot be re-pointed after attestation.
+// The tag (mutable) is dropped; a ref that is already digest-pinned rewrites
+// to the same value. Sealed creates forward THIS form to Daytona so the image
+// the runner pulls is byte-identical to the one the TEE attested.
+func PinRef(imageRef, digest string) (string, error) {
+	ref, err := name.ParseReference(imageRef, name.Insecure)
+	if err != nil {
+		return "", fmt.Errorf("parse image ref %q: %w", imageRef, err)
+	}
+	return ref.Context().Name() + "@" + digest, nil
+}
+
 // GetDigest fetches the content digest (e.g. "sha256:abc...") for imageRef.
 //
 // Registries whose host starts with "registry:" or "localhost:" are contacted

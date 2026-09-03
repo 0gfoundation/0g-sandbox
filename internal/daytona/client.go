@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -68,12 +69,20 @@ func (c *Client) do(ctx context.Context, method, path string, body any) (*http.R
 	return c.http.Do(req)
 }
 
+// ErrNotFound reports a definitive 404 from Daytona: the sandbox does not
+// exist (deleted, or never existed). Callers use errors.Is to distinguish
+// "gone for good" from transient lookup failures.
+var ErrNotFound = errors.New("sandbox not found")
+
 func (c *Client) GetSandbox(ctx context.Context, id string) (*Sandbox, error) {
 	resp, err := c.do(ctx, http.MethodGet, "/api/sandbox/"+id, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("daytona GetSandbox %s: %w", id, ErrNotFound)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("daytona GetSandbox %s: status %d", id, resp.StatusCode)
 	}

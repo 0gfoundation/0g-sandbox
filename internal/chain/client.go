@@ -3,6 +3,7 @@ package chain
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"math/big"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
@@ -61,8 +63,8 @@ type Client struct {
 	providerAddr common.Address    // = TEE key address: provider IS the TEE signer (v2)
 
 	blockTimeMu  sync.Mutex
-	blockTimeSec float64    // cached avg block time in seconds
-	blockTimeAt  time.Time  // when the cache was populated
+	blockTimeSec float64   // cached avg block time in seconds
+	blockTimeAt  time.Time // when the cache was populated
 }
 
 func NewClient(cfg *config.Config) (*Client, error) {
@@ -250,23 +252,75 @@ var voucherSettledTopic = crypto.Keccak256Hash([]byte("VoucherSettled(address,ad
 //     INVALID_NONCE, INVALID_SIGNATURE — all return before the nonce commit),
 //     call PreviewSettlementResults with the original vouchers.  Because the
 //     nonce was never committed, the view function still evaluates correctly.
-func (c *Client) SettleFeesWithTEE(ctx context.Context, vouchers []voucher.SandboxVoucher) ([]SettlementStatus, error) {
+//
+// SubmitSettleFees broadcasts the settlement tx and returns it WITHOUT
+// waiting for it to mine. Split from SettleFeesWithTEE so the settler can
+// persist the in-flight tx before its fate is known: re-signing the same
+// vouchers with fresh nonces while the original tx may still mine is a
+// double-charge (the contract dedupes only by strictly-increasing nonce, not
+// by usageHash).
+func (c *Client) SubmitSettleFees(ctx context.Context, vouchers []voucher.SandboxVoucher) (*types.Transaction, error) {
 	opts, err := c.transactOpts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("build tx opts: %w", err)
 	}
-
 	tx, err := c.contract.SettleFeesWithTEE(opts, toContractVouchers(vouchers))
 	if err != nil {
 		return nil, fmt.Errorf("SettleFeesWithTEE tx: %w", err)
 	}
+	return tx, nil
+}
 
-	receipt, err := bind.WaitMined(ctx, c.eth, tx)
-	if err != nil {
-		return nil, fmt.Errorf("wait mined: %w", err)
+// TxFate resolution values for a broadcast tx whose receipt is not yet known.
+type TxFate int
+
+const (
+	TxPending TxFate = iota // still in flight — keep waiting
+	TxMined                 // receipt available
+	TxDropped               // provably gone: account nonce advanced past it with no receipt
+)
+
+// ResolveTxFate reports the definitive state of a broadcast tx. The settler
+// never issues replacement txs, so "confirmed account nonce > tx nonce and no
+// receipt" is proof the tx was dropped and can never mine.
+func (c *Client) ResolveTxFate(ctx context.Context, txHash common.Hash, accountNonce uint64) (TxFate, *types.Receipt, error) {
+	receipt, err := c.eth.TransactionReceipt(ctx, txHash)
+	if err == nil && receipt != nil {
+		return TxMined, receipt, nil
 	}
+	confirmed, nerr := c.eth.NonceAt(ctx, crypto.PubkeyToAddress(c.teeKey.PublicKey), nil)
+	if nerr != nil {
+		return TxPending, nil, nerr
+	}
+	if confirmed > accountNonce {
+		// The account nonce advanced past this tx with no receipt. That is
+		// usually a drop — but receipt lookup and NonceAt are two RPCs, and an
+		// LB-fronted or mid-import node can serve a nonce that reflects a block
+		// whose receipt the first call missed. Re-fetch the receipt once,
+		// fresh, before declaring dropped: if the tx actually mined, this
+		// catches it and avoids re-signing settled usage (double charge). The
+		// caller additionally requires two consecutive dropped observations.
+		if r2, e2 := c.eth.TransactionReceipt(ctx, txHash); e2 == nil && r2 != nil {
+			return TxMined, r2, nil
+		}
+		return TxDropped, nil, nil
+	}
+	return TxPending, nil, nil
+}
+
+// SettleStatusesFromReceipt extracts per-voucher settlement statuses from a
+// mined settlement tx's receipt (VoucherSettled events + preview fallback for
+// vouchers that emitted none). Receipt with status 0 (whole tx reverted) means
+// NO voucher was consumed — callers may safely re-sign and resubmit.
+// ErrTxReverted marks a settlement tx that mined with status 0 — the whole tx
+// reverted, so NO voucher was consumed on-chain and re-signing is safe. It is
+// deliberately distinct from a status-extraction (preview) failure on a MINED
+// tx, where events already settled and re-signing would double-charge.
+var ErrTxReverted = errors.New("settlement tx reverted")
+
+func (c *Client) SettleStatusesFromReceipt(ctx context.Context, receipt *types.Receipt, vouchers []voucher.SandboxVoucher) ([]SettlementStatus, error) {
 	if receipt.Status == 0 {
-		return nil, fmt.Errorf("tx reverted: %s", tx.Hash().Hex())
+		return nil, fmt.Errorf("%w: %s", ErrTxReverted, receipt.TxHash.Hex())
 	}
 
 	// Step 1: parse VoucherSettled events → (user, nonce) → status.
@@ -312,6 +366,22 @@ func (c *Client) SettleFeesWithTEE(ctx context.Context, vouchers []voucher.Sandb
 	}
 
 	return statuses, nil
+}
+
+// SettleFeesWithTEE submits a settlement batch and waits for it to mine —
+// the compose of SubmitSettleFees + WaitMined + SettleStatusesFromReceipt.
+// Callers that must survive a WaitMined failure without double-charging
+// (the settler) use the split pieces and persist the in-flight tx instead.
+func (c *Client) SettleFeesWithTEE(ctx context.Context, vouchers []voucher.SandboxVoucher) ([]SettlementStatus, error) {
+	tx, err := c.SubmitSettleFees(ctx, vouchers)
+	if err != nil {
+		return nil, err
+	}
+	receipt, err := bind.WaitMined(ctx, c.eth, tx)
+	if err != nil {
+		return nil, fmt.Errorf("wait mined: %w", err)
+	}
+	return c.SettleStatusesFromReceipt(ctx, receipt, vouchers)
 }
 
 // PreviewSettlementResults calls the view function to check expected statuses

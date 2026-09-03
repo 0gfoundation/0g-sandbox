@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
@@ -29,36 +31,62 @@ func newTestRedis(t *testing.T) *redis.Client {
 // mockDaytona returns a test HTTP server that records which sandbox IDs were
 // stopped, and optionally injects failures for specific IDs.
 type mockDaytona struct {
-	mu      sync.Mutex
-	stopped []string
-	failIDs map[string]bool
-	srv     *httptest.Server
+	mu             sync.Mutex
+	stopped        []string
+	failIDs        map[string]bool // POST /stop → 500
+	archiveFailIDs map[string]bool // POST /archive → 500
+	archived       map[string]bool // set once archive succeeds; drives GET state
+	goneIDs        map[string]bool // GET → 404 (deleted / never existed)
+	srv            *httptest.Server
 }
 
 func newMockDaytona(t *testing.T) *mockDaytona {
 	t.Helper()
-	m := &mockDaytona{failIDs: make(map[string]bool)}
+	m := &mockDaytona{
+		failIDs:        make(map[string]bool),
+		archiveFailIDs: make(map[string]bool),
+		archived:       make(map[string]bool),
+		goneIDs:        make(map[string]bool),
+	}
 	m.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Only handle POST /api/sandbox/{id}/stop
-		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/stop") {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		// Extract ID: /api/sandbox/{id}/stop → parts[3]
-		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-		if len(parts) < 4 {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/") // ["api","sandbox",id,(action)]
+		if len(parts) < 3 {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		id := parts[2] // ["api","sandbox",id,"stop"]
+		id := parts[2]
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		if m.failIDs[id] {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
+
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/stop"):
+			if m.failIDs[id] {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			m.stopped = append(m.stopped, id)
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/archive"):
+			if m.archiveFailIDs[id] {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			m.archived[id] = true
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && len(parts) == 3:
+			// GetSandbox — used by WaitStopped and the disposition check.
+			if m.goneIDs[id] {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			state := "stopped"
+			if m.archived[id] {
+				state = "archived"
+			}
+			w.Write([]byte(`{"id":"` + id + `","state":"` + state + `"}`)) //nolint:errcheck
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
-		m.stopped = append(m.stopped, id)
-		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(m.srv.Close)
 	return m
@@ -218,10 +246,10 @@ func TestRunStopHandler_StopsAndCleansRedis(t *testing.T) {
 
 	// Pre-populate both Redis keys that the handler should delete
 	bg := context.Background()
-	rdb.Set(bg, "billing:compute:sb-1", "session", 0)          //nolint:errcheck
+	rdb.Set(bg, "billing:compute:sb-1", "session", 0)           //nolint:errcheck
 	rdb.Set(bg, "stop:sandbox:sb-1", "insufficient_balance", 0) //nolint:errcheck
 
-	go runStopHandler(ctx, stopCh, mock.client(), rdb, zap.NewNop(), nil)
+	go runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil)
 
 	stopCh <- settler.StopSignal{SandboxID: "sb-1", Reason: "insufficient_balance"}
 
@@ -244,10 +272,10 @@ func TestRunStopHandler_DaytonaError_StillCleansRedis(t *testing.T) {
 	stopCh := make(chan settler.StopSignal, 4)
 
 	bg := context.Background()
-	rdb.Set(bg, "billing:compute:sb-err", "session", 0)    //nolint:errcheck
+	rdb.Set(bg, "billing:compute:sb-err", "session", 0)       //nolint:errcheck
 	rdb.Set(bg, "stop:sandbox:sb-err", "not_acknowledged", 0) //nolint:errcheck
 
-	go runStopHandler(ctx, stopCh, mock.client(), rdb, zap.NewNop(), nil)
+	go runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil)
 
 	stopCh <- settler.StopSignal{SandboxID: "sb-err", Reason: "not_acknowledged"}
 
@@ -268,7 +296,7 @@ func TestRunStopHandler_MultipleSignals(t *testing.T) {
 		rdb.Set(bg, "stop:sandbox:"+id, "insufficient_balance", 0) //nolint:errcheck
 	}
 
-	go runStopHandler(ctx, stopCh, mock.client(), rdb, zap.NewNop(), nil)
+	go runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil)
 
 	for _, id := range []string{"sb-x", "sb-y", "sb-z"} {
 		stopCh <- settler.StopSignal{SandboxID: id, Reason: "insufficient_balance"}
@@ -296,7 +324,7 @@ func TestRunStopHandler_ContextCancel_Exits(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		runStopHandler(ctx, stopCh, mock.client(), rdb, zap.NewNop(), nil)
+		runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil)
 		close(done)
 	}()
 
@@ -307,5 +335,106 @@ func TestRunStopHandler_ContextCancel_Exits(t *testing.T) {
 		// Good
 	case <-time.After(500 * time.Millisecond):
 		t.Error("runStopHandler did not exit after context cancellation")
+	}
+}
+
+// ── newAppOwnerResolver ───────────────────────────────────────────────────────
+
+type mockOwnerReader struct {
+	mu    sync.Mutex
+	owner common.Address
+	err   error
+	calls int
+}
+
+func (m *mockOwnerReader) GetAppOwner(context.Context, string) (common.Address, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls++
+	return m.owner, m.err
+}
+
+// Finding #24: stale-on-error must be BOUNDED. A removed owner kept
+// provider-wide destructive admin for as long as the RPC stayed degraded; past
+// the cap the resolver must fail closed for the owner path (static
+// ADMIN_ADDRESSES wallets are unaffected).
+func TestAppOwnerResolver_StaleServingIsBounded(t *testing.T) {
+	reader := &mockOwnerReader{owner: common.HexToAddress("0xAAA")}
+	want := strings.ToLower(common.HexToAddress("0xAAA").Hex())
+	ttl := 10 * time.Millisecond
+	cap := 60 * time.Millisecond
+	fn := newAppOwnerResolver(reader, "app", ttl, cap, time.Millisecond, zap.NewNop())
+
+	if got, err := fn(context.Background()); err != nil || got != want {
+		t.Fatalf("initial resolve: %q err=%v", got, err)
+	}
+
+	// RPC starts failing. Within the stale cap the last good value is served.
+	reader.mu.Lock()
+	reader.err = fmt.Errorf("rpc down")
+	reader.mu.Unlock()
+	time.Sleep(2 * ttl) // past TTL, well within cap
+	if got, err := fn(context.Background()); err != nil || got != want {
+		t.Fatalf("within stale cap: want stale value, got %q err=%v", got, err)
+	}
+
+	// Past the cap: fail closed.
+	time.Sleep(cap)
+	if _, err := fn(context.Background()); err == nil {
+		t.Fatal("past stale cap the resolver must fail closed, got nil error")
+	}
+
+	// RPC recovers with a NEW owner: fresh value served, old owner gone.
+	// (Wait out the negative-cache retry window first.)
+	reader.mu.Lock()
+	reader.err = nil
+	reader.owner = common.HexToAddress("0xBBB")
+	reader.mu.Unlock()
+	time.Sleep(3 * time.Millisecond)
+	if got, err := fn(context.Background()); err != nil || got != strings.ToLower(common.HexToAddress("0xBBB").Hex()) {
+		t.Fatalf("after recovery: %q err=%v", got, err)
+	}
+}
+
+// TTL caching: no chain call within the TTL, refresh after it expires.
+func TestAppOwnerResolver_TTL(t *testing.T) {
+	reader := &mockOwnerReader{owner: common.HexToAddress("0xAAA")}
+	fn := newAppOwnerResolver(reader, "app", 30*time.Millisecond, time.Minute, time.Millisecond, zap.NewNop())
+	fn(context.Background()) //nolint:errcheck
+	fn(context.Background()) //nolint:errcheck
+	if reader.calls != 1 {
+		t.Fatalf("within TTL want 1 chain call, got %d", reader.calls)
+	}
+	time.Sleep(40 * time.Millisecond)
+	fn(context.Background()) //nolint:errcheck
+	if reader.calls != 2 {
+		t.Fatalf("after TTL want refresh (2 calls), got %d", reader.calls)
+	}
+}
+
+// Review F1 (#102): during an outage, post-TTL requests must not each run
+// their own failing RPC fetch under the mutex — the failure is negatively
+// cached so at most one probe per window hits the dead RPC.
+func TestAppOwnerResolver_NegativeCachingUnderOutage(t *testing.T) {
+	reader := &mockOwnerReader{owner: common.HexToAddress("0xAAA")}
+	fn := newAppOwnerResolver(reader, "app", time.Millisecond, time.Minute, time.Second, zap.NewNop())
+	fn(context.Background()) //nolint:errcheck  — prime the cache (1 call)
+
+	reader.mu.Lock()
+	reader.err = fmt.Errorf("rpc down")
+	reader.mu.Unlock()
+	time.Sleep(5 * time.Millisecond) // past TTL
+
+	before := reader.calls
+	for i := 0; i < 50; i++ {
+		if _, err := fn(context.Background()); err != nil {
+			t.Fatalf("stale value expected within cap, got err %v", err)
+		}
+	}
+	reader.mu.Lock()
+	probes := reader.calls - before
+	reader.mu.Unlock()
+	if probes > 2 {
+		t.Fatalf("50 requests during outage caused %d RPC probes; negative caching should cap this at ~1", probes)
 	}
 }

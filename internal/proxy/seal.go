@@ -109,7 +109,7 @@ func InjectSeal(body []byte, teeKey *ecdsa.PrivateKey, imageHash string) ([]byte
 	if env == nil {
 		env = make(map[string]any)
 	}
-	env["SANDBOX_SEAL_KEY"] = privHex
+	env[sealKeyEnv] = privHex
 	env["SANDBOX_SEAL_ATTESTATION"] = string(attestationJSON)
 
 	// SANDBOX_PROXY_DOMAIN lets bootstrap inside the sealed container
@@ -134,7 +134,7 @@ func stripSealKey(body []byte) ([]byte, error) {
 		return nil, err
 	}
 	if env, ok := m["env"].(map[string]any); ok {
-		delete(env, "SANDBOX_SEAL_KEY")
+		delete(env, sealKeyEnv)
 	}
 	return json.Marshal(m)
 }

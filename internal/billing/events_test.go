@@ -50,12 +50,12 @@ func (m *mockSigner) count() int {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const (
-	testProvider     = "0x1111111111111111111111111111111111111111"
-	testOwner        = "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-	testSandbox      = "sb-events-001"
-	pricePerSec      = int64(100)  // 100 neuron/sec
-	createFeeVal     = int64(500)  // 500 neuron flat create fee
-	testIntervalSec  = int64(60)   // 60-second billing interval
+	testProvider    = "0x1111111111111111111111111111111111111111"
+	testOwner       = "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	testSandbox     = "sb-events-001"
+	pricePerSec     = int64(100) // 100 neuron/sec
+	createFeeVal    = int64(500) // 500 neuron flat create fee
+	testIntervalSec = int64(60)  // 60-second billing interval
 )
 
 func newTestHandler(t *testing.T, ms *mockSigner) (*EventHandler, func(sandboxID string) (*Session, error)) {
@@ -123,11 +123,11 @@ func TestOnCreate_EmitsTwoVouchers(t *testing.T) {
 	}
 }
 
-func TestOnCreate_SignEnqueueError_NoSessionCreated(t *testing.T) {
+// A signer error inside OnCreate must not panic. (Session-still-opened is
+// asserted by TestOnCreate_EnqueueFailure_StillOpensSession — finding #2.)
+func TestOnCreate_SignEnqueueError_NoPanic(t *testing.T) {
 	ms := &mockSigner{enqErr: errors.New("redis down")}
 	h, _ := newTestHandler(t, ms)
-
-	// Should not panic
 	h.OnCreate(context.Background(), testSandbox, testOwner, 1, 1)
 }
 
@@ -317,5 +317,34 @@ func TestOnArchive_DeletesSessionNoVoucher(t *testing.T) {
 	sess, _ := GetSession(ctx, rdb, testSandbox)
 	if sess != nil {
 		t.Error("session should be deleted after OnArchive")
+	}
+}
+
+// Finding #2 (live-fire on #109): a voucher-enqueue failure inside OnCreate must
+// NOT skip session creation. Pre-fix it returned early, leaving the sandbox
+// unbilled (no session → the generator never ticks → catch-up can't help). Now
+// the session is opened regardless, with NextVoucherAt defaulting to now so the
+// generator bills the first period on its next tick.
+func TestOnCreate_EnqueueFailure_StillOpensSession(t *testing.T) {
+	ms := &mockSigner{enqErr: errors.New("nonce reseed failed (fail-closed)")}
+	h, get := newTestHandler(t, ms)
+
+	before := time.Now().Unix()
+	h.OnCreate(context.Background(), "sb-fail", testOwner, 2, 4)
+
+	sess, err := get("sb-fail")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if sess == nil {
+		t.Fatal("session must be created even when voucher enqueue fails — otherwise the sandbox runs unbilled")
+	}
+	if sess.Owner != testOwner || sess.Provider != testProvider {
+		t.Errorf("session fields wrong: %+v", sess)
+	}
+	// NextVoucherAt defaults to ~now so the first period is due immediately
+	// (the generator + catch-up bill it), not now+interval.
+	if sess.NextVoucherAt < before || sess.NextVoucherAt > before+testIntervalSec {
+		t.Errorf("NextVoucherAt = %d, want ~now (%d) so the missed period is due", sess.NextVoucherAt, before)
 	}
 }

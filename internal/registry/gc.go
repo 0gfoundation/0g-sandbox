@@ -56,17 +56,24 @@ func ListDerivedTags(ctx context.Context, registryURL string) ([]string, error) 
 
 		tagReq, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v2/"+repo+"/tags/list", nil)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("build tags request for repository %s: %w", repo, err)
 		}
 		tagResp, err := client.Do(tagReq)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("fetch tags for repository %s: %w", repo, err)
 		}
 		var tagList struct {
 			Tags []string `json:"tags"`
 		}
-		_ = json.NewDecoder(tagResp.Body).Decode(&tagList)
-		tagResp.Body.Close()
+		// A corrupted/truncated tag list must NOT be treated as "no tags" — that
+		// would silently skip every orphan in this repo while GC reports success.
+		decErr := json.NewDecoder(tagResp.Body).Decode(&tagList)
+		if cerr := tagResp.Body.Close(); cerr != nil && decErr == nil {
+			decErr = cerr
+		}
+		if decErr != nil {
+			return nil, fmt.Errorf("decode tags for repository %s: %w", repo, decErr)
+		}
 		for _, tag := range tagList.Tags {
 			if !strings.HasPrefix(tag, "d-") {
 				continue

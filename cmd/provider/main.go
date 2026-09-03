@@ -62,8 +62,8 @@ import (
 )
 
 const (
-	defaultRPC      = "https://evmrpc-testnet.0g.ai"
-	defaultChainID  = int64(16602)
+	defaultRPC     = "https://evmrpc-testnet.0g.ai"
+	defaultChainID = int64(16602)
 )
 
 func main() {
@@ -136,16 +136,16 @@ func resolveOwnerKey(flagVal string) *ecdsa.PrivateKey {
 // Then this command runs sandbox.addOrUpdateService(signer, url, appId, prices).
 func runRegister(args []string) {
 	fs := flag.NewFlagSet("register", flag.ExitOnError)
-	rpc            := fs.String("rpc",           defaultRPC,              "RPC endpoint")
-	chainID        := fs.Int64("chain-id",        defaultChainID,          "Chain ID")
-	contractHex    := fs.String("contract",       envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
-	keyHex         := fs.String("key",            "",                      "App owner private key (hex); or set OWNER_KEY env")
-	signerHex      := fs.String("signer",         "",                      "Node's TEE signer address = the provider address (required; get it from the node's /api/info or tapp-cli get-app-key)")
-	appId          := fs.String("app-id",         "",                      "TappRegistry appId to bind (required; signer must already be an active node of it)")
-	serviceURL     := fs.String("url",            "",                      "Provider service URL (required)")
-	pricePerCPU    := fs.String("price-per-cpu",  "1000000000000000",      "Price per CPU per minute (neuron)")
-	pricePerMemGB  := fs.String("price-per-mem",  "500000000000000",       "Price per GB memory per minute (neuron)")
-	createFee      := fs.String("fee",            "60000000000000000",     "Create fee per sandbox (neuron)")
+	rpc := fs.String("rpc", defaultRPC, "RPC endpoint")
+	chainID := fs.Int64("chain-id", defaultChainID, "Chain ID")
+	contractHex := fs.String("contract", envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
+	keyHex := fs.String("key", "", "App owner private key (hex); or set OWNER_KEY env")
+	signerHex := fs.String("signer", "", "Node's TEE signer address = the provider address (required; get it from the node's /api/info or tapp-cli get-app-key)")
+	appId := fs.String("app-id", "", "TappRegistry appId to bind (required; signer must already be an active node of it)")
+	serviceURL := fs.String("url", "", "Provider service URL (required)")
+	pricePerCPU := fs.String("price-per-cpu", "1000000000000000", "Price per CPU per minute (neuron)")
+	pricePerMemGB := fs.String("price-per-mem", "500000000000000", "Price per GB memory per minute (neuron)")
+	createFee := fs.String("fee", "60000000000000000", "Create fee per sandbox (neuron)")
 	_ = fs.Parse(args)
 
 	if *serviceURL == "" {
@@ -161,9 +161,9 @@ func runRegister(args []string) {
 	ownerAddr := crypto.PubkeyToAddress(privKey.PublicKey)
 	signerAddr := common.HexToAddress(*signerHex)
 
-	pricePerCPUBig   := parseBigInt(*pricePerCPU, "--price-per-cpu")
+	pricePerCPUBig := parseBigInt(*pricePerCPU, "--price-per-cpu")
 	pricePerMemGBBig := parseBigInt(*pricePerMemGB, "--price-per-mem")
-	createFeeBig     := parseBigInt(*createFee, "--fee")
+	createFeeBig := parseBigInt(*createFee, "--fee")
 
 	fmt.Printf("App owner:          %s\n", ownerAddr.Hex())
 	fmt.Printf("Provider (signer):  %s\n", signerAddr.Hex())
@@ -201,11 +201,11 @@ func runRegister(args []string) {
 // refundable and nonce watermarks stay put.
 func runRemoveService(args []string) {
 	fs := flag.NewFlagSet("remove-service", flag.ExitOnError)
-	rpc         := fs.String("rpc",      defaultRPC,      "RPC endpoint")
-	chainID     := fs.Int64("chain-id",  defaultChainID,  "Chain ID")
+	rpc := fs.String("rpc", defaultRPC, "RPC endpoint")
+	chainID := fs.Int64("chain-id", defaultChainID, "Chain ID")
 	contractHex := fs.String("contract", envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
-	keyHex      := fs.String("key",      "",              "App owner private key (hex); or set OWNER_KEY env")
-	signerHex   := fs.String("signer",   "",              "Node's TEE signer address whose service to remove (required)")
+	keyHex := fs.String("key", "", "App owner private key (hex); or set OWNER_KEY env")
+	signerHex := fs.String("signer", "", "Node's TEE signer address whose service to remove (required)")
 	_ = fs.Parse(args)
 
 	if *signerHex == "" {
@@ -267,13 +267,13 @@ func runRemoveService(args []string) {
 //  6. users requestRefund on the old bucket and re-deposit to the new signer
 func runRotate(args []string) {
 	fs := flag.NewFlagSet("rotate", flag.ExitOnError)
-	rpc         := fs.String("rpc",      defaultRPC,      "RPC endpoint")
-	chainID     := fs.Int64("chain-id",  defaultChainID,  "Chain ID")
+	rpc := fs.String("rpc", defaultRPC, "RPC endpoint")
+	chainID := fs.Int64("chain-id", defaultChainID, "Chain ID")
 	contractHex := fs.String("contract", envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
-	keyHex      := fs.String("key",      "",              "App owner private key (hex); or set OWNER_KEY env")
-	oldHex      := fs.String("old",      "",              "Old (dead) signer address (required)")
-	newHex      := fs.String("new",      "",              "New signer address (required; must already be an active node — tapp-cli add-node-onchain)")
-	urlOverride := fs.String("url",      "",              "New service URL (default: keep the old service's URL)")
+	keyHex := fs.String("key", "", "App owner private key (hex); or set OWNER_KEY env")
+	oldHex := fs.String("old", "", "Old (dead) signer address (required)")
+	newHex := fs.String("new", "", "New signer address (required; must already be an active node — tapp-cli add-node-onchain)")
+	urlOverride := fs.String("url", "", "New service URL (default: keep the old service's URL)")
 	_ = fs.Parse(args)
 
 	if *oldHex == "" || *newHex == "" {
@@ -353,10 +353,10 @@ func runRotate(args []string) {
 
 func runStatus(args []string) {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
-	rpc         := fs.String("rpc",      defaultRPC,      "RPC endpoint")
+	rpc := fs.String("rpc", defaultRPC, "RPC endpoint")
 	contractHex := fs.String("contract", envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
-	addrHex     := fs.String("address",  "",              "Provider (signer) address to inspect (required; read-only, no key needed)")
-	tappHex     := fs.String("tapp",     envOrDefault("TAPP_REGISTRY", ""), "TappRegistry address (optional; shows the appId owner and node state)")
+	addrHex := fs.String("address", "", "Provider (signer) address to inspect (required; read-only, no key needed)")
+	tappHex := fs.String("tapp", envOrDefault("TAPP_REGISTRY", ""), "TappRegistry address (optional; shows the appId owner and node state)")
 	_ = fs.Parse(args)
 
 	if *addrHex == "" {
@@ -431,11 +431,11 @@ func runStatus(args []string) {
 // no payout rights of its own.
 func runWithdraw(args []string) {
 	fs := flag.NewFlagSet("withdraw", flag.ExitOnError)
-	rpc         := fs.String("rpc",      defaultRPC,      "RPC endpoint")
-	chainID     := fs.Int64("chain-id",  defaultChainID,  "Chain ID")
+	rpc := fs.String("rpc", defaultRPC, "RPC endpoint")
+	chainID := fs.Int64("chain-id", defaultChainID, "Chain ID")
 	contractHex := fs.String("contract", envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
-	keyHex      := fs.String("key",      "",              "App owner private key; or set OWNER_KEY env")
-	signerHex   := fs.String("signer",   "",              "Node's TEE signer address whose earnings to withdraw (required)")
+	keyHex := fs.String("key", "", "App owner private key; or set OWNER_KEY env")
+	signerHex := fs.String("signer", "", "Node's TEE signer address whose earnings to withdraw (required)")
 	_ = fs.Parse(args)
 
 	if *signerHex == "" {
@@ -490,10 +490,10 @@ func runWithdraw(args []string) {
 //	docker exec <runner> docker push <registry>/daytona/<name>
 func runPushImage(args []string) {
 	fs := flag.NewFlagSet("push-image", flag.ExitOnError)
-	image    := fs.String("image",    "",                               "Local Docker image (e.g. rust-sandbox:1.0.0) (required)")
-	name     := fs.String("name",     "",                               "Name in registry (default: same as --image)")
-	runner   := fs.String("runner",   "0g-sandbox-billing-runner-1",   "Runner container name")
-	registry := fs.String("registry", "registry:6000",                 "Internal registry address")
+	image := fs.String("image", "", "Local Docker image (e.g. rust-sandbox:1.0.0) (required)")
+	name := fs.String("name", "", "Name in registry (default: same as --image)")
+	runner := fs.String("runner", "0g-sandbox-billing-runner-1", "Runner container name")
+	registry := fs.String("registry", "registry:6000", "Internal registry address")
 	_ = fs.Parse(args)
 
 	if *image == "" {
@@ -566,9 +566,9 @@ type snapshotTier struct {
 
 // defaultTiers are the standard small/medium/large resource tiers.
 var defaultTiers = []snapshotTier{
-	{"small",  1, 1,  10},
-	{"medium", 2, 4,  30},
-	{"large",  4, 8,  60},
+	{"small", 1, 1, 10},
+	{"medium", 2, 4, 30},
+	{"large", 4, 8, 60},
 }
 
 // runSnapshot registers a Docker image as a named Daytona snapshot via the
@@ -578,14 +578,14 @@ var defaultTiers = []snapshotTier{
 // Without --tiers: creates a single snapshot with explicit or default resources.
 func runSnapshot(args []string) {
 	fs := flag.NewFlagSet("snapshot", flag.ExitOnError)
-	apiURL := fs.String("api",    "http://localhost:8080", "0G Sandbox service URL")
-	keyHex := fs.String("key",    "",                     "Admin wallet key — the app owner or an ADMIN_ADDRESSES wallet (hex); or set OWNER_KEY env")
-	image  := fs.String("image",  "",                     "Docker image name (required)")
-	name   := fs.String("name",   "",                     "Snapshot name (defaults to image name)")
-	tiers  := fs.Bool("tiers",    false,                  "Create small/medium/large variants automatically")
-	cpu    := fs.Int("cpu",       1,                      "CPU cores (ignored when --tiers)")
-	memory := fs.Int("memory",    1,                      "Memory in GB (ignored when --tiers)")
-	disk   := fs.Int("disk",      3,                      "Disk in GB (ignored when --tiers)")
+	apiURL := fs.String("api", "http://localhost:8080", "0G Sandbox service URL")
+	keyHex := fs.String("key", "", "Admin wallet key — the app owner or an ADMIN_ADDRESSES wallet (hex); or set OWNER_KEY env")
+	image := fs.String("image", "", "Docker image name (required)")
+	name := fs.String("name", "", "Snapshot name (defaults to image name)")
+	tiers := fs.Bool("tiers", false, "Create small/medium/large variants automatically")
+	cpu := fs.Int("cpu", 1, "CPU cores (ignored when --tiers)")
+	memory := fs.Int("memory", 1, "Memory in GB (ignored when --tiers)")
+	disk := fs.Int("disk", 3, "Disk in GB (ignored when --tiers)")
 	_ = fs.Parse(args)
 
 	if *image == "" {
@@ -632,7 +632,7 @@ func createSnapshot(privKey *ecdsa.PrivateKey, apiURL, imageName, name string, c
 		"disk":      disk,
 	}
 	payloadBytes, _ := json.Marshal(body)
-	msg, sig, walletAddr := signRequest(privKey, "snapshot", "", json.RawMessage(payloadBytes))
+	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(apiURL), "snapshot", "", json.RawMessage(payloadBytes))
 
 	req, err := http.NewRequest(http.MethodPost, apiURL+"/api/snapshots", bytes.NewReader(payloadBytes))
 	if err != nil {
@@ -670,11 +670,11 @@ func createSnapshot(privKey *ecdsa.PrivateKey, apiURL, imageName, name string, c
 func runListSnapshots(args []string) {
 	fs := flag.NewFlagSet("snapshots", flag.ExitOnError)
 	apiURL := fs.String("api", "http://localhost:8080", "0G Sandbox service URL")
-	keyHex := fs.String("key", "",                     "Admin wallet key — the app owner or an ADMIN_ADDRESSES wallet (hex); or set OWNER_KEY env")
+	keyHex := fs.String("key", "", "Admin wallet key — the app owner or an ADMIN_ADDRESSES wallet (hex); or set OWNER_KEY env")
 	_ = fs.Parse(args)
 
 	privKey := resolveOwnerKey(*keyHex)
-	msg, sig, walletAddr := signRequest(privKey, "list", "", json.RawMessage(`{}`))
+	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), "list", "", json.RawMessage(`{}`))
 
 	req, err := http.NewRequest(http.MethodGet, *apiURL+"/api/snapshots", nil)
 	if err != nil {
@@ -717,14 +717,14 @@ func runDeleteSnapshot(args []string) {
 	fs := flag.NewFlagSet("delete-snapshot", flag.ExitOnError)
 	apiURL := fs.String("api", "http://localhost:8080", "0G Sandbox service URL")
 	keyHex := fs.String("key", "", "Admin wallet key — the app owner or an ADMIN_ADDRESSES wallet (hex); or set OWNER_KEY env")
-	id     := fs.String("id", "", "Snapshot ID (required)")
+	id := fs.String("id", "", "Snapshot ID (required)")
 	_ = fs.Parse(args)
 
 	if *id == "" {
 		fatalf("--id is required")
 	}
 	privKey := resolveOwnerKey(*keyHex)
-	msg, sig, walletAddr := signRequest(privKey, "delete-snapshot", *id, json.RawMessage(`{}`))
+	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), "delete-snapshot", *id, json.RawMessage(`{}`))
 
 	req, err := http.NewRequest(http.MethodDelete, *apiURL+"/api/snapshots/"+*id, nil)
 	if err != nil {
@@ -756,7 +756,7 @@ func runGCImages(args []string) {
 	_ = fs.Parse(args)
 
 	privKey := resolveOwnerKey(*keyHex)
-	msg, sig, walletAddr := signRequest(privKey, "gc-images", "", json.RawMessage(`{}`))
+	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), "gc-images", "", json.RawMessage(`{}`))
 
 	url := *apiURL + "/api/registry/gc"
 	if *dryRun {
@@ -819,7 +819,34 @@ func runGCImages(args []string) {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-func signRequest(privKey *ecdsa.PrivateKey, action, resourceID string, payload json.RawMessage) (signedMsg, sig, walletAddr string) {
+// providerAddressFor resolves (and caches) the destination provider's on-chain
+// address from GET /api/info, to bind signed requests to that provider.
+// Returns "" on failure (accepted while the server runs with AUTH_STRICT off).
+var providerAddrCache = map[string]string{}
+
+func providerAddressFor(apiBase string) string {
+	if v, ok := providerAddrCache[apiBase]; ok {
+		return v
+	}
+	addr := ""
+	resp, err := http.Get(strings.TrimRight(apiBase, "/") + "/api/info")
+	if err == nil {
+		defer resp.Body.Close()
+		var info struct {
+			ProviderAddress string `json:"provider_address"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&info) == nil {
+			addr = info.ProviderAddress
+		}
+	}
+	if addr == "" {
+		fmt.Fprintln(os.Stderr, "warn: could not resolve provider_address from /api/info; signing without provider binding")
+	}
+	providerAddrCache[apiBase] = addr
+	return addr
+}
+
+func signRequest(privKey *ecdsa.PrivateKey, provider, action, resourceID string, payload json.RawMessage) (signedMsg, sig, walletAddr string) {
 	addr := crypto.PubkeyToAddress(privKey.PublicKey)
 	nonceBuf := make([]byte, 16)
 	rand.Read(nonceBuf) //nolint:errcheck
@@ -829,9 +856,10 @@ func signRequest(privKey *ecdsa.PrivateKey, action, resourceID string, payload j
 		ExpiresAt  int64           `json:"expires_at"`
 		Nonce      string          `json:"nonce"`
 		Payload    json.RawMessage `json:"payload"`
+		Provider   string          `json:"provider,omitempty"`
 		ResourceID string          `json:"resource_id"`
 	}
-	reqObj := signedRequest{Action: action, ExpiresAt: time.Now().Add(3 * time.Minute).Unix(), Nonce: nonce, Payload: payload, ResourceID: resourceID}
+	reqObj := signedRequest{Action: action, ExpiresAt: time.Now().Add(3 * time.Minute).Unix(), Nonce: nonce, Payload: payload, Provider: provider, ResourceID: resourceID}
 	msgBytes, _ := json.Marshal(reqObj)
 	prefix := fmt.Sprintf("\x19Ethereum Signed Message:\n%d", len(msgBytes))
 	hash := crypto.Keccak256([]byte(prefix), msgBytes)
@@ -860,7 +888,6 @@ func resolveEnv(flagVal, envVar, label string) string {
 	fatalf("%s required: use --%s or %s env", label, strings.ToLower(strings.ReplaceAll(envVar, "_", "-")), envVar)
 	return ""
 }
-
 
 func parseBigInt(s, name string) *big.Int {
 	v, ok := new(big.Int).SetString(s, 10)

@@ -539,7 +539,7 @@ Authentication uses three HTTP headers injected automatically by the CLI:
 | Header | Content |
 |--------|---------|
 | `X-Wallet-Address` | User's Ethereum address |
-| `X-Signed-Message` | Base64-encoded JSON `{action, expires_at, nonce, payload, resource_id}` |
+| `X-Signed-Message` | Base64-encoded JSON `{action, expires_at, nonce, payload, provider, resource_id}` (`provider` binds the signature to the destination provider; see API_REFERENCE) |
 | `X-Wallet-Signature` | EIP-191 signature over the message |
 
 ---

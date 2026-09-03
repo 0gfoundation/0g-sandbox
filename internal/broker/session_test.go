@@ -39,17 +39,17 @@ func (m *mockProviderLookup) Get(addr string) (indexer.ProviderRecord, bool) {
 }
 
 type mockSessionChain struct {
-	mu                   sync.Mutex
-	cpuPerSec            *big.Int
-	memPerSec            *big.Int
-	createFee            *big.Int
-	pricingErr           error
-	balance              *big.Int
-	balanceAfterDeposit  *big.Int // if set, returned on 2nd+ GetProviderBalance calls
-	balCallCount         int
-	balErr               error
-	expectedTEEAddr      common.Address // signer must match for IsActiveNode → true
-	nodeErr              error
+	mu                  sync.Mutex
+	cpuPerSec           *big.Int
+	memPerSec           *big.Int
+	createFee           *big.Int
+	pricingErr          error
+	balance             *big.Int
+	balanceAfterDeposit *big.Int // if set, returned on 2nd+ GetProviderBalance calls
+	balCallCount        int
+	balErr              error
+	expectedTEEAddr     common.Address // signer must match for IsActiveNode → true
+	nodeErr             error
 }
 
 func (m *mockSessionChain) GetServicePricing(_ context.Context, _ common.Address) (*big.Int, *big.Int, *big.Int, error) {
@@ -100,9 +100,16 @@ func teeSign(key *ecdsa.PrivateKey, msgHash []byte) string {
 // is teeKey. Returns the handler, provider lookup mock, and a fresh Redis client.
 func newSessionSetup(t *testing.T, teeKey *ecdsa.PrivateKey, chain sessionChainClient, payment PaymentLayer) (*SessionHandler, *mockProviderLookup) {
 	t.Helper()
-	_ = crypto.PubkeyToAddress(teeKey.PublicKey) // teeAddr no longer in ProviderRecord; signer→node lookup is in tap
+	// v2: the provider IS its TEE signer, and the handlers now enforce
+	// signer == provider — so the record under test is keyed by the teeKey's
+	// own address. provider1 stays registered for lookup-shape tests.
+	teeAddr := crypto.PubkeyToAddress(teeKey.PublicKey)
 	providers := &mockProviderLookup{
 		records: map[string]indexer.ProviderRecord{
+			strings.ToLower(teeAddr.Hex()): {
+				Address: teeAddr.Hex(),
+				AppId:   "test-app",
+			},
 			strings.ToLower(provider1.Hex()): {
 				Address: provider1.Hex(),
 				AppId:   "test-app",
@@ -140,7 +147,7 @@ func buildPostReq(t *testing.T, key *ecdsa.PrivateKey, sandboxID string, cpu, me
 	t.Helper()
 	req := postSessionReq{
 		SandboxID:          sandboxID,
-		ProviderAddr:       provider1.Hex(),
+		ProviderAddr:       crypto.PubkeyToAddress(key.PublicKey).Hex(), // v2: provider == signer
 		UserAddr:           userA.Hex(),
 		CPU:                cpu,
 		MemGB:              memGB,
@@ -204,7 +211,10 @@ func TestHandlePost_invalidSignature(t *testing.T) {
 	h, _ := newSessionSetup(t, teeKey, chain, &mockPaymentLayer{})
 	router := newSessionRouter(h)
 
-	req := buildPostReq(t, wrongKey, "sb-1", 2, 4) // signed with wrong key
+	// Request names the REGISTERED provider (teeKey's address) but is signed
+	// by a different key: recovered signer != provider → 401.
+	req := buildPostReq(t, teeKey, "sb-1", 2, 4)
+	req.Signature = teeSign(wrongKey, sessionMsgHash(req))
 	w := doPost(t, router, req)
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", w.Code)
@@ -391,11 +401,11 @@ func TestHandleDelete_providerNotFound(t *testing.T) {
 
 	// Seed a session, then remove the provider from the indexer
 	seedSession(t, h.rdb, SessionEntry{
-		SandboxID: "sb-del", User: userA.Hex(), Provider: provider1.Hex(),
+		SandboxID: "sb-del", User: userA.Hex(), Provider: crypto.PubkeyToAddress(key.PublicKey).Hex(),
 		PricePerSec: "40", VoucherIntervalSec: 60,
 	})
 	providers.mu.Lock()
-	delete(providers.records, strings.ToLower(provider1.Hex()))
+	delete(providers.records, strings.ToLower(crypto.PubkeyToAddress(key.PublicKey).Hex()))
 	providers.mu.Unlock()
 
 	w := doDelete(t, router, "sb-del", key)
@@ -413,7 +423,7 @@ func TestHandleDelete_invalidSignature(t *testing.T) {
 	router := newSessionRouter(h)
 
 	seedSession(t, h.rdb, SessionEntry{
-		SandboxID: "sb-del", User: userA.Hex(), Provider: provider1.Hex(),
+		SandboxID: "sb-del", User: userA.Hex(), Provider: crypto.PubkeyToAddress(teeKey.PublicKey).Hex(),
 		PricePerSec: "40", VoucherIntervalSec: 60,
 	})
 
@@ -428,7 +438,7 @@ func TestHandleDelete_timestampExpired(t *testing.T) {
 	h, _ := newSessionSetup(t, key, defaultChain(0), &mockPaymentLayer{})
 
 	seedSession(t, h.rdb, SessionEntry{
-		SandboxID: "sb-del", User: userA.Hex(), Provider: provider1.Hex(),
+		SandboxID: "sb-del", User: userA.Hex(), Provider: crypto.PubkeyToAddress(key.PublicKey).Hex(),
 		PricePerSec: "40", VoucherIntervalSec: 60,
 	})
 
@@ -458,7 +468,7 @@ func TestHandleDelete_success(t *testing.T) {
 	router := newSessionRouter(h)
 
 	seedSession(t, h.rdb, SessionEntry{
-		SandboxID: "sb-del", User: userA.Hex(), Provider: provider1.Hex(),
+		SandboxID: "sb-del", User: userA.Hex(), Provider: crypto.PubkeyToAddress(key.PublicKey).Hex(),
 		PricePerSec: "40", VoucherIntervalSec: 60,
 	})
 
@@ -471,5 +481,73 @@ func TestHandleDelete_success(t *testing.T) {
 	exists, _ := h.rdb.Exists(context.Background(), sessionPrefix+"sb-del").Result()
 	if exists != 0 {
 		t.Errorf("session still in Redis after delete")
+	}
+}
+
+// Finding #16: a SIBLING node of the same app passes IsActiveNode but must not
+// act on another provider's (user, provider) bucket — deposits or session
+// deletes for a provider you are not are refused.
+func TestHandlePost_SiblingNodeCannotActForOtherProvider(t *testing.T) {
+	providerKey, _ := crypto.GenerateKey()
+	siblingKey, _ := crypto.GenerateKey()
+	chain := defaultChain(0) // expectedTEEAddr zero → IsActiveNode accepts ANY signer
+	h, _ := newSessionSetup(t, providerKey, chain, &mockPaymentLayer{})
+	router := newSessionRouter(h)
+
+	// Sibling signs a funding request naming the OTHER provider.
+	req := buildPostReq(t, providerKey, "", 2, 4) // provider = providerKey's addr
+	req.Signature = teeSign(siblingKey, sessionMsgHash(req))
+	w := doPost(t, router, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("sibling-node funding for another provider: status = %d, want 401", w.Code)
+	}
+}
+
+func TestHandleDelete_SiblingNodeCannotDeleteOtherProvidersSession(t *testing.T) {
+	providerKey, _ := crypto.GenerateKey()
+	siblingKey, _ := crypto.GenerateKey()
+	h, _ := newSessionSetup(t, providerKey, defaultChain(0), &mockPaymentLayer{})
+	router := newSessionRouter(h)
+
+	seedSession(t, h.rdb, SessionEntry{
+		SandboxID: "sb-x", User: userA.Hex(), Provider: crypto.PubkeyToAddress(providerKey.PublicKey).Hex(),
+		PricePerSec: "40", VoucherIntervalSec: 60,
+	})
+	w := doDelete(t, router, "sb-x", siblingKey)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("sibling-node delete of another provider's session: status = %d, want 401", w.Code)
+	}
+}
+
+// Review F1a: a signed request outside the ±300s freshness window must be
+// rejected — without this a captured signature stays valid forever.
+func TestHandlePost_StaleStartTimeRejected(t *testing.T) {
+	key, _ := crypto.GenerateKey()
+	h, _ := newSessionSetup(t, key, defaultChain(1_000_000), &mockPaymentLayer{})
+	router := newSessionRouter(h)
+
+	req := buildPostReq(t, key, "sb-stale", 2, 4)
+	req.StartTime = time.Now().Unix() - 400
+	req.Signature = teeSign(key, sessionMsgHash(req))
+	w := doPost(t, router, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("stale start_time: status = %d, want 401", w.Code)
+	}
+}
+
+// Review F1b: funding-only requests (sandbox_id == "") previously had NO
+// anti-replay key — a captured funding signature was replayable indefinitely.
+// The second identical request must now 409.
+func TestHandlePost_FundingOnlyReplayRejected(t *testing.T) {
+	key, _ := crypto.GenerateKey()
+	h, _ := newSessionSetup(t, key, defaultChain(1_000_000), &mockPaymentLayer{})
+	router := newSessionRouter(h)
+
+	req := buildPostReq(t, key, "", 2, 4) // funding-only
+	if w := doPost(t, router, req); w.Code != http.StatusOK {
+		t.Fatalf("first funding request: status = %d, want 200", w.Code)
+	}
+	if w := doPost(t, router, req); w.Code != http.StatusConflict {
+		t.Errorf("replayed funding request: status = %d, want 409", w.Code)
 	}
 }

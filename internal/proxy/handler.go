@@ -26,7 +26,41 @@ import (
 	"github.com/0gfoundation/0g-sandbox/internal/daytona"
 	"github.com/0gfoundation/0g-sandbox/internal/events"
 	"github.com/0gfoundation/0g-sandbox/internal/registry"
+	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
+
+// overrideHeaders are caller-controlled headers that some frameworks and
+// ingresses interpret as path/method/origin overrides. They must never reach
+// Daytona alongside the injected admin bearer — the proxy's authorization is
+// bound to the path and method IT routed, and any upstream reinterpretation
+// would run with admin rights on a request the gates never saw.
+var overrideHeaders = []string{
+	// Routing / method overrides.
+	"X-Original-Url",
+	"X-Rewrite-Url",
+	"X-Original-Uri",
+	"X-Http-Method-Override",
+	"X-Http-Method",
+	"X-Method-Override",
+	"X-Forwarded-Host",
+	"X-Forwarded-Proto",
+	"X-Forwarded-Port",
+	"X-Forwarded-Prefix",
+	"X-Forwarded-Path",
+	"X-Forwarded-For",
+	"X-Real-Ip",
+	"Forwarded",
+	// Session material foreign to Daytona.
+	"Cookie",
+	// The caller's OWN auth headers: the proxy consumed them at the gate;
+	// forwarding EIP-191 signature triples to Daytona hands valid signed
+	// requests to the upstream operator and anyone on that path — widening the
+	// replay-capture surface (#92/#93) for zero benefit, Daytona has no use
+	// for them.
+	"X-Wallet-Address",
+	"X-Signed-Message",
+	"X-Wallet-Signature",
+}
 
 // BillingHooks is satisfied by billing.EventHandler.
 // Decoupled here so proxy tests can use a mock.
@@ -71,9 +105,9 @@ type Handler struct {
 	pricePerCPUPerSec   *big.Int       // per CPU core per second
 	pricePerMemGBPerSec *big.Int       // per GB memory per second
 	voucherIntervalSec  int64
-	providerAddress     string // on-chain settlement identity; used by broker client and balance lookups
+	providerAddress     string   // on-chain settlement identity; used by broker client and balance lookups
 	adminAddresses      []string // operator wallets allowed to call admin-only endpoints (lowercased hex)
-	sshGatewayHost      string // if set, replaces localhost in SSH commands
+	sshGatewayHost      string   // if set, replaces localhost in SSH commands
 	computePricePerSec  *big.Int
 	rdb                 *redis.Client
 	teeKey              *ecdsa.PrivateKey // TEE signing key; nil = sealed containers disabled
@@ -102,7 +136,26 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 	orig := rp.Director
 	rp.Director = func(req *http.Request) {
 		orig(req)
+		// Scrub caller-controlled routing / method-override headers BEFORE the
+		// admin bearer goes on. The proxy's owner gates bind to the path+method
+		// it routed; frameworks and ingresses that honor these headers would
+		// reinterpret the request upstream (different path, different method)
+		// under admin credentials — e.g. a gated POST /api/sandbox rewritten
+		// into DELETE /api/sandbox/<victim> or PUT .../labels. Whether the
+		// pinned Daytona honors them is off-repo behavior; the proxy must not
+		// forward them regardless.
+		for _, h := range overrideHeaders {
+			req.Header.Del(h)
+		}
 		req.Header.Set("Authorization", "Bearer "+dtona.AdminKey())
+		// Force an uncompressed (or transport-managed) upstream body: if the
+		// CALLER's Accept-Encoding survives, Go's transport passes Daytona's
+		// compressed bytes through untouched and the seal-key scrub in
+		// ModifyResponse scans gzip data it cannot match — the caller then
+		// decompresses the key client-side. With the header removed the
+		// transport either gets identity or negotiates gzip itself, which it
+		// transparently decompresses BEFORE ModifyResponse runs.
+		req.Header.Del("Accept-Encoding")
 		req.Host = target.Host
 	}
 
@@ -115,6 +168,27 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 		resp.Header.Del("Access-Control-Allow-Origin")
 		resp.Header.Del("Access-Control-Allow-Methods")
 		resp.Header.Del("Access-Control-Allow-Headers")
+
+		// Scrub the sealed-container private key from forwarded JSON bodies.
+		// InjectSeal puts SANDBOX_SEAL_KEY into the container's env map, and
+		// endpoints that forward Daytona's sandbox object verbatim (GET
+		// /sandbox/:id, PUT /sandbox/:id/labels, the catch-all) hand that env
+		// straight back to the caller — the owner of a sealed sandbox could
+		// read its signing key with one authenticated GET. The strip in
+		// handleCreate only covers the create response; scrubbing here covers
+		// every forwarded response, present and future. JSON only: streaming
+		// bodies (SSE toolbox logs) must not be buffered.
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 && strings.Contains(resp.Header.Get("Content-Type"), "json") {
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				return err
+			}
+			scrubbed := scrubSealKeyFromBody(body)
+			resp.Body = io.NopCloser(bytes.NewReader(scrubbed))
+			resp.ContentLength = int64(len(scrubbed))
+			resp.Header.Set("Content-Length", strconv.Itoa(len(scrubbed)))
+		}
 		return nil
 	}
 
@@ -179,16 +253,23 @@ func (h *Handler) BrokerDeregister(ctx context.Context, sandboxID string) {
 //   - All /sandbox/:id/* routes go through a single catch-all handler to avoid
 //     Gin's restriction on mixing static segments and wildcard catch-alls.
 func (h *Handler) Register(rg *gin.RouterGroup) {
+	// The traversal guard ships WITH the package: every engine that mounts
+	// these routes gets it, not just binaries that remember the engine-wide
+	// mount (authorization binds to :id while the raw path is forwarded as
+	// admin — see PathTraversalGuard).
+	rg.Use(PathTraversalGuard())
 	// ── Create sandbox ─────────────────────────────────────────────────────
 	rg.POST("/sandbox", h.handleCreate)
+
+	// ── Balance: the caller's spendable balance as the gates see it ───────
+	rg.GET("/balance", h.handleBalance)
 
 	// ── List / paginated (filter by owner) ────────────────────────────────
 	rg.GET("/sandbox", h.handleList)
 	rg.GET("/sandbox/paginated", h.handleList)
-	rg.GET("/volumes", h.handleListGeneric("daytona-owner"))
+	rg.GET("/volumes", h.handleVolumesList)
 	rg.POST("/snapshots", h.handleSnapshotCreate)
 	rg.DELETE("/snapshots/:id", h.handleSnapshotDelete)
-
 
 	// ── DELETE /sandbox/:id (no action suffix, safe to register separately) ─
 	rg.DELETE("/sandbox/:id", h.withOwnerOrAdmin(h.handleDelete))
@@ -222,6 +303,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 // the auth.Middleware-protected group so dashboards/explorers can hit them
 // without a signed request.
 func (h *Handler) RegisterPublic(rg *gin.RouterGroup) {
+	rg.Use(PathTraversalGuard())
 	// On-chain VoucherSettled events. Anyone can derive the same data from
 	// the public RPC + contract address; no value in gating it.
 	rg.GET("/events", h.handleEvents)
@@ -239,15 +321,39 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "read body"})
 		return
 	}
-	reqCPU, reqMemGB := extractResources(body)
-	// For snapshot creates the request body has no cpu/memory fields.
-	// Look up the snapshot spec so the broker pre-create call uses the real resource cost.
-	if reqCPU == 0 && reqMemGB == 0 {
-		if snapName := extractSnapshotName(body); snapName != "" {
-			if snap, err := h.dtona.GetSnapshot(c.Request.Context(), snapName); err == nil && snap != nil {
-				reqCPU, reqMemGB = snap.CPU, snap.Mem
-			}
-		}
+	// Snapshot-only policy: reject custom cpu/memory/disk/gpu/image so the
+	// billed spec always equals the provisioned one (#73/#77). Runs before any
+	// balance reservation or Daytona call.
+	if err := requireSnapshotCreate(body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	// Snapshot-only policy guarantees no custom cpu/memory in the body, so the
+	// snapshot record is the ONLY billing spec source. Look it up and FAIL
+	// CLOSED when billing is on: a transient GetSnapshot error must not admit
+	// on createFee alone while Daytona provisions the snapshot's real spec
+	// (that reopens #77). This matches the sealed path, which already fails
+	// closed on a snapshot-resolution error. Best-effort only when billing is
+	// disabled (balCheck nil, e.g. unit tests that don't exercise the gate).
+	reqCPU, reqMemGB := 0, 0
+	snapName := extractSnapshotName(body)
+	snap, snapErr := h.dtona.GetSnapshot(c.Request.Context(), snapName)
+	switch {
+	case snapErr == nil && snap != nil:
+		reqCPU, reqMemGB = snap.CPU, snap.Mem
+	case h.balCheck == nil:
+		// Billing disabled — spec is not needed; best-effort, don't block.
+	case snapErr != nil:
+		// Transient lookup failure: fail closed, do NOT admit on createFee
+		// alone while Daytona provisions the real spec (reopens #77). Mirrors
+		// the sealed path, which already fails closed on snapshot resolution.
+		h.log.Error("create: snapshot spec lookup failed; failing closed to protect billing",
+			zap.String("snapshot", snapName), zap.Error(snapErr))
+		c.JSON(http.StatusBadGateway, gin.H{"error": "could not resolve snapshot spec for billing"})
+		return
+	default: // snap == nil: snapshot not found
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("snapshot %q not found", snapName)})
+		return
 	}
 
 	// Pre-check: reject if user has not acknowledged the TEE signer.
@@ -271,45 +377,73 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	createReserved := false
 	if h.balCheck != nil {
 		createRequired = new(big.Int).Add(h.createFee, h.intervalCost(reqCPU, reqMemGB))
+		held, pending := h.outstandingDebt(c.Request.Context(), wallet)
+		heldDebt := new(big.Int).Add(held, pending)
 		balance, err := h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
 		if err != nil {
 			h.log.Error("balance check", zap.String("wallet", wallet), zap.Error(err))
 			c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 			return
 		}
-		available := availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress))
-		if available.Cmp(createRequired) < 0 && h.broker != nil {
+		// Reserve FIRST, judge against the post-increment total, roll back on
+		// failure. Check-then-reserve had a TOCTOU window: N concurrent creates
+		// all read the pre-reservation total, all passed, and N sandboxes
+		// started on a balance that covered one (#74). The INCRBY inside
+		// Reserve is the serialization point — under any interleaving, request
+		// k sees k×required reserved and judges accordingly. TTL is a safety
+		// net: if the process crashes before OnCreate fires, the reservation
+		// auto-expires after 2 voucher intervals.
+		ttl := time.Duration(h.voucherIntervalSec*2) * time.Second
+		totalReserved, rerr := billing.Reserve(c.Request.Context(), h.rdb, wallet, h.providerAddress, createRequired, ttl)
+		if rerr != nil {
+			// Redis unavailable: fall back to the advisory (racy) check rather
+			// than blocking all creates — billing is degraded anyway and the
+			// debt ledger still catches overspend after the fact.
+			h.log.Warn("balance reservation failed; advisory check only", zap.String("wallet", wallet), zap.Error(rerr))
+			totalReserved = new(big.Int).Add(billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress), createRequired)
+		} else {
+			createReserved = true
+		}
+		// shortfall = balance − heldDebt − totalReserved (totalReserved already
+		// includes THIS request); negative → cannot afford.
+		shortfall := new(big.Int).Sub(new(big.Int).Sub(balance, heldDebt), totalReserved)
+		if shortfall.Sign() < 0 && h.broker != nil {
 			// Ask the broker to top up the user's balance (funding-only call:
 			// sandbox_id="" means no monitoring session is registered yet).
 			if berr := h.broker.registerSession(c.Request.Context(), "", wallet, int64(reqCPU), int64(reqMemGB)); berr != nil {
 				h.log.Warn("broker pre-create fund", zap.String("wallet", wallet), zap.Error(berr))
 			} else {
-				// Re-read balance after top-up.
+				// Re-read balance after top-up (the reservation stays put).
 				balance, err = h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
 				if err != nil {
+					if createReserved {
+						billing.Release(c.Request.Context(), h.rdb, wallet, h.providerAddress, createRequired)
+					}
 					h.log.Error("balance re-check", zap.String("wallet", wallet), zap.Error(err))
 					c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 					return
 				}
-				available = availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress))
+				shortfall = new(big.Int).Sub(new(big.Int).Sub(balance, heldDebt), totalReserved)
 			}
 		}
-		if available.Cmp(createRequired) < 0 {
+		if shortfall.Sign() < 0 {
+			if createReserved {
+				billing.Release(c.Request.Context(), h.rdb, wallet, h.providerAddress, createRequired)
+				createReserved = false
+			}
+			// Spendable BEFORE this request's own reservation, floored at 0.
+			display := new(big.Int).Add(shortfall, createRequired)
+			if display.Sign() < 0 {
+				display = new(big.Int)
+			}
 			c.JSON(http.StatusPaymentRequired, gin.H{
-				"error":     "insufficient balance",
-				"available": available.String(),
-				"required":  createRequired.String(),
+				"error":              "insufficient balance",
+				"available":          display.String(),
+				"required":           createRequired.String(),
+				"outstanding_debt":   held.String(),    // parked debt — must be topped up
+				"pending_settlement": pending.String(), // queued usage — charged on next settle
 			})
 			return
-		}
-		// Reserve the cost to prevent concurrent requests from double-spending.
-		// TTL is a safety net: if the process crashes before OnCreate fires, the
-		// reservation auto-expires after 2 voucher intervals.
-		ttl := time.Duration(h.voucherIntervalSec*2) * time.Second
-		if err := billing.Reserve(c.Request.Context(), h.rdb, wallet, h.providerAddress, createRequired, ttl); err != nil {
-			h.log.Warn("balance reservation failed (non-fatal)", zap.String("wallet", wallet), zap.Error(err))
-		} else {
-			createReserved = true
 		}
 	}
 
@@ -344,6 +478,31 @@ func (h *Handler) handleCreate(c *gin.Context) {
 				"detail": err.Error(),
 			})
 			return
+		}
+		// Pin the forwarded image to the attested digest. The attestation is
+		// signed over imageHash, but a mutable TAG forwarded to Daytona can be
+		// re-pointed between resolution and the runner's pull — the container
+		// would then run code the attestation never covered (attestation-
+		// identity forgery; the whole sealed trust chain gates on this digest).
+		// Rewriting to repo@sha256:<digest> makes the pulled image byte-
+		// identical to the attested one by content addressing.
+		//
+		// Snapshot creates are not rewritten: Daytona resolves the snapshot
+		// internally (rewriting to an image would drop the snapshot's resource
+		// defaults), its image names here are content-addressed already, and
+		// re-tagging would require push access to the internal registry, which
+		// tenants cannot reach.
+		if hasDirectImage(body) {
+			pinned, perr := registry.PinRef(imageRef, imageHash)
+			if perr != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid image reference"})
+				return
+			}
+			body, err = rewriteImage(body, pinned)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+				return
+			}
 		}
 	}
 
@@ -434,7 +593,18 @@ func (h *Handler) handleCreate(c *gin.Context) {
 
 	if result.StatusCode >= 200 && result.StatusCode < 300 {
 		if id := extractID(upstream.Body.Bytes()); id != "" {
-			cpu, memGB := extractResources(upstream.Body.Bytes())
+			// Bill the provisioned spec: prefer what Daytona reports in the
+			// create response (the actual provisioned truth), and fall back to
+			// the gate-resolved snapshot spec when the response omits it.
+			// Depending on the response echo ALONE was the bug — if Daytona
+			// stops echoing cpu/mem the session would open at 0 rate and #77
+			// returns silently; the gate-resolved fallback prevents that. Under
+			// snapshot-only the two agree, and #116's clamped release makes any
+			// residual reserve/release asymmetry harmless.
+			cpu, memGB := reqCPU, reqMemGB
+			if rc, rm := extractResources(upstream.Body.Bytes()); rc != 0 || rm != 0 {
+				cpu, memGB = rc, rm
+			}
 			go func() {
 				ctx := context.WithoutCancel(c.Request.Context())
 				// Register the real sandbox ID with the broker for ongoing
@@ -485,50 +655,81 @@ func (h *Handler) handleStart(c *gin.Context) {
 		cpu, memGB = sb.CPU, sb.Memory
 	}
 
+	// A start against an ALREADY-OPEN billing session (create-then-start with
+	// no stop in between) is a billing no-op: OnStart returns early and emits
+	// no voucher. Skip the whole reserve/gate then — taking a reservation here
+	// would leak for its TTL, since OnStart's release only runs when it opens a
+	// session (review #116 F1). Redis error → treat as absent and gate as
+	// usual (safe direction).
+	sessionOpen := false
+	if existing, gerr := billing.GetSession(c.Request.Context(), h.rdb, id); gerr == nil && existing != nil {
+		sessionOpen = true
+	}
+
 	// Pre-check: reject if on-chain balance is below one voucher interval for this sandbox's spec.
 	// If insufficient and broker is configured, request a top-up and wait for it to land.
 	// available = chainBalance - reserved prevents concurrent requests from double-spending.
 	var startRequired *big.Int
 	startReserved := false
-	if h.balCheck != nil {
+	if h.balCheck != nil && !sessionOpen {
 		startRequired = h.intervalCost(cpu, memGB)
+		held, pending := h.outstandingDebt(c.Request.Context(), wallet)
+		heldDebt := new(big.Int).Add(held, pending)
 		balance, err := h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
 		if err != nil {
 			h.log.Error("balance check (start)", zap.String("wallet", wallet), zap.Error(err))
 			c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 			return
 		}
-		available := availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress))
-		if available.Cmp(startRequired) < 0 && h.broker != nil {
+		// Reserve-first, same TOCTOU shape as the create gate (#74): judge
+		// against the post-increment total, roll back the reservation on
+		// rejection.
+		ttl := time.Duration(h.voucherIntervalSec*2) * time.Second
+		totalReserved, rerr := billing.Reserve(c.Request.Context(), h.rdb, wallet, h.providerAddress, startRequired, ttl)
+		if rerr != nil {
+			h.log.Warn("balance reservation failed; advisory check only", zap.String("wallet", wallet), zap.Error(rerr))
+			totalReserved = new(big.Int).Add(billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress), startRequired)
+		} else {
+			startReserved = true
+		}
+		shortfall := new(big.Int).Sub(new(big.Int).Sub(balance, heldDebt), totalReserved)
+		if shortfall.Sign() < 0 && h.broker != nil {
 			if berr := h.broker.registerSession(c.Request.Context(), id, wallet, int64(cpu), int64(memGB)); berr != nil {
 				h.log.Warn("broker pre-start fund", zap.String("id", id), zap.Error(berr))
 			} else {
 				// Re-check balance after broker waited for deposit.
 				balance, err = h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
 				if err != nil {
+					if startReserved {
+						billing.Release(c.Request.Context(), h.rdb, wallet, h.providerAddress, startRequired)
+					}
 					h.log.Error("balance re-check (start)", zap.String("wallet", wallet), zap.Error(err))
 					c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 					return
 				}
-				available = availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress))
+				shortfall = new(big.Int).Sub(new(big.Int).Sub(balance, heldDebt), totalReserved)
 			}
 		} else if h.broker != nil {
 			// Balance sufficient: register for monitoring only (non-blocking).
 			go h.broker.registerSession(context.WithoutCancel(c.Request.Context()), id, wallet, int64(cpu), int64(memGB))
 		}
-		if available.Cmp(startRequired) < 0 {
+		if shortfall.Sign() < 0 {
+			if startReserved {
+				billing.Release(c.Request.Context(), h.rdb, wallet, h.providerAddress, startRequired)
+				startReserved = false
+			}
+			display := new(big.Int).Add(shortfall, startRequired)
+			if display.Sign() < 0 {
+				display = new(big.Int)
+			}
 			c.JSON(http.StatusPaymentRequired, gin.H{
-				"error":     "insufficient balance",
-				"available": available.String(),
-				"required":  startRequired.String(),
+				"error":              "insufficient balance",
+				"available":          display.String(),
+				"required":           startRequired.String(),
+				"outstanding_debt":   held.String(),    // parked debt — must be topped up
+				"pending_settlement": pending.String(), // queued usage — charged on next settle
 			})
 			return
-		}
-		ttl := time.Duration(h.voucherIntervalSec*2) * time.Second
-		if err := billing.Reserve(c.Request.Context(), h.rdb, wallet, h.providerAddress, startRequired, ttl); err != nil {
-			h.log.Warn("balance reservation failed (non-fatal)", zap.String("wallet", wallet), zap.Error(err))
-		} else {
-			startReserved = true
 		}
 	}
 
@@ -770,7 +971,12 @@ func (h *Handler) handleEvents(c *gin.Context) {
 		c.JSON(http.StatusNotImplemented, gin.H{"error": "events not configured"})
 		return
 	}
-	// ?since=<unix_ts>: return events with block.timestamp >= since. 0 or omitted = all history.
+	// ?since=<unix_ts>: return events with block.timestamp >= since.
+	// 0 or omitted defaults to a 7-day window — "all history" blows past RPC
+	// response limits on any contract with real history (observed: a contract
+	// past nonce 514k 502s on every unbounded query), so an explicit recent
+	// window is the only default that always works. Callers wanting deeper
+	// history page backwards with explicit since values.
 	var sinceTimestamp uint64
 	if s := c.Query("since"); s != "" {
 		n, err := strconv.ParseUint(s, 10, 64)
@@ -779,6 +985,9 @@ func (h *Handler) handleEvents(c *gin.Context) {
 			return
 		}
 		sinceTimestamp = n
+	}
+	if sinceTimestamp == 0 {
+		sinceTimestamp = uint64(time.Now().Add(-7 * 24 * time.Hour).Unix())
 	}
 	page := 0
 	if s := c.Query("page"); s != "" {
@@ -828,12 +1037,12 @@ func (h *Handler) handleEvents(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"current_block":  currentBlock,
-		"since":          sinceTimestamp,
-		"total":          total,
-		"page":           page,
-		"page_size":      pageSize,
-		"events":         result,
+		"current_block": currentBlock,
+		"since":         sinceTimestamp,
+		"total":         total,
+		"page":          page,
+		"page_size":     pageSize,
+		"events":        result,
 	})
 }
 
@@ -917,14 +1126,23 @@ func (h *Handler) handleCloseSession(c *gin.Context) {
 // ── Labels ──────────────────────────────────────────────────────────────────
 
 func (h *Handler) handleLabels(c *gin.Context) {
+	// Daytona's replaceLabels is a wholesale replace, so the protected labels
+	// must be re-injected from the live sandbox — a payload-only strip would
+	// have the replace DELETE them (ownership bricked; sealed flag cleared →
+	// SSH/toolbox reopen and the seal key becomes readable).
+	sb, err := h.dtona.GetSandbox(c.Request.Context(), c.Param("id"))
+	if err != nil || sb == nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "sandbox lookup failed"})
+		return
+	}
 	body, _ := io.ReadAll(c.Request.Body)
-	stripped, err := StripOwnerLabel(body)
+	merged, err := MergeProtectedLabels(body, sb.Labels)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid label payload"})
 		return
 	}
-	c.Request.Body = io.NopCloser(bytes.NewReader(stripped))
-	c.Request.ContentLength = int64(len(stripped))
+	c.Request.Body = io.NopCloser(bytes.NewReader(merged))
+	c.Request.ContentLength = int64(len(merged))
 	h.forward(c)
 }
 
@@ -946,10 +1164,19 @@ func (h *Handler) handleList(c *gin.Context) {
 	c.JSON(http.StatusOK, filtered)
 }
 
-func (h *Handler) handleListGeneric(_ string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		h.forward(c)
+// handleVolumesList gates GET /api/volumes to admins. Volumes are not a wired
+// feature in 0g-sandbox (no create path, so they carry no daytona-owner label),
+// which means an owner-scoped filter has nothing to match on and forwarding as
+// admin to a non-admin caller would leak every tenant's volume IDs. Deny-by-
+// default: admins get the raw list (ops view), everyone else gets 403. When the
+// volume feature is built, replace this with an owner-scoped list (filter the
+// forwarded response by the caller's daytona-owner label).
+func (h *Handler) handleVolumesList(c *gin.Context) {
+	if !h.isAdmin(c.GetString("wallet_address")) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin only"})
+		return
 	}
+	h.forward(c)
 }
 
 // handleListSnapshots lists all Daytona snapshots. Snapshots are admin-managed
@@ -1102,7 +1329,6 @@ func copyRecorder(c *gin.Context, rec *httptest.ResponseRecorder) {
 	c.Data(rec.Code, rec.Header().Get("Content-Type"), rec.Body.Bytes())
 }
 
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 // handleCatchAll dispatches all /sandbox/:id/<action> requests.
@@ -1141,8 +1367,41 @@ func (h *Handler) handleCatchAll(c *gin.Context) {
 
 	// ── Transparent proxy (owner check) ───────────────────────────────────
 	default:
-		h.withOwner(h.forward)(c)
+		h.withOwner(h.stripVolumesThenForward)(c)
 	}
+}
+
+// stripVolumesThenForward removes any caller-supplied "volumes" (any case) from
+// a JSON body before the transparent forward. The catch-all forwards arbitrary
+// sandbox-scoped actions to Daytona as admin; if the backend ever accepts
+// volume attach/modify through one of them, an unvalidated volumes array would
+// reopen the cross-tenant mount closed at create (deny-by-default until
+// per-volume ownership validation lands, #81). Non-JSON or empty bodies pass
+// through untouched.
+func (h *Handler) stripVolumesThenForward(c *gin.Context) {
+	if c.Request.Body != nil && c.Request.ContentLength != 0 {
+		body, err := io.ReadAll(c.Request.Body)
+		if err == nil {
+			var m map[string]any
+			if json.Unmarshal(body, &m) == nil {
+				changed := false
+				for k := range m {
+					if strings.EqualFold(k, "volumes") {
+						delete(m, k)
+						changed = true
+					}
+				}
+				if changed {
+					if nb, err := json.Marshal(m); err == nil {
+						body = nb
+					}
+				}
+			}
+			c.Request.Body = io.NopCloser(bytes.NewReader(body))
+			c.Request.ContentLength = int64(len(body))
+		}
+	}
+	h.forward(c)
 }
 
 // withOwner wraps a handler with an ownership check.
@@ -1258,12 +1517,83 @@ func extractResources(body []byte) (cpu, memGB int) {
 }
 
 // availableBalance returns chainBalance - reserved, floored at zero.
-func availableBalance(chainBalance, reserved *big.Int) *big.Int {
+// availableBalance is the balance a caller may spend on new work: the on-chain
+// balance minus in-flight reservations minus any outstanding held debt.
+// Outstanding debt is settled (oldest first) before new compute, so it is not
+// available — a user with debt must top up enough to cover it before starting
+// or creating a sandbox. Clamped at zero.
+func availableBalance(chainBalance, reserved, heldDebt *big.Int) *big.Int {
 	available := new(big.Int).Sub(chainBalance, reserved)
+	if heldDebt != nil {
+		available.Sub(available, heldDebt)
+	}
 	if available.Sign() < 0 {
 		available.SetInt64(0)
 	}
 	return available
+}
+
+// handleBalance returns the caller's balance exactly as the create/start gates
+// compute it, so a user can see WHY a launch is rejected instead of only
+// hitting the 402: on-chain balance, in-flight reservations, outstanding held
+// debt (must be topped up and settled before new work), and the resulting
+// spendable remainder.
+func (h *Handler) handleBalance(c *gin.Context) {
+	wallet := c.GetString("wallet_address")
+	if h.balCheck == nil {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "balance check not configured"})
+		return
+	}
+	balance, err := h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
+	if err != nil {
+		h.log.Error("balance lookup", zap.String("wallet", wallet), zap.Error(err))
+		c.JSON(http.StatusBadGateway, gin.H{"error": "balance lookup failed"})
+		return
+	}
+	reserved := billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress)
+	held, pending := h.outstandingDebt(c.Request.Context(), wallet)
+	debt := new(big.Int).Add(held, pending)
+	c.JSON(http.StatusOK, gin.H{
+		"provider": h.providerAddress,
+		"balance":  balance.String(),
+		"reserved": reserved.String(),
+		// held debt (parked, needs top-up) + pending settlement (queued, will be
+		// charged as soon as the settler submits) — both already owed.
+		"outstanding_debt":   held.String(),
+		"pending_settlement": pending.String(),
+		"available":          availableBalance(balance, reserved, debt).String(),
+	})
+}
+
+// outstandingDebt returns what the user already owes this provider but has not
+// yet been charged on-chain, in two parts:
+//
+//   - held: parked unpayable debt (voucher:held:<user>:<provider>);
+//   - pending: vouchers still sitting in the settle queue — accrued usage that
+//     WILL be deducted as soon as the settler submits it. While the settler is
+//     stalled this can be large (and the raw chain balance correspondingly
+//     misleading), so the gates and the balance endpoint must count it.
+//
+// Lookup failures degrade to zero (logged) — a transient Redis error must not
+// wrongly block a create/start. Note this is deliberately fail-open: during a
+// Redis hiccup a debt-carrying user could pass the gate. Accepted because it
+// matches the existing GetReserved posture, a down Redis breaks session
+// creation anyway, and the on-chain settle path remains the money authority.
+func (h *Handler) outstandingDebt(ctx context.Context, wallet string) (held, pending *big.Int) {
+	user := common.HexToAddress(wallet)
+	provider := common.HexToAddress(h.providerAddress)
+	held, err := voucher.HeldDebt(ctx, h.rdb, user, provider)
+	if err != nil {
+		h.log.Warn("held debt lookup failed; treating as zero", zap.String("wallet", wallet), zap.Error(err))
+		held = new(big.Int)
+	}
+	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, provider.Hex())
+	pending, err = voucher.QueuedPending(ctx, h.rdb, queueKey, user, provider)
+	if err != nil {
+		h.log.Warn("queued pending lookup failed; treating as zero", zap.String("wallet", wallet), zap.Error(err))
+		pending = new(big.Int)
+	}
+	return held, pending
 }
 
 // extractSnapshotName parses the "snapshot" field from a sandbox create request body.
@@ -1286,6 +1616,27 @@ func extractSealed(body []byte) bool {
 
 // resolveImageRef extracts the image reference from a create request body and,
 // for snapshot-based sandboxes, resolves the snapshot name to its ImageName.
+// hasDirectImage reports whether the create body names an image directly
+// (as opposed to a snapshot) — only direct refs are caller-controlled and
+// need digest pinning.
+func hasDirectImage(body []byte) bool {
+	var m struct {
+		Image string `json:"image"`
+	}
+	json.NewDecoder(bytes.NewReader(body)).Decode(&m) //nolint:errcheck
+	return m.Image != ""
+}
+
+// rewriteImage replaces the body's image field with the pinned reference.
+func rewriteImage(body []byte, pinned string) ([]byte, error) {
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, err
+	}
+	m["image"] = pinned
+	return json.Marshal(m)
+}
+
 func (h *Handler) resolveImageRef(ctx context.Context, body []byte) (string, error) {
 	var m struct {
 		Image    string `json:"image"`
