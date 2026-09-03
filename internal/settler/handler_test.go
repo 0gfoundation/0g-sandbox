@@ -2,6 +2,7 @@ package settler
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -10,10 +11,12 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"github.com/0gfoundation/0g-sandbox/internal/alert"
+	"github.com/0gfoundation/0g-sandbox/internal/billing"
 	"github.com/0gfoundation/0g-sandbox/internal/chain"
 	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
@@ -455,4 +458,56 @@ func TestHandleStatuses_InvalidNonce_ResetsCounter(t *testing.T) {
 	if mr.Exists(nonceKey) {
 		t.Fatal("INVALID_NONCE must delete the stale counter so the next voucher reseeds from chain")
 	}
+}
+
+// Review #117 nit: the self-heal's key must be the SAME one the signer creates,
+// or the Del silently no-ops. Seed a counter via the signer's own IncrNonce,
+// then feed the settler an INVALID_NONCE voucher for that pair and assert the
+// signer-created key is gone — pinning the cross-package key-derivation coupling
+// as a contract, not a coincidence.
+func TestHandleStatuses_InvalidNonce_DeletesSignerCreatedKey(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
+	owner := "0xAaBbCcDdEeFf00112233445566778899aAbBcCdD"
+	prov := "0x00112233445566778899aAbBcCdDeEfF00112233"
+
+	// The signer derives and creates the counter key from its own logic.
+	sgn := billing.NewSigner(testSignerKey(t), big.NewInt(1),
+		common.HexToAddress("0x0000000000000000000000000000000000000abc"),
+		common.HexToAddress(prov), rdb, &zeroNonceReader{}, zap.NewNop())
+	if _, err := sgn.IncrNonce(context.Background(), owner, prov); err != nil {
+		t.Fatalf("seed via signer: %v", err)
+	}
+	signerKey := fmt.Sprintf(voucher.NonceKeyFmt, strings.ToLower(owner), strings.ToLower(prov))
+	if !mr.Exists(signerKey) {
+		t.Fatalf("precondition: signer must have created %s", signerKey)
+	}
+
+	// The settler processes an INVALID_NONCE voucher for the SAME pair.
+	v := voucher.SandboxVoucher{
+		SandboxID: "sb", User: common.HexToAddress(owner), Provider: common.HexToAddress(prov),
+		TotalFee: big.NewInt(1), Nonce: big.NewInt(1),
+	}
+	HandleStatuses(context.Background(), rdb, make(chan StopSignal, 1), "q", "raw",
+		[]voucher.SandboxVoucher{v}, []chain.SettlementStatus{chain.StatusInvalidNonce}, alert.Nop{}, zap.NewNop())
+
+	if mr.Exists(signerKey) {
+		t.Fatal("settler must delete the exact key the signer created (key-derivation contract broken)")
+	}
+}
+
+type zeroNonceReader struct{}
+
+func (zeroNonceReader) GetLastNonce(context.Context, common.Address, common.Address) (*big.Int, error) {
+	return big.NewInt(0), nil
+}
+
+func testSignerKey(t *testing.T) *ecdsa.PrivateKey {
+	t.Helper()
+	k, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
 }
