@@ -50,12 +50,12 @@ func (m *mockSigner) count() int {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const (
-	testProvider     = "0x1111111111111111111111111111111111111111"
-	testOwner        = "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-	testSandbox      = "sb-events-001"
-	pricePerSec      = int64(100)  // 100 neuron/sec
-	createFeeVal     = int64(500)  // 500 neuron flat create fee
-	testIntervalSec  = int64(60)   // 60-second billing interval
+	testProvider    = "0x1111111111111111111111111111111111111111"
+	testOwner       = "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	testSandbox     = "sb-events-001"
+	pricePerSec     = int64(100) // 100 neuron/sec
+	createFeeVal    = int64(500) // 500 neuron flat create fee
+	testIntervalSec = int64(60)  // 60-second billing interval
 )
 
 func newTestHandler(t *testing.T, ms *mockSigner) (*EventHandler, func(sandboxID string) (*Session, error)) {

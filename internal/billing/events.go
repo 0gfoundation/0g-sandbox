@@ -74,9 +74,17 @@ func (h *EventHandler) computePrice(cpu, memGB int) *big.Int {
 // emitPeriodVoucher signs and enqueues a pre-charge voucher covering one full
 // voucherIntervalSec window starting at periodStart. Returns the next
 // NextVoucherAt value (periodStart + voucherIntervalSec).
-func (h *EventHandler) emitPeriodVoucher(ctx context.Context, sandboxID, ownerAddr string, price *big.Int, periodStart int64) (int64, error) {
-	nextVoucherAt := periodStart + h.voucherIntervalSec
-	fee := new(big.Int).Mul(price, big.NewInt(h.voucherIntervalSec))
+// emitPeriodVoucher charges `intervals` billing periods starting at
+// periodStart in ONE voucher (fee = price × interval × intervals) and returns
+// the new NextVoucherAt. intervals > 1 is the backlog catch-up path: after
+// downtime the generator owes many periods, and one voucher per period per
+// tick could never close the gap (see runGeneration).
+func (h *EventHandler) emitPeriodVoucher(ctx context.Context, sandboxID, ownerAddr string, price *big.Int, periodStart, intervals int64) (int64, error) {
+	if intervals < 1 {
+		intervals = 1
+	}
+	nextVoucherAt := periodStart + h.voucherIntervalSec*intervals
+	fee := new(big.Int).Mul(price, big.NewInt(h.voucherIntervalSec*intervals))
 	if fee.Sign() == 0 {
 		return nextVoucherAt, nil
 	}
@@ -111,7 +119,7 @@ func (h *EventHandler) OnCreate(ctx context.Context, sandboxID, ownerAddr string
 	}
 
 	price := h.computePrice(cpu, memGB)
-	nextVoucherAt, err := h.emitPeriodVoucher(ctx, sandboxID, ownerAddr, price, now)
+	nextVoucherAt, err := h.emitPeriodVoucher(ctx, sandboxID, ownerAddr, price, now, 1)
 	if err != nil {
 		h.log.Error("OnCreate: emit first period", zap.String("sandbox", sandboxID), zap.Error(err))
 		return
@@ -154,7 +162,7 @@ func (h *EventHandler) OnStart(ctx context.Context, sandboxID, ownerAddr string,
 	}
 	price := h.computePrice(cpu, memGB)
 	now := time.Now().Unix()
-	nextVoucherAt, err := h.emitPeriodVoucher(ctx, sandboxID, ownerAddr, price, now)
+	nextVoucherAt, err := h.emitPeriodVoucher(ctx, sandboxID, ownerAddr, price, now, 1)
 	if err != nil {
 		h.log.Error("OnStart: emit first period", zap.String("sandbox", sandboxID), zap.Error(err))
 		return
