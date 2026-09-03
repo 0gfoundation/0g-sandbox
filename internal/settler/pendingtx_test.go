@@ -2,6 +2,8 @@ package settler
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -18,11 +20,12 @@ import (
 )
 
 type mockFateResolver struct {
-	fates     []chain.TxFate // consumed per call; last repeats
-	receipt   *types.Receipt
-	statuses  []chain.SettlementStatus
-	lastNonce *big.Int
-	calls     int
+	fates      []chain.TxFate // consumed per call; last repeats
+	receipt    *types.Receipt
+	statuses   []chain.SettlementStatus
+	lastNonce  *big.Int
+	extractErr error
+	calls      int
 }
 
 func (m *mockFateResolver) ResolveTxFate(context.Context, common.Hash, uint64) (chain.TxFate, *types.Receipt, error) {
@@ -35,6 +38,9 @@ func (m *mockFateResolver) ResolveTxFate(context.Context, common.Hash, uint64) (
 }
 
 func (m *mockFateResolver) SettleStatusesFromReceipt(context.Context, *types.Receipt, []voucher.SandboxVoucher) ([]chain.SettlementStatus, error) {
+	if m.extractErr != nil {
+		return nil, m.extractErr
+	}
 	return m.statuses, nil
 }
 
@@ -94,6 +100,9 @@ func TestResolvePendingTx_Mined_AppliesStatuses(t *testing.T) {
 
 // A provably-dropped tx re-queues the BLPOP'd item so the next round re-signs.
 func TestResolvePendingTx_Dropped_Requeues(t *testing.T) {
+	old := pendingTxPollInterval
+	pendingTxPollInterval = time.Millisecond
+	t.Cleanup(func() { pendingTxPollInterval = old })
 	rdb, provider, p, queueKey := pendingFixture(t)
 	savePendingTx(context.Background(), rdb, provider, p) //nolint:errcheck
 	resolver := &mockFateResolver{fates: []chain.TxFate{chain.TxDropped}}
@@ -161,5 +170,89 @@ func TestReconcileIntent_NotOnChain_Requeues(t *testing.T) {
 	}
 	if got, _ := loadPendingTx(context.Background(), rdb, provider); got != nil {
 		t.Error("record must be cleared")
+	}
+}
+
+// Review #113 F1 (High): a MINED tx whose status-extraction fails (preview RPC
+// blip on a no-event voucher) must NOT be re-queued — its events already
+// settled, re-signing would double-charge. Only ErrTxReverted re-queues.
+func TestResolvePendingTx_MinedButExtractionFails_NeverRequeues(t *testing.T) {
+	old := pendingTxPollInterval
+	pendingTxPollInterval = time.Millisecond
+	t.Cleanup(func() { pendingTxPollInterval = old })
+
+	rdb, provider, p, queueKey := pendingFixture(t)
+	savePendingTx(context.Background(), rdb, provider, p) //nolint:errcheck
+	resolver := &mockFateResolver{
+		fates:      []chain.TxFate{chain.TxMined},
+		receipt:    &types.Receipt{Status: 1, TxHash: p.TxHash},
+		extractErr: errors.New("preview RPC blip"), // mined, but extraction fails
+	}
+
+	// Resolve in a goroutine — it will loop forever retrying extraction (never
+	// requeues). Give it several polls, then assert the queue stayed empty.
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		resolvePendingTx(ctx, rdb, resolver, queueKey, make(chan StopSignal, 1), provider, &p, alert.Nop{}, zap.NewNop())
+		close(done)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	<-done
+
+	if n, _ := rdb.LLen(context.Background(), queueKey).Result(); n != 0 {
+		t.Fatalf("mined-but-extraction-failed must NEVER re-queue (double-charge path), queue len %d", n)
+	}
+	if p2, _ := loadPendingTx(context.Background(), rdb, provider); p2 == nil {
+		t.Error("pending record must be kept for retry, not cleared")
+	}
+}
+
+// Review #113 F1: a reverted tx (status 0 → ErrTxReverted) consumed nothing, so
+// it re-queues.
+func TestResolvePendingTx_Reverted_Requeues(t *testing.T) {
+	old := pendingTxPollInterval
+	pendingTxPollInterval = time.Millisecond
+	t.Cleanup(func() { pendingTxPollInterval = old })
+
+	rdb, provider, p, queueKey := pendingFixture(t)
+	savePendingTx(context.Background(), rdb, provider, p) //nolint:errcheck
+	resolver := &mockFateResolver{
+		fates:      []chain.TxFate{chain.TxMined},
+		receipt:    &types.Receipt{Status: 0, TxHash: p.TxHash},
+		extractErr: fmt.Errorf("%w: 0xabc", chain.ErrTxReverted),
+	}
+	got := resolvePendingTx(context.Background(), rdb, resolver, queueKey, make(chan StopSignal, 1), provider, &p, alert.Nop{}, zap.NewNop())
+	if got != nil {
+		t.Fatalf("reverted tx returns nil, got %v", got)
+	}
+	items, _ := rdb.LRange(context.Background(), queueKey, 0, -1).Result()
+	if len(items) != 1 || items[0] != p.FirstItem {
+		t.Errorf("reverted tx must re-queue, queue: %v", items)
+	}
+}
+
+// Review #113 F2 (Medium): a single dropped observation must NOT re-queue — a
+// receipt-miss race can show it for a tx that mined. Two consecutive required.
+func TestResolvePendingTx_SingleDropped_WaitsForConfirmation(t *testing.T) {
+	old := pendingTxPollInterval
+	pendingTxPollInterval = time.Millisecond
+	t.Cleanup(func() { pendingTxPollInterval = old })
+
+	rdb, provider, p, queueKey := pendingFixture(t)
+	savePendingTx(context.Background(), rdb, provider, p) //nolint:errcheck
+	// dropped once, then MINED on the re-confirm poll → must apply statuses, not requeue.
+	resolver := &mockFateResolver{
+		fates:    []chain.TxFate{chain.TxDropped, chain.TxMined},
+		receipt:  &types.Receipt{Status: 1, TxHash: p.TxHash},
+		statuses: []chain.SettlementStatus{chain.StatusSuccess},
+	}
+	got := resolvePendingTx(context.Background(), rdb, resolver, queueKey, make(chan StopSignal, 1), provider, &p, alert.Nop{}, zap.NewNop())
+	if len(got) != 1 || got[0] != chain.StatusSuccess {
+		t.Fatalf("dropped-then-mined must apply statuses, got %v", got)
+	}
+	if n, _ := rdb.LLen(context.Background(), queueKey).Result(); n != 0 {
+		t.Errorf("must not re-queue when the re-confirm shows mined, queue len %d", n)
 	}
 }

@@ -3,6 +3,7 @@ package settler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -27,6 +28,10 @@ const PendingTxKeyFmt = "settler:pending-tx:%s"
 // pendingTxPollInterval is how often the fate of an in-flight tx is
 // re-checked. Package var so tests can shrink it.
 var pendingTxPollInterval = 5 * time.Second
+
+// pendingTxStallPolls is how many consecutive TxPending polls trigger the
+// stuck-tx alert (~pendingTxStallPolls × pendingTxPollInterval of no progress).
+var pendingTxStallPolls = 12
 
 type pendingTx struct {
 	TxHash       common.Hash              `json:"tx_hash"`
@@ -113,6 +118,8 @@ func clearPendingTx(ctx context.Context, rdb *redis.Client, provider common.Addr
 // re-sign would settle the same usage twice (double charge — the contract
 // dedupes by strictly-increasing nonce only).
 func resolvePendingTx(ctx context.Context, rdb *redis.Client, resolver fateResolver, queueKey string, stopCh chan<- StopSignal, provider common.Address, p *pendingTx, alerter alert.Alerter, log *zap.Logger) []chain.SettlementStatus {
+	dropped := 0      // consecutive TxDropped observations (finding #2)
+	pendingPolls := 0 // consecutive TxPending polls, for the stall alert (finding #3)
 	for {
 		fate, receipt, err := resolver.ResolveTxFate(ctx, p.TxHash, p.AccountNonce)
 		if err != nil {
@@ -122,21 +129,52 @@ func resolvePendingTx(ctx context.Context, rdb *redis.Client, resolver fateResol
 		case chain.TxMined:
 			statuses, serr := resolver.SettleStatusesFromReceipt(ctx, receipt, p.Vouchers)
 			if serr != nil {
-				// Whole tx reverted: nothing on-chain consumed — safe to retry.
-				log.Warn("settler: pending tx reverted; re-queueing vouchers", zap.String("tx", p.TxHash.Hex()), zap.Error(serr))
-				requeueRaw(ctx, rdb, queueKey, p, log)
-				clearPendingTx(ctx, rdb, provider)
-				return nil
+				if errors.Is(serr, chain.ErrTxReverted) {
+					// Whole tx reverted: nothing on-chain consumed — safe to retry.
+					log.Warn("settler: pending tx reverted; re-queueing vouchers", zap.String("tx", p.TxHash.Hex()), zap.Error(serr))
+					requeueRaw(ctx, rdb, queueKey, p, log)
+					clearPendingTx(ctx, rdb, provider)
+					return nil
+				}
+				// The tx MINED; its VoucherSettled events already settled. A
+				// status-extraction failure (preview RPC blip on no-event
+				// vouchers) must NEVER re-queue — that would re-sign settled
+				// usage and double-charge (the exact P0 this file closes).
+				// Keep the pending record and retry extraction on the next poll.
+				log.Error("settler: status extraction failed on MINED tx; retrying, NOT re-queueing", zap.String("tx", p.TxHash.Hex()), zap.Error(serr))
+				dropped = 0
+				break
 			}
 			log.Info("settler: pending tx mined; applying statuses", zap.String("tx", p.TxHash.Hex()), zap.Int("batch", len(p.Vouchers)))
 			HandleStatuses(ctx, rdb, stopCh, queueKey, p.FirstItem, p.Vouchers, statuses, alerter, log)
 			clearPendingTx(ctx, rdb, provider)
 			return statuses
 		case chain.TxDropped:
+			// Require TWO consecutive dropped observations (finding #2): a
+			// single receipt-miss race between ResolveTxFate's two RPCs can
+			// show advanced-nonce-no-receipt for a tx that actually mined.
+			dropped++
+			if dropped < 2 {
+				log.Warn("settler: pending tx looks dropped (1/2); re-confirming next poll", zap.String("tx", p.TxHash.Hex()))
+				break
+			}
 			log.Warn("settler: pending tx provably dropped; re-queueing vouchers", zap.String("tx", p.TxHash.Hex()))
 			requeueRaw(ctx, rdb, queueKey, p, log)
 			clearPendingTx(ctx, rdb, provider)
 			return nil
+		default:
+			dropped = 0
+			// Liveness (finding #3): a broadcast tx that never mines (mempool
+			// eviction, partition) would poll TxPending forever and block the
+			// whole Run loop — starving the periodic sweep that protects
+			// unpayable sandboxes (#114). Alert after a threshold so an
+			// operator can intervene (replace/cancel the tx from the TEE key).
+			pendingPolls++
+			if pendingPolls == pendingTxStallPolls {
+				alerter.Notify(ctx, alert.KindSettlerTxFailure, alert.SeverityCritical,
+					"Settlement tx stuck pending — settler loop blocked, stop-protection starved",
+					map[string]any{"tx": p.TxHash.Hex(), "polls": pendingPolls})
+			}
 		}
 		select {
 		case <-ctx.Done():
