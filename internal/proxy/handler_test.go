@@ -665,3 +665,63 @@ func TestBalanceEndpoint_SubtractsDebtAndReserved(t *testing.T) {
 		}
 	}
 }
+
+// Finding #26: caller-controlled routing/method-override headers must never
+// reach Daytona next to the injected admin bearer — an upstream that honors
+// them would reinterpret the request (other path, other method) with admin
+// rights on a route the proxy's gates never saw.
+func TestForward_StripsOverrideHeaders(t *testing.T) {
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.Write([]byte(`[]`)) //nolint:errcheck
+	}))
+	t.Cleanup(srv.Close)
+	dtona := daytona.NewClient(srv.URL, "test-key")
+	r := gin.New()
+	api := r.Group("/api", func(c *gin.Context) {
+		c.Set("wallet_address", "0xADmin")
+		c.Next()
+	})
+	NewHandler(dtona, &mockBilling{}, nil, nil, nil, nil, nil, nil, nil, "",
+		[]string{"0xadmin"}, "", nil, zap.NewNop(), "", nil, 0).Register(api)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/volumes", nil)
+	req.Header.Set("X-Original-URL", "/api/sandbox/victim/start")
+	req.Header.Set("X-HTTP-Method-Override", "DELETE")
+	req.Header.Set("X-Forwarded-Host", "evil.example")
+	req.Header.Set("X-Forwarded-For", "1.2.3.4")
+	req.Header.Set("Cookie", "session=fake")
+	req.Header.Set("X-Wallet-Address", "0xADmin")
+	req.Header.Set("X-Signed-Message", "c2lnbmVk")
+	req.Header.Set("X-Wallet-Signature", "0xdeadbeef")
+	req.Header.Set("X-Custom-App", "keep-me")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if got == nil {
+		t.Fatalf("request not forwarded; status=%d", w.Code)
+	}
+	// X-Forwarded-For: the caller's spoofed value must be gone; the transport
+	// re-adds one containing only the TRUE client IP (ReverseProxy appends it
+	// after the Director) — which is exactly the wanted outcome.
+	if xff := got.Get("X-Forwarded-For"); strings.Contains(xff, "1.2.3.4") {
+		t.Errorf("caller-spoofed X-Forwarded-For must be stripped, got %q", xff)
+	}
+	for _, h := range []string{
+		"X-Original-Url", "X-Http-Method-Override", "X-Forwarded-Host",
+		"Cookie",
+		// signature material must never reach the upstream operator
+		"X-Wallet-Address", "X-Signed-Message", "X-Wallet-Signature",
+	} {
+		if got.Get(h) != "" {
+			t.Errorf("override header %s must be stripped, got %q", h, got.Get(h))
+		}
+	}
+	if got.Get("X-Custom-App") != "keep-me" {
+		t.Error("unrelated headers must pass through")
+	}
+	if got.Get("Authorization") != "Bearer test-key" {
+		t.Errorf("admin bearer expected, got %q", got.Get("Authorization"))
+	}
+}
