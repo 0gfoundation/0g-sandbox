@@ -431,3 +431,28 @@ func TestHandleStatuses_NotAcknowledged_ParksVoucher(t *testing.T) {
 		t.Errorf("held-users index: %v", users)
 	}
 }
+
+// Finding #30 (#79) self-heal: INVALID_NONCE means the local counter disagrees
+// with the chain. The counter must be deleted so the NEXT voucher reseeds from
+// on-chain lastNonce — otherwise every subsequent voucher for the pair keeps
+// getting rejected and discarded.
+func TestHandleStatuses_InvalidNonce_ResetsCounter(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	stopCh := make(chan StopSignal, 1)
+
+	v := voucher.SandboxVoucher{
+		SandboxID: "sb-n", User: common.HexToAddress("0xAAA"), Provider: common.HexToAddress("0xBBB"),
+		TotalFee: big.NewInt(9), Nonce: big.NewInt(1),
+	}
+	nonceKey := fmt.Sprintf(voucher.NonceKeyFmt,
+		strings.ToLower(v.User.Hex()), strings.ToLower(v.Provider.Hex()))
+	rdb.Set(context.Background(), nonceKey, "1", 0) // the stale counter that produced nonce=1
+
+	HandleStatuses(context.Background(), rdb, stopCh, "q", "raw", []voucher.SandboxVoucher{v},
+		[]chain.SettlementStatus{chain.StatusInvalidNonce}, alert.Nop{}, zap.NewNop())
+
+	if mr.Exists(nonceKey) {
+		t.Fatal("INVALID_NONCE must delete the stale counter so the next voucher reseeds from chain")
+	}
+}

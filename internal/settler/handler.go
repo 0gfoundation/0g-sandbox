@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -129,7 +130,17 @@ func HandleStatuses(
 			)
 
 		case chain.StatusInvalidNonce:
-			log.Warn("voucher discarded: invalid nonce",
+			// Self-heal: the local counter disagrees with the chain (stale
+			// seed, operator surgery, a competing writer). Delete the Redis
+			// counter so the NEXT voucher reseeds from on-chain lastNonce —
+			// without this, every subsequent voucher for the pair keeps
+			// getting rejected and discarded (unbilled compute, no recovery).
+			nonceKey := fmt.Sprintf(voucher.NonceKeyFmt,
+				strings.ToLower(v.User.Hex()), strings.ToLower(v.Provider.Hex()))
+			if err := rdb.Del(ctx, nonceKey).Err(); err != nil {
+				log.Error("invalid-nonce reseed: delete counter failed", zap.String("key", nonceKey), zap.Error(err))
+			}
+			log.Warn("voucher discarded: invalid nonce — counter reset for reseed",
 				zap.String("user", v.User.Hex()),
 				zap.String("nonce", v.Nonce.String()),
 			)
