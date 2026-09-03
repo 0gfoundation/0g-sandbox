@@ -148,6 +148,14 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 			req.Header.Del(h)
 		}
 		req.Header.Set("Authorization", "Bearer "+dtona.AdminKey())
+		// Force an uncompressed (or transport-managed) upstream body: if the
+		// CALLER's Accept-Encoding survives, Go's transport passes Daytona's
+		// compressed bytes through untouched and the seal-key scrub in
+		// ModifyResponse scans gzip data it cannot match — the caller then
+		// decompresses the key client-side. With the header removed the
+		// transport either gets identity or negotiates gzip itself, which it
+		// transparently decompresses BEFORE ModifyResponse runs.
+		req.Header.Del("Accept-Encoding")
 		req.Host = target.Host
 	}
 
@@ -160,6 +168,27 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 		resp.Header.Del("Access-Control-Allow-Origin")
 		resp.Header.Del("Access-Control-Allow-Methods")
 		resp.Header.Del("Access-Control-Allow-Headers")
+
+		// Scrub the sealed-container private key from forwarded JSON bodies.
+		// InjectSeal puts SANDBOX_SEAL_KEY into the container's env map, and
+		// endpoints that forward Daytona's sandbox object verbatim (GET
+		// /sandbox/:id, PUT /sandbox/:id/labels, the catch-all) hand that env
+		// straight back to the caller — the owner of a sealed sandbox could
+		// read its signing key with one authenticated GET. The strip in
+		// handleCreate only covers the create response; scrubbing here covers
+		// every forwarded response, present and future. JSON only: streaming
+		// bodies (SSE toolbox logs) must not be buffered.
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 && strings.Contains(resp.Header.Get("Content-Type"), "json") {
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				return err
+			}
+			scrubbed := scrubSealKeyFromBody(body)
+			resp.Body = io.NopCloser(bytes.NewReader(scrubbed))
+			resp.ContentLength = int64(len(scrubbed))
+			resp.Header.Set("Content-Length", strconv.Itoa(len(scrubbed)))
+		}
 		return nil
 	}
 
