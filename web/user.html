@@ -1193,7 +1193,7 @@ async function loadProviders(forceChain=false) {
         bodyHTML = `
           <div class="pv-detail-section">
             <div class="pv-detail-row"><span class="pv-detail-key">address</span><span class="pv-detail-val">${p.address}</span></div>
-            <div class="pv-detail-row"><span class="pv-detail-key">app_id</span><span class="pv-detail-val">${p.app_id || '—'}<span class="tip"><span class="tip-icon">?</span><span class="tip-box">The provider's TEE trust root in TappRegistry — compose hash, image hashes, and the active TEE node set are all keyed by this appId.</span></span></span></div>
+            <div class="pv-detail-row"><span class="pv-detail-key">app_id</span><span class="pv-detail-val">${esc(p.app_id) || '—'}<span class="tip"><span class="tip-icon">?</span><span class="tip-box">The provider's TEE trust root in TappRegistry — compose hash, image hashes, and the active TEE node set are all keyed by this appId.</span></span></span></div>
           </div>
           <div class="pv-connect-prompt">connect wallet to acknowledge and create sandboxes</div>`;
       } else {
@@ -1276,33 +1276,39 @@ function toggleProvider(key) {
 function setSelectedProvider(p) { selectedProvider = p; }
 
 function sandboxLabel(s) {
+  // name/id come from the provider's API — a malicious provider could put
+  // markup in either; escape before innerHTML.
   const name = s.name && s.name !== s.id ? s.name : null;
   return name
-    ? `<span style="font-weight:500;color:var(--text)">${name}</span> <span class="pv-sandbox-id" style="font-size:11px">${s.id?.slice(0,8)}…</span>`
-    : `<span class="pv-sandbox-id">${s.id?.slice(0,14)||'—'}…</span>`;
+    ? `<span style="font-weight:500;color:var(--text)">${esc(name)}</span> <span class="pv-sandbox-id" style="font-size:11px">${esc(s.id?.slice(0,8))}…</span>`
+    : `<span class="pv-sandbox-id">${esc(s.id?.slice(0,14))||'—'}…</span>`;
 }
 
 function renderSandboxRows(sandboxes, providerAddr) {
   if (!sandboxes?.length) return '<div class="pv-sandbox-empty">no sandboxes · click + new to get started</div>';
   return sandboxes.map(s => {
-    const shortLabel = (s.name&&s.name!==s.id?s.name:s.id?.slice(0,8))||s.id;
+    // Provider-sourced strings go into attribute and inline-JS contexts below:
+    // allow only a safe charset for the id (UUID-shaped) and escape the label —
+    // a hostile provider must not reach script via quotes in either.
+    const sid = /^[A-Za-z0-9._-]+$/.test(s.id||'') ? s.id : '';
+    const shortLabel = esc(((s.name&&s.name!==s.id?s.name:s.id?.slice(0,8))||s.id||'').replace(/['"\\]/g,''));
     const st = (s.state||'').toLowerCase();
     return `
-    <div class="pv-sandbox-row" data-id="${s.id}">
+    <div class="pv-sandbox-row" data-id="${esc(sid)}">
       <span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
         ${sandboxLabel(s)}
         <span style="font-size:10px;color:var(--muted);font-family:var(--mono);display:flex;gap:8px">
           ${s.cpu?`<span>${s.cpu}C / ${s.memory??'?'}GB</span>`:''}
-          ${s.snapshot?`<span title="${s.snapshot}" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.snapshot}</span>`:''}
-          ${Array.isArray(s.publicPorts)&&s.publicPorts.length?`<span title="Only these ports are publicly reachable; all others require auth" style="color:#cba8ff">ports: ${s.publicPorts.join(',')}</span>`:''}
+          ${s.snapshot?`<span title="${esc(s.snapshot)}" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.snapshot)}</span>`:''}
+          ${Array.isArray(s.publicPorts)&&s.publicPorts.length?`<span title="Only these ports are publicly reachable; all others require auth" style="color:#cba8ff">ports: ${esc(s.publicPorts.join(','))}</span>`:''}
         </span>
       </span>
       ${stateTag(s.state)}
       <div class="pv-sandbox-actions">
-        ${st==='started' ? `<button class="btn btn-sm btn-ghost" onclick="doSSH('${s.id}','${providerAddr}')" style="font-family:var(--mono)">ssh</button>` : ''}
-        ${['started','starting'].includes(st) ? `<button class="btn btn-sm btn-danger" onclick="doStop('${s.id}','${shortLabel}','${providerAddr}')" style="font-family:var(--mono)">stop</button>` : ''}
-        ${['archived','stopped'].includes(st) ? `<button class="btn btn-sm btn-prim" onclick="doStart('${s.id}','${providerAddr}')" style="font-family:var(--mono)">start</button>` : ''}
-        ${['archived','stopped','error'].includes(st) ? `<button class="btn btn-sm btn-ghost" onclick="doDelete('${s.id}','${shortLabel}','${providerAddr}')" style="font-family:var(--mono)">delete</button>` : ''}
+        ${st==='started' ? `<button class="btn btn-sm btn-ghost" onclick="doSSH('${sid}','${providerAddr}')" style="font-family:var(--mono)">ssh</button>` : ''}
+        ${['started','starting'].includes(st) ? `<button class="btn btn-sm btn-danger" onclick="doStop('${sid}','${shortLabel}','${providerAddr}')" style="font-family:var(--mono)">stop</button>` : ''}
+        ${['archived','stopped'].includes(st) ? `<button class="btn btn-sm btn-prim" onclick="doStart('${sid}','${providerAddr}')" style="font-family:var(--mono)">start</button>` : ''}
+        ${['archived','stopped','error'].includes(st) ? `<button class="btn btn-sm btn-ghost" onclick="doDelete('${sid}','${shortLabel}','${providerAddr}')" style="font-family:var(--mono)">delete</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -1594,6 +1600,18 @@ async function sendTx(label,txFn,{onSuccess,onError,errEl}={}) {
 function toast(msg,type='info') { const el=pushToast(msg,type); setTimeout(()=>el.remove(),4000); }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+// HTML-escape for CHAIN- or PROVIDER-sourced strings interpolated into
+// innerHTML. app_id is an arbitrary string any permissionlessly-registered
+// provider chose on-chain; snapshot/sandbox fields come from the provider's
+// API. Unescaped, a malicious provider gets stored XSS on the market page —
+// same-origin script that can steer acknowledge/deposit/create to itself or
+// exfiltrate the SSH token shown after ssh-access. Escapes &<>"' (covers text
+// and quoted-attribute contexts).
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, ch => (
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]
+  ));
+}
 function fmtNeuron(s) {
   if(!s||s==='0') return '0 0G';
   const n=BigInt(s); if(n===0n) return '0 0G';
