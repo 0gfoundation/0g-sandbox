@@ -82,6 +82,14 @@ export interface SignOptions {
   nonce?: string;
   /** Override "now" as unix seconds — for deterministic tests only. */
   nowSec?: number;
+  /**
+   * Destination provider's on-chain address (provider_address from
+   * GET /api/info). Binds the signature to that provider: without it, a
+   * captured signed message can be replayed verbatim at any other provider
+   * within the expiry window. Omitted → legacy unbound message (accepted only
+   * while the server runs with AUTH_STRICT off).
+   */
+  provider?: string;
 }
 
 /**
@@ -108,6 +116,7 @@ export async function buildAuthHeaders(
     expires_at: expiresAt,
     nonce,
     payload: payload ?? {},
+    ...(opts.provider ? { provider: opts.provider } : {}),
     resource_id: resourceId,
   });
   const messageBytes = new TextEncoder().encode(message);

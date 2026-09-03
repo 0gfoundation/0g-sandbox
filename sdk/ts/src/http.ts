@@ -31,8 +31,11 @@ export class HttpClient {
 
   /** Wallet-signed request. */
   async signed<T = unknown>(method: string, path: string, opts: SignedRequestOptions): Promise<T> {
+    const provider = await this.resolveProvider();
     const headers: Record<string, string> = {
-      ...(await buildAuthHeaders(this.signer, opts.action, opts.resourceId ?? '', opts.payload ?? {})),
+      ...(await buildAuthHeaders(this.signer, opts.action, opts.resourceId ?? '', opts.payload ?? {}, {
+        provider,
+      })),
     };
     let body: string | undefined;
     if (opts.body !== undefined) {
@@ -40,6 +43,24 @@ export class HttpClient {
       body = JSON.stringify(opts.body);
     }
     return this.do<T>(method, path, { headers, body, query: opts.query, timeoutMs: opts.timeoutMs });
+  }
+
+  /**
+   * Destination provider address for signature binding, resolved once from
+   * GET /api/info and cached. Returns '' if the lookup fails — the server
+   * accepts unbound messages while AUTH_STRICT is off, so a flaky info
+   * endpoint degrades to legacy behavior instead of breaking every call.
+   */
+  private providerAddr: string | undefined;
+  private async resolveProvider(): Promise<string> {
+    if (this.providerAddr !== undefined) return this.providerAddr;
+    try {
+      const info = await this.public<{ provider_address?: string }>('GET', '/api/info');
+      this.providerAddr = info.provider_address ?? '';
+    } catch {
+      this.providerAddr = '';
+    }
+    return this.providerAddr;
   }
 
   /** Unauthenticated request (public endpoints). */
