@@ -105,16 +105,26 @@ func (h *EventHandler) OnCreate(ctx context.Context, sandboxID, ownerAddr string
 		TotalFee:  new(big.Int).Set(h.createFee),
 		UsageHash: voucher.BuildUsageHash(sandboxID, now, now, 0),
 	}
+	// Voucher-enqueue failures below MUST NOT abort session creation. A
+	// transient failure (e.g. the fail-closed nonce reseed after a
+	// Redis-recreating restart) previously returned early, leaving the sandbox
+	// with NO billing session — the generator never ticked and the compute ran
+	// uncollected, and backlog catch-up can't help because it needs a session
+	// to exist. The session is now opened regardless; a missed
+	// create-fee/first-period voucher becomes a period the generator bills on
+	// its next tick, not an unbilled sandbox.
 	if err := h.signer.Enqueue(ctx, v); err != nil {
-		h.log.Error("OnCreate: enqueue create-fee", zap.String("sandbox", sandboxID), zap.Error(err))
-		return
+		h.log.Error("OnCreate: enqueue create-fee (session opened anyway; compute still billed)", zap.String("sandbox", sandboxID), zap.Error(err))
 	}
 
 	price := h.computePrice(cpu, memGB)
-	nextVoucherAt, err := h.emitPeriodVoucher(ctx, sandboxID, ownerAddr, price, now)
-	if err != nil {
-		h.log.Error("OnCreate: emit first period", zap.String("sandbox", sandboxID), zap.Error(err))
-		return
+	// Default NextVoucherAt to now: if the first-period pre-charge fails, the
+	// period stays DUE from now so the generator emits it on its next tick.
+	nextVoucherAt := now
+	if nva, err := h.emitPeriodVoucher(ctx, sandboxID, ownerAddr, price, now); err != nil {
+		h.log.Error("OnCreate: emit first period (session opened anyway; generator will bill the period)", zap.String("sandbox", sandboxID), zap.Error(err))
+	} else {
+		nextVoucherAt = nva
 	}
 
 	s := Session{
