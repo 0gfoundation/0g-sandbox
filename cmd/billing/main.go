@@ -963,6 +963,7 @@ func classifySandbox(ctx context.Context, dtona *daytona.Client, id string) sand
 		return dispositionArchived
 	}
 	return dispositionActive
+}
 
 // appOwnerReader is the slice of the chain client the owner resolver needs.
 type appOwnerReader interface {
