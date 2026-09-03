@@ -23,9 +23,9 @@ func reservedKey(user, provider string) string {
 // returned total — check-then-reserve had a TOCTOU window where N concurrent
 // creates all read the pre-reservation balance and all passed (#74).
 var reserveScript = redis.NewScript(`
-	local v = redis.call('INCRBY', KEYS[1], ARGV[1])
+	redis.call('INCRBY', KEYS[1], ARGV[1])
 	redis.call('EXPIRE', KEYS[1], ARGV[2])
-	return tostring(v)
+	return redis.call('GET', KEYS[1])
 `)
 
 func Reserve(ctx context.Context, rdb *redis.Client, user, provider string, amount *big.Int, ttl time.Duration) (*big.Int, error) {
@@ -48,14 +48,16 @@ func Reserve(ctx context.Context, rdb *redis.Client, user, provider string, amou
 // the same key and briefly re-open the create TOCTOU. Clamped, the worst case
 // is releasing down to zero, never below.
 var releaseScript = redis.NewScript(`
-	local cur = tonumber(redis.call('GET', KEYS[1]) or '0')
-	local dec = tonumber(ARGV[1])
-	if dec > cur then dec = cur end
-	local v = redis.call('DECRBY', KEYS[1], dec)
-	if tonumber(v) <= 0 then
+	-- DECRBY is exact 64-bit integer arithmetic (no Lua double rounding, which
+	-- would corrupt neuron-scale values past 2^53). If it drives the counter
+	-- to <= 0, the key is deleted — so an over-large release clamps to "gone",
+	-- never a negative counter that could wipe concurrent reservations on the
+	-- next read. Redis returns the DECRBY result as an exact integer.
+	local v = redis.call('DECRBY', KEYS[1], ARGV[1])
+	if v <= 0 then
 		redis.call('DEL', KEYS[1])
 	end
-	return v
+	return redis.call('GET', KEYS[1]) or '0'
 `)
 
 func Release(ctx context.Context, rdb *redis.Client, user, provider string, amount *big.Int) {
