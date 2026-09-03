@@ -13,6 +13,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
@@ -37,11 +38,26 @@ type outageChain struct {
 	settles int
 }
 
-func (o *outageChain) SettleFeesWithTEE(context.Context, []voucher.SandboxVoucher) ([]chain.SettlementStatus, error) {
+// SubmitSettleFees always fails: these tests model an outage where nothing
+// can be broadcast (dry wallet / unreachable RPC). Post-#113 interface shape.
+func (o *outageChain) SubmitSettleFees(context.Context, []voucher.SandboxVoucher) (*types.Transaction, error) {
 	o.mu.Lock()
 	o.settles++
 	o.mu.Unlock()
 	return nil, errors.New("SettleFeesWithTEE tx: insufficient funds for gas * price + value")
+}
+
+// fateResolver methods — never reached while submissions fail at broadcast.
+func (o *outageChain) ResolveTxFate(context.Context, common.Hash, uint64) (chain.TxFate, *types.Receipt, error) {
+	return chain.TxDropped, nil, nil
+}
+
+func (o *outageChain) SettleStatusesFromReceipt(context.Context, *types.Receipt, []voucher.SandboxVoucher) ([]chain.SettlementStatus, error) {
+	return nil, errors.New("unreachable in outage tests")
+}
+
+func (o *outageChain) GetLastNonce(context.Context, common.Address, common.Address) (*big.Int, error) {
+	return big.NewInt(0), nil
 }
 
 func (o *outageChain) ProviderAddress() common.Address { return o.provider }
@@ -263,7 +279,19 @@ type rotationChain struct {
 	settles  int
 }
 
-func (r *rotationChain) SettleFeesWithTEE(context.Context, []voucher.SandboxVoucher) ([]chain.SettlementStatus, error) {
+func (r *rotationChain) ResolveTxFate(context.Context, common.Hash, uint64) (chain.TxFate, *types.Receipt, error) {
+	return chain.TxDropped, nil, nil
+}
+
+func (r *rotationChain) SettleStatusesFromReceipt(context.Context, *types.Receipt, []voucher.SandboxVoucher) ([]chain.SettlementStatus, error) {
+	return nil, errors.New("unreachable during rotation hold")
+}
+
+func (r *rotationChain) GetLastNonce(context.Context, common.Address, common.Address) (*big.Int, error) {
+	return big.NewInt(0), nil
+}
+
+func (r *rotationChain) SubmitSettleFees(context.Context, []voucher.SandboxVoucher) (*types.Transaction, error) {
 	r.settles++
 	return nil, errors.New("must not be called during rotation hold")
 }
