@@ -5,8 +5,8 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 
-	"github.com/0gfoundation/0g-sandbox/internal/chain"
 	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
 
@@ -20,7 +20,12 @@ type StopSignal struct {
 // Satisfied by *chain.Client; decoupled here so the settler can be tested
 // without a live RPC connection.
 type ChainClient interface {
-	SettleFeesWithTEE(ctx context.Context, vouchers []voucher.SandboxVoucher) ([]chain.SettlementStatus, error)
+	// SubmitSettleFees broadcasts without waiting; the settler persists the
+	// returned tx before its fate is known (see PendingTxKeyFmt) so a
+	// WaitMined failure or crash can never lead to re-signing usage that the
+	// original tx later settles (double charge).
+	SubmitSettleFees(ctx context.Context, vouchers []voucher.SandboxVoucher) (*types.Transaction, error)
+	fateResolver
 	// ProviderAddress is this deployment's provider identity (= the TEE
 	// signer address); it keys the voucher queue the settler drains.
 	ProviderAddress() common.Address
