@@ -71,9 +71,9 @@ type Handler struct {
 	pricePerCPUPerSec   *big.Int       // per CPU core per second
 	pricePerMemGBPerSec *big.Int       // per GB memory per second
 	voucherIntervalSec  int64
-	providerAddress     string // on-chain settlement identity; used by broker client and balance lookups
+	providerAddress     string   // on-chain settlement identity; used by broker client and balance lookups
 	adminAddresses      []string // operator wallets allowed to call admin-only endpoints (lowercased hex)
-	sshGatewayHost      string // if set, replaces localhost in SSH commands
+	sshGatewayHost      string   // if set, replaces localhost in SSH commands
 	computePricePerSec  *big.Int
 	rdb                 *redis.Client
 	teeKey              *ecdsa.PrivateKey // TEE signing key; nil = sealed containers disabled
@@ -103,6 +103,14 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 	rp.Director = func(req *http.Request) {
 		orig(req)
 		req.Header.Set("Authorization", "Bearer "+dtona.AdminKey())
+		// Force an uncompressed (or transport-managed) upstream body: if the
+		// CALLER's Accept-Encoding survives, Go's transport passes Daytona's
+		// compressed bytes through untouched and the seal-key scrub in
+		// ModifyResponse scans gzip data it cannot match — the caller then
+		// decompresses the key client-side. With the header removed the
+		// transport either gets identity or negotiates gzip itself, which it
+		// transparently decompresses BEFORE ModifyResponse runs.
+		req.Header.Del("Accept-Encoding")
 		req.Host = target.Host
 	}
 
@@ -209,7 +217,6 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/volumes", h.handleListGeneric("daytona-owner"))
 	rg.POST("/snapshots", h.handleSnapshotCreate)
 	rg.DELETE("/snapshots/:id", h.handleSnapshotDelete)
-
 
 	// ── DELETE /sandbox/:id (no action suffix, safe to register separately) ─
 	rg.DELETE("/sandbox/:id", h.withOwnerOrAdmin(h.handleDelete))
@@ -849,12 +856,12 @@ func (h *Handler) handleEvents(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"current_block":  currentBlock,
-		"since":          sinceTimestamp,
-		"total":          total,
-		"page":           page,
-		"page_size":      pageSize,
-		"events":         result,
+		"current_block": currentBlock,
+		"since":         sinceTimestamp,
+		"total":         total,
+		"page":          page,
+		"page_size":     pageSize,
+		"events":        result,
 	})
 }
 
@@ -1122,7 +1129,6 @@ func copyRecorder(c *gin.Context, rec *httptest.ResponseRecorder) {
 	}
 	c.Data(rec.Code, rec.Header().Get("Content-Type"), rec.Body.Bytes())
 }
-
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

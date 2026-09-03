@@ -2,9 +2,12 @@ package proxy
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/0gfoundation/0g-sandbox/internal/daytona"
@@ -173,5 +176,51 @@ func TestForwardedLabelsUpdate_ScrubsSealKey(t *testing.T) {
 	}
 	if !bytes.Contains(w.Body.Bytes(), []byte("SANDBOX_SEAL_ATTESTATION")) {
 		t.Error("SANDBOX_SEAL_ATTESTATION (public) must still be present")
+	}
+}
+
+// Bypass regression: a caller sending its own Accept-Encoding must not end up
+// with upstream-COMPRESSED bytes — the scrub scans the body and cannot match
+// inside gzip. The Director drops the caller's header; the transport then
+// either gets identity or negotiates gzip ITSELF, which it transparently
+// decompresses before ModifyResponse runs — so the scrub always sees
+// plaintext. Upstream here compresses whenever asked, exactly like a
+// compression-enabled Daytona.
+func TestForwardedGetSandbox_GzipCannotBypassScrub(t *testing.T) {
+	sealed := []byte(`{"id":"sb-sealed","labels":{"daytona-owner":"0xWALLET"},"env":{"SANDBOX_SEAL_KEY":"0xleak","SANDBOX_SEAL_ATTESTATION":"pub"}}`)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			w.Header().Set("Content-Encoding", "gzip")
+			gz := gzip.NewWriter(w)
+			_, _ = gz.Write(sealed)
+			gz.Close()
+			return
+		}
+		_, _ = w.Write(sealed)
+	}))
+	t.Cleanup(srv.Close)
+	dtona := daytona.NewClient(srv.URL, "test-key")
+	r := newTestEngine(dtona, &mockBilling{}, "0xWALLET")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sandbox/sb-sealed", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	// Whatever encoding came back, the decoded bytes must be scrubbed.
+	raw := w.Body.Bytes()
+	if strings.Contains(w.Header().Get("Content-Encoding"), "gzip") {
+		gr, err := gzip.NewReader(bytes.NewReader(raw))
+		if err != nil {
+			t.Fatalf("gunzip: %v", err)
+		}
+		raw, _ = io.ReadAll(gr)
+	}
+	if bytes.Contains(raw, []byte("SANDBOX_SEAL_KEY")) {
+		t.Errorf("seal key leaked (encoding=%q): %s", w.Header().Get("Content-Encoding"), raw)
+	}
+	if !bytes.Contains(raw, []byte("SANDBOX_SEAL_ATTESTATION")) {
+		t.Error("attestation (public) must survive")
 	}
 }
