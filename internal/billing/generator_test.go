@@ -327,3 +327,80 @@ func TestRunGeneration_FlatRateFallback(t *testing.T) {
 		t.Errorf("flat rate TotalFee: got %d want %d", v.TotalFee.Int64(), wantFee)
 	}
 }
+
+// ── Backlog catch-up (#76) ───────────────────────────────────────────────────
+
+// After downtime the generator owes many periods. One tick must close a
+// moderate backlog entirely — in CHUNKS (≤catchupChunkIntervals per voucher),
+// with the total fee exactly covering every missed period.
+func TestRunGeneration_Backlog_CatchesUpInChunks(t *testing.T) {
+	rdb, _ := newTestRedis(t)
+	ms := &mockSigner{}
+	const intervalSec = int64(60)
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(0), new(big.Int), new(big.Int), intervalSec, ms, zap.NewNop())
+	ctx := context.Background()
+
+	// 100 intervals behind (+30s slack so integer division lands on 100).
+	start := time.Now().Unix() - 100*intervalSec + 30
+	CreateSession(ctx, rdb, Session{ //nolint:errcheck
+		SandboxID: "sb-backlog", Owner: testOwner, Provider: testProvider,
+		NextVoucherAt: start, PricePerSec: "100",
+	})
+
+	runGeneration(ctx, rdb, h, zap.NewNop())
+
+	ms.mu.Lock()
+	n := len(ms.vouchers)
+	total := new(big.Int)
+	for _, v := range ms.vouchers {
+		total.Add(total, v.TotalFee)
+	}
+	ms.mu.Unlock()
+	if n != 2 { // 60 + 40
+		t.Fatalf("want 2 chunked vouchers (60+40 intervals), got %d", n)
+	}
+	wantTotal := int64(100) * intervalSec * 100 // intervals × sec × price(session "100")
+	if total.Int64() != wantTotal {
+		t.Errorf("total fee: got %d want %d (every missed period billed once)", total.Int64(), wantTotal)
+	}
+	sess, _ := GetSession(ctx, rdb, "sb-backlog")
+	if got := sess.NextVoucherAt; got != start+100*intervalSec {
+		t.Errorf("NextVoucherAt: got %d want %d (fully caught up)", got, start+100*intervalSec)
+	}
+}
+
+// A very deep backlog is bounded per tick (catchupMaxVouchersPerTick chunks)
+// and resumes next tick — no unbounded work, no lost periods.
+func TestRunGeneration_DeepBacklog_BoundedPerTick(t *testing.T) {
+	rdb, _ := newTestRedis(t)
+	ms := &mockSigner{}
+	const intervalSec = int64(60)
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(0), new(big.Int), new(big.Int), intervalSec, ms, zap.NewNop())
+	ctx := context.Background()
+
+	start := time.Now().Unix() - 1000*intervalSec + 30 // 1000 intervals behind
+	CreateSession(ctx, rdb, Session{                   //nolint:errcheck
+		SandboxID: "sb-deep", Owner: testOwner, Provider: testProvider,
+		NextVoucherAt: start, PricePerSec: "100",
+	})
+
+	runGeneration(ctx, rdb, h, zap.NewNop())
+	ms.mu.Lock()
+	n1 := len(ms.vouchers)
+	ms.mu.Unlock()
+	if n1 != catchupMaxVouchersPerTick {
+		t.Fatalf("first tick: want %d chunks, got %d", catchupMaxVouchersPerTick, n1)
+	}
+	sess, _ := GetSession(ctx, rdb, "sb-deep")
+	advanced := (sess.NextVoucherAt - start) / intervalSec
+	if advanced != catchupMaxVouchersPerTick*catchupChunkIntervals {
+		t.Fatalf("first tick advanced %d intervals, want %d", advanced, catchupMaxVouchersPerTick*catchupChunkIntervals)
+	}
+
+	// Second tick continues from where the first stopped.
+	runGeneration(ctx, rdb, h, zap.NewNop())
+	sess2, _ := GetSession(ctx, rdb, "sb-deep")
+	if sess2.NextVoucherAt <= sess.NextVoucherAt {
+		t.Error("second tick must keep advancing the backlog")
+	}
+}
