@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
+	"github.com/0gfoundation/0g-sandbox/internal/billing"
 	"github.com/0gfoundation/0g-sandbox/internal/chain"
 	"github.com/0gfoundation/0g-sandbox/internal/daytona"
 )
@@ -791,5 +793,106 @@ func TestEvents_DefaultSinceIsBounded(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/events?since=1700000000", nil))
 	if fetcher.gotSince != 1700000000 {
 		t.Errorf("explicit since not honored: %d", fetcher.gotSince)
+	}
+}
+
+// ── #74 balance-gate TOCTOU ──────────────────────────────────────────────────
+
+// N concurrent creates against a balance that covers exactly ONE must admit
+// exactly one. Pre-fix, all N read the pre-reservation total and all passed;
+// reserve-first serializes on INCRBY, so this holds under ANY interleaving.
+func TestCreateGate_ConcurrentCreates_OnlyOneAdmitted(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
+	var daytonaCreates int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			atomic.AddInt32(&daytonaCreates, 1)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"sb-new","state":"started","labels":{"daytona-owner":"0xW"}}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+	dtona := daytona.NewClient(srv.URL, "test-key")
+
+	r := gin.New()
+	api := r.Group("/api", func(c *gin.Context) { c.Set("wallet_address", "0xW"); c.Next() })
+	// createFee=100, no per-resource pricing → createRequired = 100.
+	// Balance 150 covers exactly one create.
+	NewHandler(dtona, &mockBilling{}, &mockBalChecker{bal: big.NewInt(150)}, nil, nil,
+		big.NewInt(100), new(big.Int), new(big.Int), new(big.Int), "0xPROV",
+		nil, "", rdb, zap.NewNop(), "", nil, 60).Register(api)
+
+	const n = 8
+	codes := make(chan int, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"cpu":0}`))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			codes <- w.Code
+		}()
+	}
+	wg.Wait()
+	close(codes)
+
+	ok, denied := 0, 0
+	for c := range codes {
+		switch c {
+		case http.StatusOK, http.StatusCreated:
+			ok++
+		case http.StatusPaymentRequired:
+			denied++
+		default:
+			t.Errorf("unexpected status %d", c)
+		}
+	}
+	if ok != 1 || denied != n-1 {
+		t.Fatalf("want exactly 1 admitted / %d denied, got %d / %d (daytona creates: %d)",
+			n-1, ok, denied, atomic.LoadInt32(&daytonaCreates))
+	}
+	if got := atomic.LoadInt32(&daytonaCreates); got != 1 {
+		t.Fatalf("daytona must see exactly 1 create, got %d", got)
+	}
+}
+
+// A rejected create must roll back its reservation — otherwise rejections
+// permanently eat into available balance until the TTL expires.
+func TestCreateGate_RejectionRollsBackReservation(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
+	srv, _ := mockDaytona(t, nil)
+	dtona := daytona.NewClient(srv.URL, "test-key")
+	r := gin.New()
+	api := r.Group("/api", func(c *gin.Context) { c.Set("wallet_address", "0xW"); c.Next() })
+	NewHandler(dtona, &mockBilling{}, &mockBalChecker{bal: big.NewInt(10)}, nil, nil,
+		big.NewInt(100), new(big.Int), new(big.Int), new(big.Int), "0xPROV",
+		nil, "", rdb, zap.NewNop(), "", nil, 60).Register(api)
+
+	for i := 0; i < 3; i++ {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusPaymentRequired {
+			t.Fatalf("attempt %d: status %d", i, w.Code)
+		}
+	}
+	if got := billing.GetReserved(context.Background(), rdb, "0xW", "0xPROV"); got.Sign() != 0 {
+		t.Fatalf("rejected creates must leave zero reservation, got %s", got)
 	}
 }

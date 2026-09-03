@@ -361,41 +361,65 @@ func (h *Handler) handleCreate(c *gin.Context) {
 			c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 			return
 		}
-		available := availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress), heldDebt)
-		if available.Cmp(createRequired) < 0 && h.broker != nil {
+		// Reserve FIRST, judge against the post-increment total, roll back on
+		// failure. Check-then-reserve had a TOCTOU window: N concurrent creates
+		// all read the pre-reservation total, all passed, and N sandboxes
+		// started on a balance that covered one (#74). The INCRBY inside
+		// Reserve is the serialization point — under any interleaving, request
+		// k sees k×required reserved and judges accordingly. TTL is a safety
+		// net: if the process crashes before OnCreate fires, the reservation
+		// auto-expires after 2 voucher intervals.
+		ttl := time.Duration(h.voucherIntervalSec*2) * time.Second
+		totalReserved, rerr := billing.Reserve(c.Request.Context(), h.rdb, wallet, h.providerAddress, createRequired, ttl)
+		if rerr != nil {
+			// Redis unavailable: fall back to the advisory (racy) check rather
+			// than blocking all creates — billing is degraded anyway and the
+			// debt ledger still catches overspend after the fact.
+			h.log.Warn("balance reservation failed; advisory check only", zap.String("wallet", wallet), zap.Error(rerr))
+			totalReserved = new(big.Int).Add(billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress), createRequired)
+		} else {
+			createReserved = true
+		}
+		// shortfall = balance − heldDebt − totalReserved (totalReserved already
+		// includes THIS request); negative → cannot afford.
+		shortfall := new(big.Int).Sub(new(big.Int).Sub(balance, heldDebt), totalReserved)
+		if shortfall.Sign() < 0 && h.broker != nil {
 			// Ask the broker to top up the user's balance (funding-only call:
 			// sandbox_id="" means no monitoring session is registered yet).
 			if berr := h.broker.registerSession(c.Request.Context(), "", wallet, int64(reqCPU), int64(reqMemGB)); berr != nil {
 				h.log.Warn("broker pre-create fund", zap.String("wallet", wallet), zap.Error(berr))
 			} else {
-				// Re-read balance after top-up.
+				// Re-read balance after top-up (the reservation stays put).
 				balance, err = h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
 				if err != nil {
+					if createReserved {
+						billing.Release(c.Request.Context(), h.rdb, wallet, h.providerAddress, createRequired)
+					}
 					h.log.Error("balance re-check", zap.String("wallet", wallet), zap.Error(err))
 					c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 					return
 				}
-				available = availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress), heldDebt)
+				shortfall = new(big.Int).Sub(new(big.Int).Sub(balance, heldDebt), totalReserved)
 			}
 		}
-		if available.Cmp(createRequired) < 0 {
+		if shortfall.Sign() < 0 {
+			if createReserved {
+				billing.Release(c.Request.Context(), h.rdb, wallet, h.providerAddress, createRequired)
+				createReserved = false
+			}
+			// Spendable BEFORE this request's own reservation, floored at 0.
+			display := new(big.Int).Add(shortfall, createRequired)
+			if display.Sign() < 0 {
+				display = new(big.Int)
+			}
 			c.JSON(http.StatusPaymentRequired, gin.H{
 				"error":              "insufficient balance",
-				"available":          available.String(),
+				"available":          display.String(),
 				"required":           createRequired.String(),
 				"outstanding_debt":   held.String(),    // parked debt — must be topped up
 				"pending_settlement": pending.String(), // queued usage — charged on next settle
 			})
 			return
-		}
-		// Reserve the cost to prevent concurrent requests from double-spending.
-		// TTL is a safety net: if the process crashes before OnCreate fires, the
-		// reservation auto-expires after 2 voucher intervals.
-		ttl := time.Duration(h.voucherIntervalSec*2) * time.Second
-		if err := billing.Reserve(c.Request.Context(), h.rdb, wallet, h.providerAddress, createRequired, ttl); err != nil {
-			h.log.Warn("balance reservation failed (non-fatal)", zap.String("wallet", wallet), zap.Error(err))
-		} else {
-			createReserved = true
 		}
 	}
 
@@ -611,39 +635,55 @@ func (h *Handler) handleStart(c *gin.Context) {
 			c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 			return
 		}
-		available := availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress), heldDebt)
-		if available.Cmp(startRequired) < 0 && h.broker != nil {
+		// Reserve-first, same TOCTOU shape as the create gate (#74): judge
+		// against the post-increment total, roll back the reservation on
+		// rejection.
+		ttl := time.Duration(h.voucherIntervalSec*2) * time.Second
+		totalReserved, rerr := billing.Reserve(c.Request.Context(), h.rdb, wallet, h.providerAddress, startRequired, ttl)
+		if rerr != nil {
+			h.log.Warn("balance reservation failed; advisory check only", zap.String("wallet", wallet), zap.Error(rerr))
+			totalReserved = new(big.Int).Add(billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress), startRequired)
+		} else {
+			startReserved = true
+		}
+		shortfall := new(big.Int).Sub(new(big.Int).Sub(balance, heldDebt), totalReserved)
+		if shortfall.Sign() < 0 && h.broker != nil {
 			if berr := h.broker.registerSession(c.Request.Context(), id, wallet, int64(cpu), int64(memGB)); berr != nil {
 				h.log.Warn("broker pre-start fund", zap.String("id", id), zap.Error(berr))
 			} else {
 				// Re-check balance after broker waited for deposit.
 				balance, err = h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
 				if err != nil {
+					if startReserved {
+						billing.Release(c.Request.Context(), h.rdb, wallet, h.providerAddress, startRequired)
+					}
 					h.log.Error("balance re-check (start)", zap.String("wallet", wallet), zap.Error(err))
 					c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 					return
 				}
-				available = availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress), heldDebt)
+				shortfall = new(big.Int).Sub(new(big.Int).Sub(balance, heldDebt), totalReserved)
 			}
 		} else if h.broker != nil {
 			// Balance sufficient: register for monitoring only (non-blocking).
 			go h.broker.registerSession(context.WithoutCancel(c.Request.Context()), id, wallet, int64(cpu), int64(memGB))
 		}
-		if available.Cmp(startRequired) < 0 {
+		if shortfall.Sign() < 0 {
+			if startReserved {
+				billing.Release(c.Request.Context(), h.rdb, wallet, h.providerAddress, startRequired)
+				startReserved = false
+			}
+			display := new(big.Int).Add(shortfall, startRequired)
+			if display.Sign() < 0 {
+				display = new(big.Int)
+			}
 			c.JSON(http.StatusPaymentRequired, gin.H{
 				"error":              "insufficient balance",
-				"available":          available.String(),
+				"available":          display.String(),
 				"required":           startRequired.String(),
 				"outstanding_debt":   held.String(),    // parked debt — must be topped up
 				"pending_settlement": pending.String(), // queued usage — charged on next settle
 			})
 			return
-		}
-		ttl := time.Duration(h.voucherIntervalSec*2) * time.Second
-		if err := billing.Reserve(c.Request.Context(), h.rdb, wallet, h.providerAddress, startRequired, ttl); err != nil {
-			h.log.Warn("balance reservation failed (non-fatal)", zap.String("wallet", wallet), zap.Error(err))
-		} else {
-			startReserved = true
 		}
 	}
 
