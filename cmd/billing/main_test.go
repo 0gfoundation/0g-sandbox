@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
@@ -218,7 +220,7 @@ func TestRunStopHandler_StopsAndCleansRedis(t *testing.T) {
 
 	// Pre-populate both Redis keys that the handler should delete
 	bg := context.Background()
-	rdb.Set(bg, "billing:compute:sb-1", "session", 0)          //nolint:errcheck
+	rdb.Set(bg, "billing:compute:sb-1", "session", 0)           //nolint:errcheck
 	rdb.Set(bg, "stop:sandbox:sb-1", "insufficient_balance", 0) //nolint:errcheck
 
 	go runStopHandler(ctx, stopCh, mock.client(), rdb, zap.NewNop(), nil)
@@ -244,7 +246,7 @@ func TestRunStopHandler_DaytonaError_StillCleansRedis(t *testing.T) {
 	stopCh := make(chan settler.StopSignal, 4)
 
 	bg := context.Background()
-	rdb.Set(bg, "billing:compute:sb-err", "session", 0)    //nolint:errcheck
+	rdb.Set(bg, "billing:compute:sb-err", "session", 0)       //nolint:errcheck
 	rdb.Set(bg, "stop:sandbox:sb-err", "not_acknowledged", 0) //nolint:errcheck
 
 	go runStopHandler(ctx, stopCh, mock.client(), rdb, zap.NewNop(), nil)
@@ -307,5 +309,77 @@ func TestRunStopHandler_ContextCancel_Exits(t *testing.T) {
 		// Good
 	case <-time.After(500 * time.Millisecond):
 		t.Error("runStopHandler did not exit after context cancellation")
+	}
+}
+
+// ── newAppOwnerResolver ───────────────────────────────────────────────────────
+
+type mockOwnerReader struct {
+	mu    sync.Mutex
+	owner common.Address
+	err   error
+	calls int
+}
+
+func (m *mockOwnerReader) GetAppOwner(context.Context, string) (common.Address, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls++
+	return m.owner, m.err
+}
+
+// Finding #24: stale-on-error must be BOUNDED. A removed owner kept
+// provider-wide destructive admin for as long as the RPC stayed degraded; past
+// the cap the resolver must fail closed for the owner path (static
+// ADMIN_ADDRESSES wallets are unaffected).
+func TestAppOwnerResolver_StaleServingIsBounded(t *testing.T) {
+	reader := &mockOwnerReader{owner: common.HexToAddress("0xAAA")}
+	want := strings.ToLower(common.HexToAddress("0xAAA").Hex())
+	ttl := 10 * time.Millisecond
+	cap := 60 * time.Millisecond
+	fn := newAppOwnerResolver(reader, "app", ttl, cap, zap.NewNop())
+
+	if got, err := fn(context.Background()); err != nil || got != want {
+		t.Fatalf("initial resolve: %q err=%v", got, err)
+	}
+
+	// RPC starts failing. Within the stale cap the last good value is served.
+	reader.mu.Lock()
+	reader.err = fmt.Errorf("rpc down")
+	reader.mu.Unlock()
+	time.Sleep(2 * ttl) // past TTL, well within cap
+	if got, err := fn(context.Background()); err != nil || got != want {
+		t.Fatalf("within stale cap: want stale value, got %q err=%v", got, err)
+	}
+
+	// Past the cap: fail closed.
+	time.Sleep(cap)
+	if _, err := fn(context.Background()); err == nil {
+		t.Fatal("past stale cap the resolver must fail closed, got nil error")
+	}
+
+	// RPC recovers with a NEW owner: fresh value served, old owner gone.
+	reader.mu.Lock()
+	reader.err = nil
+	reader.owner = common.HexToAddress("0xBBB")
+	reader.mu.Unlock()
+	if got, err := fn(context.Background()); err != nil || got != strings.ToLower(common.HexToAddress("0xBBB").Hex()) {
+		t.Fatalf("after recovery: %q err=%v", got, err)
+	}
+}
+
+// TTL caching: no chain call within the TTL, refresh after it expires.
+func TestAppOwnerResolver_TTL(t *testing.T) {
+	reader := &mockOwnerReader{owner: common.HexToAddress("0xAAA")}
+	fn := newAppOwnerResolver(reader, "app", 30*time.Millisecond, time.Minute, zap.NewNop())
+	fn(context.Background()) //nolint:errcheck
+	fn(context.Background()) //nolint:errcheck
+	if reader.calls != 1 {
+		t.Fatalf("within TTL want 1 chain call, got %d", reader.calls)
+	}
+	time.Sleep(40 * time.Millisecond)
+	fn(context.Background()) //nolint:errcheck
+	if reader.calls != 2 {
+		t.Fatalf("after TTL want refresh (2 calls), got %d", reader.calls)
 	}
 }

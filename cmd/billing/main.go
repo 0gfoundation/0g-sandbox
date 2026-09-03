@@ -87,32 +87,7 @@ func main() {
 	if backendAppName == "" {
 		log.Warn("BACKEND_APP_NAME not set — app owner cannot be resolved; only ADMIN_ADDRESSES wallets are admins")
 	}
-	var ownerMu sync.Mutex
-	var ownerCached string
-	var ownerCachedAt time.Time
-	appOwnerFn := func(ctx context.Context) (string, error) {
-		ownerMu.Lock()
-		defer ownerMu.Unlock()
-		if ownerCached != "" && time.Since(ownerCachedAt) < time.Minute {
-			return ownerCached, nil
-		}
-		if backendAppName == "" {
-			return "", fmt.Errorf("BACKEND_APP_NAME not set")
-		}
-		owner, err := onchain.GetAppOwner(ctx, backendAppName)
-		if err != nil {
-			if ownerCached != "" {
-				return ownerCached, nil // serve stale over failing closed
-			}
-			return "", err
-		}
-		if owner == (common.Address{}) {
-			return "", fmt.Errorf("app %q not registered in TappRegistry", backendAppName)
-		}
-		ownerCached = strings.ToLower(owner.Hex())
-		ownerCachedAt = time.Now()
-		return ownerCached, nil
-	}
+	appOwnerFn := newAppOwnerResolver(onchain, backendAppName, appOwnerTTL, appOwnerStaleCap, log)
 	if owner, err := appOwnerFn(ctx); err != nil {
 		log.Warn("app owner not resolvable yet", zap.String("app_id", backendAppName), zap.Error(err))
 	} else {
@@ -286,14 +261,14 @@ func main() {
 	// Public providers list — returns known providers with their on-chain service data.
 	r.GET("/api/providers", func(c *gin.Context) {
 		type ProviderInfo struct {
-			Address               string `json:"address"`
-			URL                   string `json:"url"`
-			AppId                 string `json:"app_id"`
-			PricePerCPUPerMin     string `json:"price_per_cpu_per_min"`
-			PricePerCPUPerSec     string `json:"price_per_cpu_per_sec"`
-			PricePerMemGBPerMin   string `json:"price_per_mem_gb_per_min"`
-			PricePerMemGBPerSec   string `json:"price_per_mem_gb_per_sec"`
-			CreateFee             string `json:"create_fee"`
+			Address             string `json:"address"`
+			URL                 string `json:"url"`
+			AppId               string `json:"app_id"`
+			PricePerCPUPerMin   string `json:"price_per_cpu_per_min"`
+			PricePerCPUPerSec   string `json:"price_per_cpu_per_sec"`
+			PricePerMemGBPerMin string `json:"price_per_mem_gb_per_min"`
+			PricePerMemGBPerSec string `json:"price_per_mem_gb_per_sec"`
+			CreateFee           string `json:"create_fee"`
 		}
 		// For now: just the configured provider.  Extend via KNOWN_PROVIDERS in the future.
 		addrs := []string{providerHex}
@@ -903,5 +878,62 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 		case <-ctx.Done():
 			return
 		}
+	}
+}
+
+// appOwnerReader is the slice of the chain client the owner resolver needs.
+type appOwnerReader interface {
+	GetAppOwner(ctx context.Context, appId string) (common.Address, error)
+}
+
+const (
+	// appOwnerTTL is how long a successful owner lookup is trusted. The
+	// resolver's value gates ADMIN checks, so the TTL is also the window in
+	// which an on-chain ownership transfer has not yet propagated — an
+	// ex-owner keeps admin (archive-all, force-stop/delete across tenants)
+	// for at most this long. Keep it short.
+	appOwnerTTL = 15 * time.Second
+	// appOwnerStaleCap bounds how long the LAST GOOD value may be served when
+	// the RPC is failing. Serving stale keeps a flaky RPC from locking the
+	// real owner out mid-incident, but unbounded staleness let a REMOVED
+	// owner keep provider-wide destructive admin for as long as the RPC
+	// stayed degraded. Past the cap the resolver fails closed for the owner
+	// path — static ADMIN_ADDRESSES wallets are unaffected.
+	appOwnerStaleCap = 10 * time.Minute
+)
+
+// newAppOwnerResolver returns a TTL-cached resolver of the appId's TappRegistry
+// owner with bounded stale-serving (see the constants above for the exact
+// trust windows — the returned value is an ADMIN identity).
+func newAppOwnerResolver(chainReader appOwnerReader, backendAppName string, ttl, staleCap time.Duration, log *zap.Logger) func(ctx context.Context) (string, error) {
+	var mu sync.Mutex
+	var cached string
+	var fetchedAt time.Time
+	return func(ctx context.Context) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if cached != "" && time.Since(fetchedAt) < ttl {
+			return cached, nil
+		}
+		if backendAppName == "" {
+			return "", fmt.Errorf("BACKEND_APP_NAME not set")
+		}
+		owner, err := chainReader.GetAppOwner(ctx, backendAppName)
+		if err != nil {
+			if cached != "" && time.Since(fetchedAt) < staleCap {
+				return cached, nil // bounded stale-over-fail-closed
+			}
+			if cached != "" {
+				log.Error("app owner lookup failing beyond stale cap — owner-based admin fails closed until RPC recovers (static ADMIN_ADDRESSES unaffected)",
+					zap.Duration("stale_for", time.Since(fetchedAt)), zap.Error(err))
+			}
+			return "", err
+		}
+		if owner == (common.Address{}) {
+			return "", fmt.Errorf("app %q not registered in TappRegistry", backendAppName)
+		}
+		cached = strings.ToLower(owner.Hex())
+		fetchedAt = time.Now()
+		return cached, nil
 	}
 }
