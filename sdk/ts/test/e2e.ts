@@ -38,7 +38,7 @@ if (!(await sdk.chain.isAcknowledged())) {
 const sealed = process.env.SEALED === '1' || info.sealed_only;
 const sb = await sdk.sandbox.create({
   name: `sdk-e2e-${Date.now()}`,
-  snapshot: process.env.SNAPSHOT || undefined,
+  snapshot: process.env.SNAPSHOT || 'ubuntu',
   ...(sealed ? { sealed: true, publicPorts: [8080] } : {}),
 });
 console.log('created:', sb.id, 'state:', sb.info.state);

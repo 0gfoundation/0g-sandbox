@@ -239,6 +239,13 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "read body"})
 		return
 	}
+	// Snapshot-only policy: reject custom cpu/memory/disk/gpu/image so the
+	// billed spec always equals the provisioned one (#73/#77). Runs before any
+	// balance reservation or Daytona call.
+	if err := requireSnapshotCreate(body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	reqCPU, reqMemGB := extractResources(body)
 	// For snapshot creates the request body has no cpu/memory fields.
 	// Look up the snapshot spec so the broker pre-create call uses the real resource cost.

@@ -129,10 +129,10 @@ func envOrDefault(key, def string) string {
 
 func addChainFlags(fs *flag.FlagSet) *chainFlags {
 	cf := &chainFlags{}
-	fs.StringVar(&cf.rpc,      "rpc",      envOrDefault("RPC_URL", "https://evmrpc-testnet.0g.ai"),                       "RPC endpoint")
-	fs.Int64Var(&cf.chainID,   "chain-id", 16602,                                                                          "Chain ID")
+	fs.StringVar(&cf.rpc, "rpc", envOrDefault("RPC_URL", "https://evmrpc-testnet.0g.ai"), "RPC endpoint")
+	fs.Int64Var(&cf.chainID, "chain-id", 16602, "Chain ID")
 	fs.StringVar(&cf.contract, "contract", envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: set --contract or SETTLEMENT_CONTRACT env)")
-	fs.StringVar(&cf.tapp,     "tapp",     envOrDefault("TAPP_REGISTRY", ""),                                              "TappRegistry contract address (required for ack)")
+	fs.StringVar(&cf.tapp, "tapp", envOrDefault("TAPP_REGISTRY", ""), "TappRegistry contract address (required for ack)")
 	return cf
 }
 
@@ -142,7 +142,7 @@ func runBalance(args []string) {
 	fs := flag.NewFlagSet("balance", flag.ExitOnError)
 	cf := addChainFlags(fs)
 	addrHex := fs.String("address", "", "Wallet address to check (defaults to --key address)")
-	keyHex  := fs.String("key",     "", "User private key (hex); or set USER_KEY env")
+	keyHex := fs.String("key", "", "User private key (hex); or set USER_KEY env")
 	providerHex := fs.String("provider", "", "Provider address (optional; shows nonce)")
 	_ = fs.Parse(args)
 
@@ -200,8 +200,8 @@ func runBalance(args []string) {
 func runDeposit(args []string) {
 	fs := flag.NewFlagSet("deposit", flag.ExitOnError)
 	cf := addChainFlags(fs)
-	keyHex      := fs.String("key",      "", "User private key (hex); or set USER_KEY env")
-	amount      := fs.Float64("amount",  0.01, "Amount to deposit in 0G (e.g. 0.01)")
+	keyHex := fs.String("key", "", "User private key (hex); or set USER_KEY env")
+	amount := fs.Float64("amount", 0.01, "Amount to deposit in 0G (e.g. 0.01)")
 	providerHex := fs.String("provider", "", "Provider address to deposit for (required)")
 	_ = fs.Parse(args)
 
@@ -262,10 +262,10 @@ func runDeposit(args []string) {
 func runAcknowledge(args []string) {
 	fs := flag.NewFlagSet("acknowledge", flag.ExitOnError)
 	cf := addChainFlags(fs)
-	keyHex      := fs.String("key",      "",    "User private key (hex); or set USER_KEY env")
-	providerHex := fs.String("provider", "",    "Provider address (required)")
-	revoke      := fs.Bool("revoke",     false, "Revoke instead of acknowledge")
-	yes         := fs.Bool("yes",        false, "Skip interactive confirmation (for scripts)")
+	keyHex := fs.String("key", "", "User private key (hex); or set USER_KEY env")
+	providerHex := fs.String("provider", "", "Provider address (required)")
+	revoke := fs.Bool("revoke", false, "Revoke instead of acknowledge")
+	yes := fs.Bool("yes", false, "Skip interactive confirmation (for scripts)")
 	_ = fs.Parse(args)
 
 	if *providerHex == "" {
@@ -487,23 +487,19 @@ func mustParseBigInt(s string) *big.Int {
 
 func runCreate(args []string) {
 	fs := flag.NewFlagSet("create", flag.ExitOnError)
-	apiURL   := fs.String("api",      "http://localhost:8080", "Billing proxy URL")
-	keyHex   := fs.String("key",      "",                     "User private key (hex); or set USER_KEY env")
-	snapshot := fs.String("snapshot", "",                     "Snapshot name to use as the sandbox base (optional)")
-	name     := fs.String("name",     "",                     "Sandbox display name (optional)")
-	class    := fs.String("class",    "",                     "Sandbox class: small | medium | large (optional)")
-	cpu      := fs.Int("cpu",         0,                      "CPU cores (optional, overrides class)")
-	memory   := fs.Int("memory",      0,                      "Memory in GB (optional, overrides class)")
-	disk     := fs.Int("disk",        0,                      "Disk in GB (optional, overrides class)")
-	sealed   := fs.Bool("sealed",     false,                  "Create a sealed sandbox (blocks SSH and toolbox access)")
-	sealID   := fs.String("seal-id",  "",                     "Optional caller-chosen seal_id (64 hex chars); random if unset")
-	ports    := fs.String("ports",    "",                     "Comma-separated ports to expose publicly (e.g. 8080,3000); others require auth. Empty = all ports public")
+	apiURL := fs.String("api", "http://localhost:8080", "Billing proxy URL")
+	keyHex := fs.String("key", "", "User private key (hex); or set USER_KEY env")
+	snapshot := fs.String("snapshot", "", "Snapshot name to use as the sandbox base (optional)")
+	name := fs.String("name", "", "Sandbox display name (optional)")
+	sealed := fs.Bool("sealed", false, "Create a sealed sandbox (blocks SSH and toolbox access)")
+	sealID := fs.String("seal-id", "", "Optional caller-chosen seal_id (64 hex chars); random if unset")
+	ports := fs.String("ports", "", "Comma-separated ports to expose publicly (e.g. 8080,3000); others require auth. Empty = all ports public")
 	var envArgs multiString
-	fs.Var(&envArgs, "env",                                   "Env var KEY=VAL injected into container; repeatable")
+	fs.Var(&envArgs, "env", "Env var KEY=VAL injected into container; repeatable")
 	_ = fs.Parse(args)
 
-	if *class != "" && *class != "small" && *class != "medium" && *class != "large" {
-		fatalf("--class must be one of: small, medium, large")
+	if *snapshot == "" {
+		fatalf("--snapshot is required (custom cpu/memory is not supported; pick a snapshot from `list-snapshots`)")
 	}
 
 	privKey := mustLoadKey(*keyHex)
@@ -514,18 +510,6 @@ func runCreate(args []string) {
 	}
 	if *snapshot != "" {
 		body["snapshot"] = *snapshot
-	}
-	if *class != "" {
-		body["class"] = *class
-	}
-	if *cpu > 0 {
-		body["cpu"] = *cpu
-	}
-	if *memory > 0 {
-		body["memory"] = *memory
-	}
-	if *disk > 0 {
-		body["disk"] = *disk
 	}
 	if *sealed {
 		body["sealed"] = true
@@ -591,8 +575,8 @@ func runCreate(args []string) {
 
 func runList(args []string) {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
-	apiURL  := fs.String("api", "http://localhost:8080", "Billing proxy URL")
-	keyHex  := fs.String("key", "",                     "User private key (hex); or set USER_KEY env")
+	apiURL := fs.String("api", "http://localhost:8080", "Billing proxy URL")
+	keyHex := fs.String("key", "", "User private key (hex); or set USER_KEY env")
 	_ = fs.Parse(args)
 
 	privKey := mustLoadKey(*keyHex)
@@ -636,8 +620,8 @@ func runList(args []string) {
 func runStop(args []string) {
 	fs := flag.NewFlagSet("stop", flag.ExitOnError)
 	apiURL := fs.String("api", "http://localhost:8080", "Billing proxy URL")
-	keyHex := fs.String("key", "",                     "User private key (hex); or set USER_KEY env")
-	id     := fs.String("id",  "",                     "Sandbox ID (required)")
+	keyHex := fs.String("key", "", "User private key (hex); or set USER_KEY env")
+	id := fs.String("id", "", "Sandbox ID (required)")
 	_ = fs.Parse(args)
 
 	if *id == "" {
@@ -672,8 +656,8 @@ func runStop(args []string) {
 func runDelete(args []string) {
 	fs := flag.NewFlagSet("delete", flag.ExitOnError)
 	apiURL := fs.String("api", "http://localhost:8080", "Billing proxy URL")
-	keyHex := fs.String("key", "",                     "User private key (hex); or set USER_KEY env")
-	id     := fs.String("id",  "",                     "Sandbox ID (required)")
+	keyHex := fs.String("key", "", "User private key (hex); or set USER_KEY env")
+	id := fs.String("id", "", "Sandbox ID (required)")
 	_ = fs.Parse(args)
 
 	if *id == "" {
@@ -708,11 +692,11 @@ func runDelete(args []string) {
 // runExec runs a shell command inside a sandbox via the toolbox API and prints stdout/stderr.
 func runExec(args []string) {
 	fs := flag.NewFlagSet("exec", flag.ExitOnError)
-	apiURL  := fs.String("api",     "http://localhost:8080", "Billing proxy URL")
-	keyHex  := fs.String("key",     "",                     "User private key (hex); or set USER_KEY env")
-	id      := fs.String("id",      "",                     "Sandbox ID (required)")
-	command := fs.String("cmd",     "",                     "Shell command to run (required)")
-	timeout := fs.Int("timeout",    30,                     "Timeout in seconds")
+	apiURL := fs.String("api", "http://localhost:8080", "Billing proxy URL")
+	keyHex := fs.String("key", "", "User private key (hex); or set USER_KEY env")
+	id := fs.String("id", "", "Sandbox ID (required)")
+	command := fs.String("cmd", "", "Shell command to run (required)")
+	timeout := fs.Int("timeout", 30, "Timeout in seconds")
 	_ = fs.Parse(args)
 
 	if *id == "" {
@@ -817,12 +801,12 @@ func printSandboxOutput(id, command, output string, exitCode int) {
 // runToolbox makes an arbitrary toolbox API call and prints the response.
 func runToolbox(args []string) {
 	fs := flag.NewFlagSet("toolbox", flag.ExitOnError)
-	apiURL  := fs.String("api",    "http://localhost:8080", "Billing proxy URL")
-	keyHex  := fs.String("key",    "",                     "User private key (hex); or set USER_KEY env")
-	id      := fs.String("id",     "",                     "Sandbox ID (required)")
-	action  := fs.String("action", "",                     "Toolbox action path, e.g. files, git/status (required)")
-	method  := fs.String("method", "GET",                  "HTTP method")
-	body    := fs.String("body",   "",                     "Request body (JSON)")
+	apiURL := fs.String("api", "http://localhost:8080", "Billing proxy URL")
+	keyHex := fs.String("key", "", "User private key (hex); or set USER_KEY env")
+	id := fs.String("id", "", "Sandbox ID (required)")
+	action := fs.String("action", "", "Toolbox action path, e.g. files, git/status (required)")
+	method := fs.String("method", "GET", "HTTP method")
+	body := fs.String("body", "", "Request body (JSON)")
 	_ = fs.Parse(args)
 
 	if *id == "" {
@@ -866,7 +850,7 @@ func runStart(args []string) {
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
 	apiURL := fs.String("api", "http://localhost:8080", "Billing proxy URL")
 	keyHex := fs.String("key", "", "User private key (hex); or set USER_KEY env")
-	id     := fs.String("id",  "", "Sandbox ID (required)")
+	id := fs.String("id", "", "Sandbox ID (required)")
 	_ = fs.Parse(args)
 
 	if *id == "" {
@@ -904,7 +888,7 @@ func runSSHAccess(args []string) {
 	fs := flag.NewFlagSet("ssh-access", flag.ExitOnError)
 	apiURL := fs.String("api", "http://localhost:8080", "Billing proxy URL")
 	keyHex := fs.String("key", "", "User private key (hex); or set USER_KEY env")
-	id     := fs.String("id",  "", "Sandbox ID (required)")
+	id := fs.String("id", "", "Sandbox ID (required)")
 	_ = fs.Parse(args)
 
 	if *id == "" {
