@@ -87,32 +87,7 @@ func main() {
 	if backendAppName == "" {
 		log.Warn("BACKEND_APP_NAME not set — app owner cannot be resolved; only ADMIN_ADDRESSES wallets are admins")
 	}
-	var ownerMu sync.Mutex
-	var ownerCached string
-	var ownerCachedAt time.Time
-	appOwnerFn := func(ctx context.Context) (string, error) {
-		ownerMu.Lock()
-		defer ownerMu.Unlock()
-		if ownerCached != "" && time.Since(ownerCachedAt) < time.Minute {
-			return ownerCached, nil
-		}
-		if backendAppName == "" {
-			return "", fmt.Errorf("BACKEND_APP_NAME not set")
-		}
-		owner, err := onchain.GetAppOwner(ctx, backendAppName)
-		if err != nil {
-			if ownerCached != "" {
-				return ownerCached, nil // serve stale over failing closed
-			}
-			return "", err
-		}
-		if owner == (common.Address{}) {
-			return "", fmt.Errorf("app %q not registered in TappRegistry", backendAppName)
-		}
-		ownerCached = strings.ToLower(owner.Hex())
-		ownerCachedAt = time.Now()
-		return ownerCached, nil
-	}
+	appOwnerFn := newAppOwnerResolver(onchain, backendAppName, appOwnerTTL, appOwnerStaleCap, appOwnerRetryEvery, log)
 	if owner, err := appOwnerFn(ctx); err != nil {
 		log.Warn("app owner not resolvable yet", zap.String("app_id", backendAppName), zap.Error(err))
 	} else {
@@ -960,10 +935,6 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 	}
 }
 
-// archivedAlready reports whether the sandbox is already in a terminal archived
-// state — used to distinguish an idempotent re-archive (safe to clean up) from a
-// genuine archive failure (must preserve retry state). On any lookup error it
-// returns false, biasing toward preserving state.
 // sandboxDisposition classifies a sandbox for the stop pipeline.
 type sandboxDisposition int
 
@@ -992,4 +963,80 @@ func classifySandbox(ctx context.Context, dtona *daytona.Client, id string) sand
 		return dispositionArchived
 	}
 	return dispositionActive
+
+// appOwnerReader is the slice of the chain client the owner resolver needs.
+type appOwnerReader interface {
+	GetAppOwner(ctx context.Context, appId string) (common.Address, error)
+}
+
+const (
+	// appOwnerTTL is how long a successful owner lookup is trusted. The
+	// resolver's value gates ADMIN checks, so the TTL is also the window in
+	// which an on-chain ownership transfer has not yet propagated — an
+	// ex-owner keeps admin (archive-all, force-stop/delete across tenants)
+	// for at most this long. Keep it short.
+	appOwnerTTL = 15 * time.Second
+	// appOwnerRetryEvery rate-limits probes at the dead RPC during an outage
+	// (negative caching) so post-TTL requests don't serialize behind failing
+	// fetches under the resolver mutex.
+	appOwnerRetryEvery = 5 * time.Second
+	// appOwnerStaleCap bounds how long the LAST GOOD value may be served when
+	// the RPC is failing. Serving stale keeps a flaky RPC from locking the
+	// real owner out mid-incident, but unbounded staleness let a REMOVED
+	// owner keep provider-wide destructive admin for as long as the RPC
+	// stayed degraded. Past the cap the resolver fails closed for the owner
+	// path — static ADMIN_ADDRESSES wallets are unaffected.
+	appOwnerStaleCap = 10 * time.Minute
+)
+
+// newAppOwnerResolver returns a TTL-cached resolver of the appId's TappRegistry
+// owner with bounded stale-serving (see the constants above for the exact
+// trust windows — the returned value is an ADMIN identity).
+func newAppOwnerResolver(chainReader appOwnerReader, backendAppName string, ttl, staleCap, retryEvery time.Duration, log *zap.Logger) func(ctx context.Context) (string, error) {
+	var mu sync.Mutex
+	var cached string
+	var fetchedAt time.Time
+	var lastErr error
+	var lastTry time.Time
+	return func(ctx context.Context) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if cached != "" && time.Since(fetchedAt) < ttl {
+			return cached, nil
+		}
+		if backendAppName == "" {
+			return "", fmt.Errorf("BACKEND_APP_NAME not set")
+		}
+		// Negative caching: during an RPC outage every post-TTL request would
+		// otherwise run its own failing (up to caller-timeout) fetch,
+		// serialized under this mutex — every withOwnerOrAdmin route queueing
+		// behind a lock draining at one request per timeout. Reuse the last
+		// failure for a short window so at most one probe per interval hits
+		// the dead RPC; the stale/fail-closed decision below is unchanged.
+		if lastErr != nil && time.Since(lastTry) < retryEvery {
+			if cached != "" && time.Since(fetchedAt) < staleCap {
+				return cached, nil
+			}
+			return "", lastErr
+		}
+		owner, err := chainReader.GetAppOwner(ctx, backendAppName)
+		lastTry = time.Now()
+		lastErr = err
+		if err != nil {
+			if cached != "" && time.Since(fetchedAt) < staleCap {
+				return cached, nil // bounded stale-over-fail-closed
+			}
+			if cached != "" {
+				log.Error("app owner lookup failing beyond stale cap — owner-based admin fails closed until RPC recovers (static ADMIN_ADDRESSES unaffected)",
+					zap.Duration("stale_for", time.Since(fetchedAt)), zap.Error(err))
+			}
+			return "", err
+		}
+		if owner == (common.Address{}) {
+			return "", fmt.Errorf("app %q not registered in TappRegistry", backendAppName)
+		}
+		cached = strings.ToLower(owner.Hex())
+		fetchedAt = time.Now()
+		return cached, nil
+	}
 }
