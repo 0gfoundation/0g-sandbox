@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"os"
 	"os/signal"
@@ -136,20 +135,30 @@ func main() {
 	// Provider reverse proxy — eliminates CORS: browser calls /proxy/:addr/* (same origin)
 	// and broker forwards server-side to the actual provider URL.
 	r.Any("/proxy/:providerAddr/*path", func(c *gin.Context) {
+		// Single hop only: a provider URL pointing back at this relay would
+		// otherwise recurse in-process until exhaustion.
+		if c.GetHeader(broker.RelayLoopHeader) != "" {
+			c.JSON(http.StatusLoopDetected, gin.H{"error": "relay loop"})
+			return
+		}
 		providerAddr := strings.ToLower(c.Param("providerAddr"))
 		rec, ok := idx.Get(providerAddr)
 		if !ok {
 			c.JSON(http.StatusNotFound, gin.H{"error": "provider not found"})
 			return
 		}
+		// The URL is verbatim on-chain data any registered app owner controls;
+		// this is an unauthenticated public endpoint. Scheme/host validation
+		// here, destination-IP validation at dial time (post-DNS) in the
+		// guarded transport — cloud metadata, loopback, and the broker's own
+		// network are unreachable through the relay.
 		target, err := url.Parse(rec.URL)
-		if err != nil {
+		if err != nil || broker.ValidateRelayTarget(target) != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"error": "invalid provider URL"})
 			return
 		}
-		proxy := httputil.NewSingleHostReverseProxy(target)
+		proxy := broker.GuardedRelayProxy(target)
 		c.Request.URL.Path = c.Param("path")
-		c.Request.URL.RawQuery = c.Request.URL.RawQuery
 		proxy.ServeHTTP(c.Writer, c.Request)
 	})
 
