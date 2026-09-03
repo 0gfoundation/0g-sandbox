@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -73,15 +74,29 @@ func GuardedTransport() *http.Transport {
 	}
 }
 
-// GuardedRelayProxy builds the reverse proxy the broker relay uses: guarded
-// transport + single-hop loop marking.
+// sharedGuardedTransport is built once: http.Transport is safe for concurrent
+// use, and a per-request transport would defeat connection pooling and leak
+// idle conns from discarded pools until GC.
+var sharedGuardedTransport = GuardedTransport()
+
+// GuardedRelayProxy builds the reverse proxy the broker relay uses: shared
+// guarded transport + single-hop loop marking + a distinct error for refused
+// destinations (an operator who registered a private/localhost provider URL
+// gets told WHY instead of a generic upstream error).
 func GuardedRelayProxy(target *url.URL) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
-	proxy.Transport = GuardedTransport()
+	proxy.Transport = sharedGuardedTransport
 	orig := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		orig(req)
 		req.Header.Set(RelayLoopHeader, "1")
+	}
+	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {
+		if strings.Contains(err.Error(), "not publicly routable") {
+			http.Error(w, "provider URL is not publicly routable (private, loopback, or link-local address)", http.StatusBadGateway)
+			return
+		}
+		http.Error(w, "upstream provider unreachable", http.StatusBadGateway)
 	}
 	return proxy
 }
