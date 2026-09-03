@@ -342,7 +342,9 @@ func TestPersistStop_WritesKeyAndSignals(t *testing.T) {
 	stopCh := make(chan StopSignal, 2)
 	ctx := context.Background()
 
-	persistStop(ctx, rdb, stopCh, "sb-direct", "insufficient_balance", zap.NewNop())
+	if err := persistStop(ctx, rdb, stopCh, "sb-direct", "insufficient_balance", zap.NewNop()); err != nil {
+		t.Fatalf("persistStop: unexpected error: %v", err)
+	}
 
 	val, err := rdb.Get(ctx, "stop:sandbox:sb-direct").Result()
 	if err != nil || val != "insufficient_balance" {

@@ -21,6 +21,7 @@ const (
 	TypeAutoStopped = "auto_stopped"
 	TypeSettled     = "settled"
 	TypeAggregated  = "aggregated"
+	TypeError       = "error"
 )
 
 // Event is a single operator-visible billing event stored in Redis.

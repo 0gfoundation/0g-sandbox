@@ -286,14 +286,14 @@ func main() {
 	// Public providers list — returns known providers with their on-chain service data.
 	r.GET("/api/providers", func(c *gin.Context) {
 		type ProviderInfo struct {
-			Address               string `json:"address"`
-			URL                   string `json:"url"`
-			AppId                 string `json:"app_id"`
-			PricePerCPUPerMin     string `json:"price_per_cpu_per_min"`
-			PricePerCPUPerSec     string `json:"price_per_cpu_per_sec"`
-			PricePerMemGBPerMin   string `json:"price_per_mem_gb_per_min"`
-			PricePerMemGBPerSec   string `json:"price_per_mem_gb_per_sec"`
-			CreateFee             string `json:"create_fee"`
+			Address             string `json:"address"`
+			URL                 string `json:"url"`
+			AppId               string `json:"app_id"`
+			PricePerCPUPerMin   string `json:"price_per_cpu_per_min"`
+			PricePerCPUPerSec   string `json:"price_per_cpu_per_sec"`
+			PricePerMemGBPerMin string `json:"price_per_mem_gb_per_min"`
+			PricePerMemGBPerSec string `json:"price_per_mem_gb_per_sec"`
+			CreateFee           string `json:"create_fee"`
 		}
 		// For now: just the configured provider.  Extend via KNOWN_PROVIDERS in the future.
 		addrs := []string{providerHex}
@@ -497,7 +497,7 @@ func main() {
 	proxyHandler.AppOwner = appOwnerFn
 	proxyHandler.RegisterPublic(apiPublic)
 	proxyHandler.Register(api)
-	go runStopHandler(ctx, stopCh, dtona, rdb, log, proxyHandler.BrokerDeregister)
+	go runStopHandler(ctx, stopCh, dtona, rdb, alerter, log, proxyHandler.BrokerDeregister)
 
 	// Admin-only: pull an image from an external registry into the internal registry.
 	// The import runs synchronously (crane.Copy) — may take minutes for large images.
@@ -857,10 +857,29 @@ func recoverPendingStops(ctx context.Context, rdb *redis.Client, stopCh chan<- s
 
 // runStopHandler consumes StopSignals, archives the sandbox (preserving state in
 // object storage so it can be restarted later), and cleans up Redis.
-func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona *daytona.Client, rdb *redis.Client, log *zap.Logger, deregisterBroker func(context.Context, string)) {
+func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona *daytona.Client, rdb *redis.Client, alerter alert.Alerter, log *zap.Logger, deregisterBroker func(context.Context, string)) {
 	for {
 		select {
 		case sig := <-stopCh:
+			// Step 0: skip stale/duplicate kill orders. A backlog of
+			// INSUFFICIENT_BALANCE rejections for the same sandbox (or a marker
+			// recovered on restart after the sandbox was already archived) would
+			// otherwise re-run the ~30s stop→wait→archive round-trip against an
+			// already-terminal sandbox — the "kill storm" of #69. If it is already
+			// archived, just clean up markers and move on.
+			if d := classifySandbox(ctx, dtona, sig.SandboxID); d != dispositionActive {
+				log.Info("stop skipped: sandbox already terminal; cleaning up markers",
+					zap.String("sandbox", sig.SandboxID),
+					zap.String("reason", sig.Reason),
+					zap.Bool("gone", d == dispositionGone),
+				)
+				rdb.Del(ctx, "billing:compute:"+sig.SandboxID) //nolint:errcheck
+				rdb.Del(ctx, "stop:sandbox:"+sig.SandboxID)    //nolint:errcheck
+				if deregisterBroker != nil {
+					deregisterBroker(ctx, sig.SandboxID)
+				}
+				continue
+			}
 			// Daytona requires stopped state before archive.
 			// Step 1: stop (removes container from runner).
 			if err := dtona.StopSandbox(ctx, sig.SandboxID); err != nil {
@@ -880,8 +899,31 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 			}
 			cancel()
 			// Step 3: archive (backup filesystem to MinIO for later restore).
+			// Only tear down billing + retry state once the sandbox is durably in
+			// a terminal archived state. If archive fails and the sandbox is NOT
+			// already archived, PRESERVE stop:sandbox:<id> so recoverPendingStops
+			// retries on the next restart — deleting it here would strand a
+			// still-running sandbox with no billing session (state drift + billing
+			// loss). An already-archived sandbox is an idempotent success, so we
+			// still clean up (avoids a poison-pill that never converges).
 			if err := dtona.ArchiveSandbox(ctx, sig.SandboxID); err != nil {
-				log.Warn("archive sandbox failed (may already be archived)",
+				if classifySandbox(ctx, dtona, sig.SandboxID) == dispositionActive {
+					log.Error("archive sandbox failed; preserving retry + billing state for recovery",
+						zap.String("sandbox", sig.SandboxID),
+						zap.Error(err),
+					)
+					alerter.Notify(ctx, alert.KindArchiveFailure, alert.SeverityCritical,
+						"Sandbox archive failed — retry state preserved, will retry on restart",
+						map[string]any{"sandbox": sig.SandboxID, "reason": sig.Reason, "error": err.Error()},
+					)
+					_ = events.Push(ctx, rdb, events.Event{
+						Type:      events.TypeError,
+						Message:   fmt.Sprintf("Sandbox %s archive failed: %s (retry state preserved)", sig.SandboxID, err.Error()),
+						SandboxID: sig.SandboxID,
+					})
+					continue // leave stop:sandbox:<id> + billing:compute:<id> in place
+				}
+				log.Warn("archive returned error but sandbox is already archived; proceeding to cleanup",
 					zap.String("sandbox", sig.SandboxID),
 					zap.Error(err),
 				)
@@ -904,4 +946,38 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 			return
 		}
 	}
+}
+
+// archivedAlready reports whether the sandbox is already in a terminal archived
+// state — used to distinguish an idempotent re-archive (safe to clean up) from a
+// genuine archive failure (must preserve retry state). On any lookup error it
+// returns false, biasing toward preserving state.
+// sandboxDisposition classifies a sandbox for the stop pipeline.
+type sandboxDisposition int
+
+const (
+	dispositionActive   sandboxDisposition = iota // exists, not archived (or lookup failed — assume active)
+	dispositionArchived                           // terminal: archived
+	dispositionGone                               // terminal: definitive 404 — deleted or never existed
+)
+
+// classifySandbox distinguishes the three outcomes the stop pipeline cares
+// about. A definitive 404 is terminal: preserving the stop marker for a
+// deleted sandbox would re-queue it on every restart forever (stop, wait and
+// archive all fail on a nonexistent id), paging the operator each time.
+// Transient lookup errors classify as active so the preserve-on-failure path
+// keeps the retry state. State comparison is case-insensitive to match the
+// shutdown path and proxy.
+func classifySandbox(ctx context.Context, dtona *daytona.Client, id string) sandboxDisposition {
+	s, err := dtona.GetSandbox(ctx, id)
+	if err != nil {
+		if errors.Is(err, daytona.ErrNotFound) {
+			return dispositionGone
+		}
+		return dispositionActive
+	}
+	if s != nil && strings.EqualFold(s.State, "archived") {
+		return dispositionArchived
+	}
+	return dispositionActive
 }

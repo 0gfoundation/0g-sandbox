@@ -30,6 +30,8 @@ const (
 	KindVoucherRejected        Kind = "voucher_rejected"
 	KindVoucherInvalidNonce    Kind = "voucher_invalid_nonce"
 	KindQueueBacklog           Kind = "queue_backlog"
+	KindStopPersistFailure     Kind = "stop_persist_failure"
+	KindArchiveFailure         Kind = "archive_failure"
 )
 
 // Severity is included in the webhook payload so receivers can route or
