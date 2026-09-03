@@ -14,6 +14,9 @@ export function validateCreateOptions(opts: CreateOptions): void {
   const fail = (msg: string) => {
     throw new SandboxSDKError('INVALID_ARGUMENT', msg);
   };
+  if (!opts.snapshot || opts.snapshot.trim() === '') {
+    fail('snapshot is required; custom cpu/memory is not supported — pick a snapshot');
+  }
   if (opts.sealId !== undefined && !/^[0-9a-f]{64}$/i.test(opts.sealId)) {
     fail('sealId must be 64 hex characters');
   }
@@ -31,12 +34,12 @@ export function validateCreateOptions(opts: CreateOptions): void {
 
 export interface CreateOptions {
   name?: string;
-  /** Snapshot name — locks cpu/memory/disk to the snapshot's spec (server rule). */
-  snapshot?: string;
-  class?: 'small' | 'medium' | 'large';
-  cpu?: number;
-  memory?: number;
-  disk?: number;
+  /**
+   * Snapshot name — REQUIRED. cpu/memory/disk come from the snapshot's spec;
+   * the server rejects custom resources (billed spec must equal provisioned
+   * spec). Custom sizing is not a supported feature yet.
+   */
+  snapshot: string;
   env?: Record<string, string>;
   /** Sealed sandbox: TEE attestation injected, SSH/toolbox blocked. Requires publicPorts to include 8080. */
   sealed?: boolean;
@@ -88,15 +91,11 @@ export class SandboxApi {
     private readonly providerAddress?: string,
   ) {}
 
-  async create(opts: CreateOptions = {}): Promise<Sandbox> {
+  async create(opts: CreateOptions): Promise<Sandbox> {
     validateCreateOptions(opts); // fail fast client-side before a wasted round-trip
     const body: Record<string, unknown> = {};
     if (opts.name) body.name = opts.name;
-    if (opts.snapshot) body.snapshot = opts.snapshot;
-    if (opts.class) body.class = opts.class;
-    if (opts.cpu) body.cpu = opts.cpu;
-    if (opts.memory) body.memory = opts.memory;
-    if (opts.disk) body.disk = opts.disk;
+    body.snapshot = opts.snapshot;
     if (opts.env && Object.keys(opts.env).length > 0) body.env = opts.env;
     if (opts.sealed) body.sealed = true;
     if (opts.sealId) body.seal_id = opts.sealId;

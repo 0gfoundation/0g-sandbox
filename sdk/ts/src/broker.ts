@@ -230,7 +230,7 @@ class BrokerSandboxApi {
   constructor(private readonly broker: Broker) {}
 
   /** Create a sandbox. The returned Sandbox is pinned to the resolved provider. */
-  async create(opts?: CreateOptions, target?: Target): Promise<Sandbox> {
+  async create(opts: CreateOptions, target?: Target): Promise<Sandbox> {
     const addr = await this.broker.resolveProvider(target, opts);
     return (await this.broker.sdkFor(addr)).sandbox.create(opts);
   }

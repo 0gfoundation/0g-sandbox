@@ -183,7 +183,7 @@ func TestHandleCreate_InjectsOwnerLabel(t *testing.T) {
 	mb := &mockBilling{}
 	r := newTestEngine(dtona, mb, "0xMYWALLET")
 
-	body := []byte(`{"name":"test-sandbox"}`)
+	body := []byte(`{"name":"test-sandbox","snapshot":"snap-x"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/sandbox", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -211,7 +211,7 @@ func TestHandleCreate_ForcesAutostopZero(t *testing.T) {
 	r := newTestEngine(dtona, &mockBilling{}, "0xWALLET")
 
 	// Client tries to set autostop
-	body := []byte(`{"autostopInterval":3600}`)
+	body := []byte(`{"autostopInterval":3600,"snapshot":"snap-x"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/sandbox", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -239,7 +239,7 @@ func TestHandleCreate_AdminKeyForwarded(t *testing.T) {
 	dtona := daytona.NewClient(srv.URL, "super-secret-admin-key")
 	r := newTestEngine(dtona, &mockBilling{}, "0xWALLET")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/sandbox", bytes.NewReader([]byte(`{}`)))
+	req := httptest.NewRequest(http.MethodPost, "/api/sandbox", bytes.NewReader([]byte(`{"snapshot":"snap-x"}`)))
 	r.ServeHTTP(httptest.NewRecorder(), req)
 
 	if receivedAuth != "Bearer super-secret-admin-key" {
@@ -433,7 +433,7 @@ func TestSealedOnly_RejectsUnsealedCreate(t *testing.T) {
 	h.SealedOnly = true
 	h.Register(api)
 
-	body := []byte(`{"image":"alpine:3.20"}`) // no sealed flag → must be rejected
+	body := []byte(`{"snapshot":"snap-x"}`) // no sealed flag → must be rejected
 	req := httptest.NewRequest(http.MethodPost, "/api/sandbox", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -467,7 +467,7 @@ func TestSealedOnly_AcceptsSealedCreate(t *testing.T) {
 	h.SealedOnly = true
 	h.Register(api)
 
-	body := []byte(`{"image":"alpine:3.20","sealed":true}`)
+	body := []byte(`{"snapshot":"snap-x","sealed":true}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/sandbox", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

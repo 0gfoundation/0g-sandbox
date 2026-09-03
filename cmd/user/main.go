@@ -491,10 +491,6 @@ func runCreate(args []string) {
 	keyHex := fs.String("key", "", "User private key (hex); or set USER_KEY env")
 	snapshot := fs.String("snapshot", "", "Snapshot name to use as the sandbox base (optional)")
 	name := fs.String("name", "", "Sandbox display name (optional)")
-	class := fs.String("class", "", "Sandbox class: small | medium | large (optional)")
-	cpu := fs.Int("cpu", 0, "CPU cores (optional, overrides class)")
-	memory := fs.Int("memory", 0, "Memory in GB (optional, overrides class)")
-	disk := fs.Int("disk", 0, "Disk in GB (optional, overrides class)")
 	sealed := fs.Bool("sealed", false, "Create a sealed sandbox (blocks SSH and toolbox access)")
 	sealID := fs.String("seal-id", "", "Optional caller-chosen seal_id (64 hex chars); random if unset")
 	ports := fs.String("ports", "", "Comma-separated ports to expose publicly (e.g. 8080,3000); others require auth. Empty = all ports public")
@@ -502,8 +498,8 @@ func runCreate(args []string) {
 	fs.Var(&envArgs, "env", "Env var KEY=VAL injected into container; repeatable")
 	_ = fs.Parse(args)
 
-	if *class != "" && *class != "small" && *class != "medium" && *class != "large" {
-		fatalf("--class must be one of: small, medium, large")
+	if *snapshot == "" {
+		fatalf("--snapshot is required (custom cpu/memory is not supported; pick a snapshot from `list-snapshots`)")
 	}
 
 	privKey := mustLoadKey(*keyHex)
@@ -514,18 +510,6 @@ func runCreate(args []string) {
 	}
 	if *snapshot != "" {
 		body["snapshot"] = *snapshot
-	}
-	if *class != "" {
-		body["class"] = *class
-	}
-	if *cpu > 0 {
-		body["cpu"] = *cpu
-	}
-	if *memory > 0 {
-		body["memory"] = *memory
-	}
-	if *disk > 0 {
-		body["disk"] = *disk
 	}
 	if *sealed {
 		body["sealed"] = true
