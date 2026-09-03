@@ -39,13 +39,13 @@ type sessionChainClient interface {
 
 // SessionHandler handles POST and DELETE /api/session on the Broker.
 type SessionHandler struct {
-	providers           providerLookup
-	chain               sessionChainClient
-	payment             PaymentLayer
-	rdb                 *redis.Client
-	log                 *zap.Logger
-	topupIntervals      int64
-	depositWaitTimeout  time.Duration
+	providers          providerLookup
+	chain              sessionChainClient
+	payment            PaymentLayer
+	rdb                *redis.Client
+	log                *zap.Logger
+	topupIntervals     int64
+	depositWaitTimeout time.Duration
 }
 
 // NewSessionHandler creates a SessionHandler.
@@ -136,6 +136,14 @@ func (h *SessionHandler) HandlePost(c *gin.Context) {
 	user := common.HexToAddress(req.UserAddr)
 	if rec.AppId == "" {
 		c.JSON(http.StatusForbidden, gin.H{"error": "provider has no app bound"})
+		return
+	}
+	// v2 identity: the provider IS its TEE signer. A sibling node of the same
+	// app passes IsActiveNode but must not act on ANOTHER provider's
+	// (user, provider) bucket — without this binding it could trigger Payment
+	// Layer deposits into arbitrary buckets or overwrite monitoring sessions.
+	if signer != provider {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "signer is not the provider it acts for"})
 		return
 	}
 	isNode, err := h.chain.IsActiveNode(ctx, rec.AppId, signer)
@@ -274,6 +282,13 @@ func (h *SessionHandler) HandleDelete(c *gin.Context) {
 	}
 	if rec.AppId == "" {
 		c.JSON(http.StatusForbidden, gin.H{"error": "provider has no app bound"})
+		return
+	}
+	// Same signer==provider binding as HandlePost: only the provider that owns
+	// this session may deregister it — a sibling node of the same app must not
+	// remove another provider's monitoring entry.
+	if !strings.EqualFold(signer.Hex(), entry.Provider) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "signer is not the provider it acts for"})
 		return
 	}
 	isNode, err := h.chain.IsActiveNode(ctx, rec.AppId, signer)
