@@ -836,7 +836,7 @@ func TestCreateGate_ConcurrentCreates_OnlyOneAdmitted(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			w := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"cpu":0}`))
+			req := httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"snap-x"}`))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
 			codes <- w.Code
@@ -885,7 +885,7 @@ func TestCreateGate_RejectionRollsBackReservation(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"snap-x"}`))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		if w.Code != http.StatusPaymentRequired {
