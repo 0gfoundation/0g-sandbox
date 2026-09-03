@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 	"github.com/alicebob/miniredis/v2"
@@ -19,6 +20,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
+	"github.com/0gfoundation/0g-sandbox/internal/chain"
 	"github.com/0gfoundation/0g-sandbox/internal/daytona"
 )
 
@@ -748,5 +750,46 @@ func TestRewriteImage_PinsForwardedRef(t *testing.T) {
 	}
 	if hasDirectImage([]byte(`{"snapshot":"snap-1"}`)) {
 		t.Error("snapshot-only body must not count as direct image")
+	}
+}
+
+// ── GET /api/events default window ───────────────────────────────────────────
+
+type capturingEventFetcher struct{ gotSince uint64 }
+
+func (f *capturingEventFetcher) GetVoucherEvents(_ context.Context, sinceTimestamp uint64, _, _ int) ([]chain.VoucherEvent, int, uint64, error) {
+	f.gotSince = sinceTimestamp
+	return nil, 0, 0, nil
+}
+
+// An omitted/zero since must NOT mean "all history": on any contract with real
+// history an unbounded event query blows past RPC response limits and 502s
+// every time (observed live at nonce 514k). The default is a 7-day window.
+func TestEvents_DefaultSinceIsBounded(t *testing.T) {
+	fetcher := &capturingEventFetcher{}
+	srv, _ := mockDaytona(t, nil)
+	dtona := daytona.NewClient(srv.URL, "test-key")
+	r := gin.New()
+	api := r.Group("/api", func(c *gin.Context) { c.Set("wallet_address", "0xWALLET"); c.Next() })
+	NewHandler(dtona, &mockBilling{}, nil, nil, fetcher, nil, nil, nil, nil, "",
+		nil, "", nil, zap.NewNop(), "", nil, 0).RegisterPublic(api)
+
+	for _, q := range []string{"", "?since=0"} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/events"+q, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("%q: status %d body %s", q, w.Code, w.Body.String())
+		}
+		weekAgo := uint64(time.Now().Add(-7 * 24 * time.Hour).Unix())
+		if fetcher.gotSince < weekAgo-60 || fetcher.gotSince > weekAgo+60 {
+			t.Errorf("%q: since=%d, want ~%d (7-day window)", q, fetcher.gotSince, weekAgo)
+		}
+	}
+
+	// Explicit since is honored untouched.
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/events?since=1700000000", nil))
+	if fetcher.gotSince != 1700000000 {
+		t.Errorf("explicit since not honored: %d", fetcher.gotSince)
 	}
 }

@@ -885,7 +885,12 @@ func (h *Handler) handleEvents(c *gin.Context) {
 		c.JSON(http.StatusNotImplemented, gin.H{"error": "events not configured"})
 		return
 	}
-	// ?since=<unix_ts>: return events with block.timestamp >= since. 0 or omitted = all history.
+	// ?since=<unix_ts>: return events with block.timestamp >= since.
+	// 0 or omitted defaults to a 7-day window — "all history" blows past RPC
+	// response limits on any contract with real history (observed: a contract
+	// past nonce 514k 502s on every unbounded query), so an explicit recent
+	// window is the only default that always works. Callers wanting deeper
+	// history page backwards with explicit since values.
 	var sinceTimestamp uint64
 	if s := c.Query("since"); s != "" {
 		n, err := strconv.ParseUint(s, 10, 64)
@@ -894,6 +899,9 @@ func (h *Handler) handleEvents(c *gin.Context) {
 			return
 		}
 		sinceTimestamp = n
+	}
+	if sinceTimestamp == 0 {
+		sinceTimestamp = uint64(time.Now().Add(-7 * 24 * time.Hour).Unix())
 	}
 	page := 0
 	if s := c.Query("page"); s != "" {
