@@ -10,7 +10,10 @@ import (
 // customResourceFields are the create-request fields that let a caller pick a
 // spec directly (image/buildInfo path in Daytona) instead of a fixed snapshot.
 // They are rejected: see requireSnapshotCreate.
-var customResourceFields = []string{"cpu", "memory", "disk", "gpu", "image"}
+// class and buildInfo are spec selectors too (class picks a Daytona size tier;
+// buildInfo is the declarative-image path). Banning the full set — not five of
+// seven — is what makes "billed spec == provisioned spec by construction" hold.
+var customResourceFields = []string{"cpu", "memory", "disk", "gpu", "image", "class", "buildInfo"}
 
 // requireSnapshotCreate enforces the snapshot-only create policy. A create must
 // name a snapshot and MUST NOT carry any custom-resource field.

@@ -31,18 +31,21 @@ func init() { gin.SetMode(gin.TestMode) }
 // ── Mock billing hooks ────────────────────────────────────────────────────────
 
 type mockBilling struct {
-	mu       sync.Mutex
-	creates  []string
-	starts   []string
-	stops    []string
-	deletes  []string
-	archives []string
+	mu        sync.Mutex
+	creates   []string
+	starts    []string
+	stops     []string
+	deletes   []string
+	archives  []string
+	createCPU int // cpu of the last OnCreate — pins the billed spec (#118 nit)
+	createMem int
 }
 
-func (m *mockBilling) OnCreate(_ context.Context, sandboxID, _ string, _, _ int) {
+func (m *mockBilling) OnCreate(_ context.Context, sandboxID, _ string, cpu, memGB int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.creates = append(m.creates, sandboxID)
+	m.createCPU, m.createMem = cpu, memGB
 }
 func (m *mockBilling) OnStart(_ context.Context, sandboxID, _ string, _, _ int) {
 	m.mu.Lock()
@@ -82,6 +85,15 @@ func mockDaytona(t *testing.T, sandboxes []daytona.Sandbox) (*httptest.Server, *
 	mux.HandleFunc("GET /api/sandbox", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(sandboxes)
+	})
+
+	// GET /api/snapshots/{name} — return a default spec so create-path spec
+	// lookups (snapshot-only policy, #118) resolve. Tests needing a specific
+	// spec use their own mux.
+	mux.HandleFunc("GET /api/snapshots/", func(w http.ResponseWriter, r *http.Request) {
+		name := r.URL.Path[len("/api/snapshots/"):]
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"id": name, "name": name, "cpu": 1, "mem": 1, "state": "active"}) //nolint:errcheck
 	})
 
 	// GET /api/sandbox/{id} — get one
@@ -927,5 +939,55 @@ func TestStartGate_OpenSession_NoReservationTaken(t *testing.T) {
 
 	if got := billing.GetReserved(context.Background(), rdb, "0xW", "0xPROV"); got.Sign() != 0 {
 		t.Fatalf("start on an open session must take no reservation, got %s", got)
+	}
+}
+
+// Review #118 nit: pin that a snapshot create bills the SNAPSHOT's spec, not 0.
+// The gate resolves cpu/mem from GetSnapshot; OnCreate must receive them (the
+// response-echo behavior this PR's correctness leans on). A Daytona that stops
+// echoing spec would silently reopen #77 — this test fires if it does.
+func TestSnapshotCreate_BillsSnapshotSpec(t *testing.T) {
+	// mock Daytona: snapshot lookup returns 4c/8g; create returns the sandbox.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/snapshots/big-4c", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"big-4c","name":"big-4c","cpu":4,"mem":8,"state":"active"}`)) //nolint:errcheck
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"sb-x","state":"started","labels":{"daytona-owner":"0xW"}}`)) //nolint:errcheck
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	dtona := daytona.NewClient(srv.URL, "test-key")
+	mb := &mockBilling{}
+	r := gin.New()
+	api := r.Group("/api", func(c *gin.Context) { c.Set("wallet_address", "0xW"); c.Next() })
+	NewHandler(dtona, mb, nil, nil, nil, big.NewInt(1), new(big.Int), new(big.Int), new(big.Int),
+		"0xPROV", nil, "", nil, zap.NewNop(), "", nil, 60).Register(api)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"big-4c"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK && w.Code != http.StatusCreated {
+		t.Fatalf("create status %d: %s", w.Code, w.Body.String())
+	}
+	// OnCreate runs in a goroutine — wait for it.
+	var cpu, mem int
+	for i := 0; i < 100; i++ {
+		mb.mu.Lock()
+		cpu, mem = mb.createCPU, mb.createMem
+		done := len(mb.creates) > 0
+		mb.mu.Unlock()
+		if done {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if cpu != 4 || mem != 8 {
+		t.Fatalf("OnCreate billed spec = %dc/%dg, want the snapshot's 4c/8g", cpu, mem)
 	}
 }
