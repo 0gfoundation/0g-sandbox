@@ -345,6 +345,31 @@ func (h *Handler) handleCreate(c *gin.Context) {
 			})
 			return
 		}
+		// Pin the forwarded image to the attested digest. The attestation is
+		// signed over imageHash, but a mutable TAG forwarded to Daytona can be
+		// re-pointed between resolution and the runner's pull — the container
+		// would then run code the attestation never covered (attestation-
+		// identity forgery; the whole sealed trust chain gates on this digest).
+		// Rewriting to repo@sha256:<digest> makes the pulled image byte-
+		// identical to the attested one by content addressing.
+		//
+		// Snapshot creates are not rewritten: Daytona resolves the snapshot
+		// internally (rewriting to an image would drop the snapshot's resource
+		// defaults), its image names here are content-addressed already, and
+		// re-tagging would require push access to the internal registry, which
+		// tenants cannot reach.
+		if hasDirectImage(body) {
+			pinned, perr := registry.PinRef(imageRef, imageHash)
+			if perr != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid image reference"})
+				return
+			}
+			body, err = rewriteImage(body, pinned)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+				return
+			}
+		}
 	}
 
 	modified, err := InjectOwner(body, wallet)
@@ -1286,6 +1311,27 @@ func extractSealed(body []byte) bool {
 
 // resolveImageRef extracts the image reference from a create request body and,
 // for snapshot-based sandboxes, resolves the snapshot name to its ImageName.
+// hasDirectImage reports whether the create body names an image directly
+// (as opposed to a snapshot) — only direct refs are caller-controlled and
+// need digest pinning.
+func hasDirectImage(body []byte) bool {
+	var m struct {
+		Image string `json:"image"`
+	}
+	json.NewDecoder(bytes.NewReader(body)).Decode(&m) //nolint:errcheck
+	return m.Image != ""
+}
+
+// rewriteImage replaces the body's image field with the pinned reference.
+func rewriteImage(body []byte, pinned string) ([]byte, error) {
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, err
+	}
+	m["image"] = pinned
+	return json.Marshal(m)
+}
+
 func (h *Handler) resolveImageRef(ctx context.Context, body []byte) (string, error) {
 	var m struct {
 		Image    string `json:"image"`

@@ -30,23 +30,28 @@ type mockBilling struct {
 }
 
 func (m *mockBilling) OnCreate(_ context.Context, sandboxID, _ string, _, _ int) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.creates = append(m.creates, sandboxID)
 }
 func (m *mockBilling) OnStart(_ context.Context, sandboxID, _ string, _, _ int) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.starts = append(m.starts, sandboxID)
 }
 func (m *mockBilling) OnStop(_ context.Context, sandboxID string) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.stops = append(m.stops, sandboxID)
 }
 func (m *mockBilling) OnDelete(_ context.Context, sandboxID string) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.deletes = append(m.deletes, sandboxID)
 }
 func (m *mockBilling) OnArchive(_ context.Context, sandboxID string) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.archives = append(m.archives, sandboxID)
 }
 func (m *mockBilling) EnsureSession(_ context.Context, _, _ string) {}
@@ -370,7 +375,6 @@ func mockDaytonaWithSSH(t *testing.T, sandboxes []daytona.Sandbox) *httptest.Ser
 	return srv
 }
 
-
 // TestSealedOnly_RejectsUnsealedCreate exercises the SEALED_ONLY config gate.
 // When the provider runs with sealed_only=true, every create that doesn't carry
 // `"sealed": true` must fail at 400 before the body ever reaches Daytona.
@@ -490,5 +494,30 @@ func TestExtractID(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("extractID(%q) = %q, want %q", tc.body, got, tc.want)
 		}
+	}
+}
+
+// Finding #71 helpers: the sealed create must pin the FORWARDED image to the
+// attested digest — a mutable tag can be re-pointed between attestation and
+// the runner's pull, running code the attestation never covered.
+func TestRewriteImage_PinsForwardedRef(t *testing.T) {
+	body := []byte(`{"image":"registry:6000/daytona/app:latest","sealed":true,"env":{"A":"b"}}`)
+	if !hasDirectImage(body) {
+		t.Fatal("hasDirectImage must detect a direct ref")
+	}
+	out, err := rewriteImage(body, "registry:6000/daytona/app@sha256:abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	json.Unmarshal(out, &m) //nolint:errcheck
+	if m["image"] != "registry:6000/daytona/app@sha256:abc" {
+		t.Errorf("image not pinned: %v", m["image"])
+	}
+	if m["env"].(map[string]any)["A"] != "b" {
+		t.Error("other fields must survive")
+	}
+	if hasDirectImage([]byte(`{"snapshot":"snap-1"}`)) {
+		t.Error("snapshot-only body must not count as direct image")
 	}
 }
