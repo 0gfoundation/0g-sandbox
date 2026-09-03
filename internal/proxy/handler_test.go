@@ -725,3 +725,28 @@ func TestForward_StripsOverrideHeaders(t *testing.T) {
 		t.Errorf("admin bearer expected, got %q", got.Get("Authorization"))
 	}
 }
+
+// Finding #71 helpers: the sealed create must pin the FORWARDED image to the
+// attested digest — a mutable tag can be re-pointed between attestation and
+// the runner's pull, running code the attestation never covered.
+func TestRewriteImage_PinsForwardedRef(t *testing.T) {
+	body := []byte(`{"image":"registry:6000/daytona/app:latest","sealed":true,"env":{"A":"b"}}`)
+	if !hasDirectImage(body) {
+		t.Fatal("hasDirectImage must detect a direct ref")
+	}
+	out, err := rewriteImage(body, "registry:6000/daytona/app@sha256:abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	json.Unmarshal(out, &m) //nolint:errcheck
+	if m["image"] != "registry:6000/daytona/app@sha256:abc" {
+		t.Errorf("image not pinned: %v", m["image"])
+	}
+	if m["env"].(map[string]any)["A"] != "b" {
+		t.Error("other fields must survive")
+	}
+	if hasDirectImage([]byte(`{"snapshot":"snap-1"}`)) {
+		t.Error("snapshot-only body must not count as direct image")
+	}
+}
