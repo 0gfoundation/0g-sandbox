@@ -2,6 +2,7 @@ package billing
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"strings"
 	"time"
@@ -15,16 +16,28 @@ func reservedKey(user, provider string) string {
 	return reservedKeyPrefix + strings.ToLower(user) + ":" + strings.ToLower(provider)
 }
 
-// Reserve atomically adds amount to the pending reservation for (user, provider)
-// and refreshes the TTL so crashed reservations auto-expire.
+// Reserve atomically adds amount to the pending reservation for (user, provider),
+// refreshes the TTL so crashed reservations auto-expire, and returns the NEW
+// TOTAL including this amount. The INCRBY is the serialization point for the
+// balance gate: callers reserve FIRST and judge affordability against the
+// returned total — check-then-reserve had a TOCTOU window where N concurrent
+// creates all read the pre-reservation balance and all passed (#74).
 var reserveScript = redis.NewScript(`
-	redis.call('INCRBY', KEYS[1], ARGV[1])
+	local v = redis.call('INCRBY', KEYS[1], ARGV[1])
 	redis.call('EXPIRE', KEYS[1], ARGV[2])
-	return 1
+	return tostring(v)
 `)
 
-func Reserve(ctx context.Context, rdb *redis.Client, user, provider string, amount *big.Int, ttl time.Duration) error {
-	return reserveScript.Run(ctx, rdb, []string{reservedKey(user, provider)}, amount.String(), int64(ttl.Seconds())).Err()
+func Reserve(ctx context.Context, rdb *redis.Client, user, provider string, amount *big.Int, ttl time.Duration) (*big.Int, error) {
+	val, err := reserveScript.Run(ctx, rdb, []string{reservedKey(user, provider)}, amount.String(), int64(ttl.Seconds())).Text()
+	if err != nil {
+		return nil, err
+	}
+	total, ok := new(big.Int).SetString(val, 10)
+	if !ok {
+		return nil, fmt.Errorf("reserve: bad total %q", val)
+	}
+	return total, nil
 }
 
 // Release subtracts amount from the reservation. If the result drops to zero or
