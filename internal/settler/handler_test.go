@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -386,5 +387,47 @@ func TestHandleStatuses_DLQEntry_IsValidVoucher(t *testing.T) {
 	}
 	if got.Nonce.Int64() != 42 {
 		t.Errorf("DLQ Nonce: got %d want 42", got.Nonce.Int64())
+	}
+}
+
+// NOT_ACKNOWLEDGED rejects BEFORE the contract consumes the nonce — the
+// revenue is collectable once the user acknowledges. The voucher must be
+// parked in the held list (nonce/signature cleared), not dropped with the pop.
+func TestHandleStatuses_NotAcknowledged_ParksVoucher(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	stopCh := make(chan StopSignal, 4)
+
+	v := voucher.SandboxVoucher{
+		SandboxID: "sb-nack",
+		User:      common.HexToAddress("0xAAA"),
+		Provider:  common.HexToAddress("0xBBB"),
+		TotalFee:  big.NewInt(777),
+		Nonce:     big.NewInt(42),
+		Signature: []byte{1, 2, 3},
+	}
+	HandleStatuses(context.Background(), rdb, stopCh, "q", "raw", []voucher.SandboxVoucher{v},
+		[]chain.SettlementStatus{chain.StatusNotAcknowledged}, alert.Nop{}, zap.NewNop())
+
+	heldKey := fmt.Sprintf(voucher.VoucherHeldKeyFmt,
+		strings.ToLower(v.User.Hex()), strings.ToLower(v.Provider.Hex()))
+	items, _ := rdb.LRange(context.Background(), heldKey, 0, -1).Result()
+	if len(items) != 1 {
+		t.Fatalf("not-acked voucher must be parked in held, got %d items", len(items))
+	}
+	var parked voucher.SandboxVoucher
+	if err := json.Unmarshal([]byte(items[0]), &parked); err != nil {
+		t.Fatal(err)
+	}
+	if parked.TotalFee.String() != "777" {
+		t.Errorf("parked fee %s want 777", parked.TotalFee)
+	}
+	if parked.Nonce != nil || parked.Signature != nil {
+		t.Error("settle-attempt artifacts (nonce/signature) must be cleared before parking")
+	}
+	// held-users index maintained → sweep will revisit after ack + balance change
+	users, _ := voucher.HeldUsers(context.Background(), rdb, v.Provider)
+	if len(users) != 1 {
+		t.Errorf("held-users index: %v", users)
 	}
 }

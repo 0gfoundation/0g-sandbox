@@ -178,6 +178,31 @@ func QueuedPending(ctx context.Context, rdb *redis.Client, queueKey string, user
 	return total, nil
 }
 
+// PushHeld parks one voucher in the (user, provider) held list and maintains
+// the held-users index. Used by the settler when a settlement outcome means
+// "collectable later, not now" — e.g. NOT_ACKNOWLEDGED, where the contract
+// rejects BEFORE consuming the nonce: dropping the voucher would write off
+// revenue that a later acknowledge makes collectable again. Nonce and
+// signature are cleared — they are settle-attempt artifacts; the sweep
+// re-aggregates and the settler re-signs on the next submission.
+func PushHeld(ctx context.Context, rdb *redis.Client, v SandboxVoucher) error {
+	v.Nonce = nil
+	v.Signature = nil
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	userLower := strings.ToLower(v.User.Hex())
+	providerLower := strings.ToLower(v.Provider.Hex())
+	heldKey := fmt.Sprintf(VoucherHeldKeyFmt, userLower, providerLower)
+	heldUsersKey := fmt.Sprintf(VoucherHeldUsersKeyFmt, providerLower)
+	pipe := rdb.TxPipeline()
+	pipe.RPush(ctx, heldKey, string(raw))
+	pipe.SAdd(ctx, heldUsersKey, userLower)
+	_, err = pipe.Exec(ctx)
+	return err
+}
+
 // HeldUsers returns the users that currently have a non-empty held (debt) list
 // for this provider, from the O(1)-maintained index set.
 func HeldUsers(ctx context.Context, rdb *redis.Client, provider common.Address) ([]common.Address, error) {
