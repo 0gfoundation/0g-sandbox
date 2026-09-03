@@ -5,15 +5,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"github.com/0gfoundation/0g-sandbox/internal/daytona"
+	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
 
 func init() { gin.SetMode(gin.TestMode) }
@@ -30,23 +36,28 @@ type mockBilling struct {
 }
 
 func (m *mockBilling) OnCreate(_ context.Context, sandboxID, _ string, _, _ int) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.creates = append(m.creates, sandboxID)
 }
 func (m *mockBilling) OnStart(_ context.Context, sandboxID, _ string, _, _ int) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.starts = append(m.starts, sandboxID)
 }
 func (m *mockBilling) OnStop(_ context.Context, sandboxID string) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.stops = append(m.stops, sandboxID)
 }
 func (m *mockBilling) OnDelete(_ context.Context, sandboxID string) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.deletes = append(m.deletes, sandboxID)
 }
 func (m *mockBilling) OnArchive(_ context.Context, sandboxID string) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.archives = append(m.archives, sandboxID)
 }
 func (m *mockBilling) EnsureSession(_ context.Context, _, _ string) {}
@@ -370,7 +381,6 @@ func mockDaytonaWithSSH(t *testing.T, sandboxes []daytona.Sandbox) *httptest.Ser
 	return srv
 }
 
-
 // TestSealedOnly_RejectsUnsealedCreate exercises the SEALED_ONLY config gate.
 // When the provider runs with sealed_only=true, every create that doesn't carry
 // `"sealed": true` must fail at 400 before the body ever reaches Daytona.
@@ -489,6 +499,82 @@ func TestExtractID(t *testing.T) {
 		got := extractID(tc.body)
 		if got != tc.want {
 			t.Errorf("extractID(%q) = %q, want %q", tc.body, got, tc.want)
+		}
+	}
+}
+
+// ── GET /api/balance ─────────────────────────────────────────────────────────
+
+type mockBalChecker struct{ bal *big.Int }
+
+func (m *mockBalChecker) GetBalance(context.Context, common.Address, common.Address) (*big.Int, error) {
+	return m.bal, nil
+}
+
+// The balance endpoint must report exactly what the create/start gates compute:
+// on-chain balance, reservations, held debt, and the spendable remainder.
+func TestBalanceEndpoint_SubtractsDebtAndReserved(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
+	wallet := "0x00000000000000000000000000000000000a11ce"
+	provider := "0x0000000000000000000000000000000000000bbb"
+
+	// Park 300 wei of debt in the held list the gates read.
+	heldKey := fmt.Sprintf(voucher.VoucherHeldKeyFmt,
+		strings.ToLower(common.HexToAddress(wallet).Hex()),
+		strings.ToLower(common.HexToAddress(provider).Hex()))
+	hv := voucher.SandboxVoucher{
+		SandboxID: "sb-1",
+		User:      common.HexToAddress(wallet),
+		Provider:  common.HexToAddress(provider),
+		TotalFee:  big.NewInt(300),
+	}
+	raw, _ := json.Marshal(hv)
+	rdb.RPush(context.Background(), heldKey, string(raw))
+
+	// And 200 wei still queued for settlement (accrued, will be charged).
+	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, common.HexToAddress(provider).Hex())
+	qv := hv
+	qv.TotalFee = big.NewInt(200)
+	rawQ, _ := json.Marshal(qv)
+	rdb.RPush(context.Background(), queueKey, string(rawQ))
+
+	srv, _ := mockDaytona(t, nil)
+	dtona := daytona.NewClient(srv.URL, "test-key")
+	r := gin.New()
+	api := r.Group("/api", func(c *gin.Context) {
+		c.Set("wallet_address", wallet)
+		c.Next()
+	})
+	NewHandler(dtona, &mockBilling{}, &mockBalChecker{bal: big.NewInt(1000)}, nil, nil,
+		nil, nil, nil, nil, provider, nil, "", rdb, zap.NewNop(), "", nil, 0).Register(api)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/balance", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	want := map[string]string{
+		"balance":            "1000",
+		"reserved":           "0",
+		"outstanding_debt":   "300",
+		"pending_settlement": "200",
+		"available":          "500",
+	}
+	for k, v := range want {
+		if resp[k] != v {
+			t.Errorf("%s: got %q want %q (body %s)", k, resp[k], v, w.Body.String())
 		}
 	}
 }

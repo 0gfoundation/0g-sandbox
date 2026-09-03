@@ -237,6 +237,10 @@ func main() {
 	// ── Goroutines ────────────────────────────────────────────────────────────
 	// Recovery must start after stopCh is ready but before settler writes to it.
 	go recoverPendingStops(ctx, rdb, stopCh, log)
+	// settler.Run also runs the pre-settle sweep (issue #69): each interval it
+	// re-splits backlogged users' vouchers (queued + held) against their balance
+	// — affordable prefix aggregates and settles, the rest parks as held debt,
+	// unpayable sandboxes stop. O(1) guards keep steady state untouched.
 	go settler.Run(ctx, cfg, rdb, onchain, signer, stopCh, alerter, log)
 	go billing.RunGenerator(ctx, rdb, billingHandler, log)
 
