@@ -152,13 +152,28 @@ func (h *SessionHandler) HandlePost(c *gin.Context) {
 		return
 	}
 
-	// 3. Anti-replay (only when sandbox_id is set).
-	if req.SandboxID != "" {
-		seenKey := fmt.Sprintf("%s%s:%d", seenKeyPrefix, req.SandboxID, req.StartTime)
-		if n, _ := h.rdb.Exists(ctx, seenKey).Result(); n > 0 {
-			c.JSON(http.StatusConflict, gin.H{"error": "already processed"})
-			return
-		}
+	// 3a. Freshness: the signed start_time must be near now (same ±300s window
+	// HandleDelete enforces). Without it, a captured request stays valid
+	// forever — combined with the funding-only replay gap below, indefinitely
+	// replayable deposits.
+	if diff := time.Now().Unix() - req.StartTime; diff > 300 || diff < -300 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "start_time outside freshness window"})
+		return
+	}
+
+	// 3b. Anti-replay. Funding-only requests (sandbox_id == "") previously had
+	// NO replay key at all — a captured funding signature could be replayed to
+	// re-trigger Payment Layer deposits every time the balance dipped. Key
+	// funding-only requests by (provider, user, start_time); the signature
+	// covers all three, so a replay lands on the same key.
+	seenKey := fmt.Sprintf("%s%s:%d", seenKeyPrefix, req.SandboxID, req.StartTime)
+	if req.SandboxID == "" {
+		seenKey = fmt.Sprintf("%sfund:%s:%s:%d", seenKeyPrefix,
+			strings.ToLower(req.ProviderAddr), strings.ToLower(req.UserAddr), req.StartTime)
+	}
+	if n, _ := h.rdb.Exists(ctx, seenKey).Result(); n > 0 {
+		c.JSON(http.StatusConflict, gin.H{"error": "already processed"})
+		return
 	}
 
 	// 4. Read pricing from chain — never trust billing proxy's passed-in prices.
@@ -210,10 +225,10 @@ func (h *SessionHandler) HandlePost(c *gin.Context) {
 		}
 	}
 
-	// 7. Write anti-replay key and session entry (only when sandbox_id is set).
+	// 7. Write the anti-replay key (both shapes — funding-only replays were the
+	// gap), then the session entry (only when sandbox_id is set).
+	h.rdb.Set(ctx, seenKey, "1", seenKeyTTL) //nolint:errcheck
 	if req.SandboxID != "" {
-		seenKey := fmt.Sprintf("%s%s:%d", seenKeyPrefix, req.SandboxID, req.StartTime)
-		h.rdb.Set(ctx, seenKey, "1", seenKeyTTL) //nolint:errcheck
 
 		entry := SessionEntry{
 			SandboxID:          req.SandboxID,
@@ -287,7 +302,7 @@ func (h *SessionHandler) HandleDelete(c *gin.Context) {
 	// Same signer==provider binding as HandlePost: only the provider that owns
 	// this session may deregister it — a sibling node of the same app must not
 	// remove another provider's monitoring entry.
-	if !strings.EqualFold(signer.Hex(), entry.Provider) {
+	if signer != common.HexToAddress(entry.Provider) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "signer is not the provider it acts for"})
 		return
 	}

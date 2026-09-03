@@ -518,3 +518,36 @@ func TestHandleDelete_SiblingNodeCannotDeleteOtherProvidersSession(t *testing.T)
 		t.Errorf("sibling-node delete of another provider's session: status = %d, want 401", w.Code)
 	}
 }
+
+// Review F1a: a signed request outside the ±300s freshness window must be
+// rejected — without this a captured signature stays valid forever.
+func TestHandlePost_StaleStartTimeRejected(t *testing.T) {
+	key, _ := crypto.GenerateKey()
+	h, _ := newSessionSetup(t, key, defaultChain(1_000_000), &mockPaymentLayer{})
+	router := newSessionRouter(h)
+
+	req := buildPostReq(t, key, "sb-stale", 2, 4)
+	req.StartTime = time.Now().Unix() - 400
+	req.Signature = teeSign(key, sessionMsgHash(req))
+	w := doPost(t, router, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("stale start_time: status = %d, want 401", w.Code)
+	}
+}
+
+// Review F1b: funding-only requests (sandbox_id == "") previously had NO
+// anti-replay key — a captured funding signature was replayable indefinitely.
+// The second identical request must now 409.
+func TestHandlePost_FundingOnlyReplayRejected(t *testing.T) {
+	key, _ := crypto.GenerateKey()
+	h, _ := newSessionSetup(t, key, defaultChain(1_000_000), &mockPaymentLayer{})
+	router := newSessionRouter(h)
+
+	req := buildPostReq(t, key, "", 2, 4) // funding-only
+	if w := doPost(t, router, req); w.Code != http.StatusOK {
+		t.Fatalf("first funding request: status = %d, want 200", w.Code)
+	}
+	if w := doPost(t, router, req); w.Code != http.StatusConflict {
+		t.Errorf("replayed funding request: status = %d, want 409", w.Code)
+	}
+}
