@@ -4,7 +4,6 @@ Network: **0G Galileo Testnet** (chain ID 16602)
 Explorer: https://chainscan-galileo.0g.ai
 Deployer (historical): `0xB831371eb2703305f1d9F8542163633D0675CEd7` — key compromised, rotated out (see 2026-09-05 below)
 Owner (current, contract + beacon, dev & testnet): `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`
-> ⚠️ **Pending:** the TappRegistry app-owner (`getAppInfo(appId).owner`, separate from the contract owner above) is still `0xB831…CEd7` on **testnet** and must be rotated there too — it governs register/withdraw/rotate. dev's app-owner is already migrated.
 
 
 > Chinese version: [CONTRACTS.zh.md](README.zh.md)

@@ -4,7 +4,6 @@
 浏览器：https://chainscan-galileo.0g.ai
 部署者（历史）：`0xB831371eb2703305f1d9F8542163633D0675CEd7` —— 私钥已泄漏,已轮换退出(见下方 2026-09-05)
 当前所有者（合约 + beacon,dev 与 testnet）：`0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`
-> ⚠️ **待办:** TappRegistry 的 app owner(`getAppInfo(appId).owner`,与上面的合约 owner 是两套)在 **testnet** 上仍是 `0xB831…CEd7`,也需在那边轮换 —— 它管 register/withdraw/rotate。dev 的 app owner 已迁移。
 
 
 > English version: [CONTRACTS.md](README.md)
