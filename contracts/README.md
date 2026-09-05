@@ -2,7 +2,10 @@
 
 Network: **0G Galileo Testnet** (chain ID 16602)
 Explorer: https://chainscan-galileo.0g.ai
-Deployer/Owner: `0xB831371eb2703305f1d9F8542163633D0675CEd7`
+Deployer (historical): `0xB831371eb2703305f1d9F8542163633D0675CEd7` — key compromised, rotated out (see 2026-09-05 below)
+Owner (current, contract + beacon, dev & testnet): `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`
+> ⚠️ **Pending:** the TappRegistry app-owner (`getAppInfo(appId).owner`, separate from the contract owner above) is still `0xB831…CEd7` on **testnet** and must be rotated there too — it governs register/withdraw/rotate. dev's app-owner is already migrated.
+
 
 > Chinese version: [CONTRACTS.zh.md](README.zh.md)
 
@@ -25,6 +28,7 @@ Deployer/Owner: `0xB831371eb2703305f1d9F8542163633D0675CEd7`
 | initial | — | Initial deploy: per-provider balance isolation, owner model |
 | 2026-03-10 | `0x9a3D6C66e3e6E020D8D40d851Db76D76EBfa93f2` | Removed `msg.sender == provider` check in `settleFeesWithTEE`; TEE key signs settlement txs directly, no `PROVIDER_PRIVATE_KEY` needed |
 | 2026-07-19 | `0x47a8E809Cd81b94eD19874da73C0E3F82DD90E5C` | **v2 redeploy (new proxy/beacon)**: provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement.  Previous dev proxy `0x2024eB0C…E9b3` retired (refund-only) |
+| 2026-09-05 | (no impl change) | **Ownership rotated** — contract `owner` + beacon owner transferred `0xB831…CEd7` → `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f` (compromised deployer key, #95). No implementation change. |
 
 ```env
 SETTLEMENT_CONTRACT=0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c
@@ -48,6 +52,7 @@ TAPP_REGISTRY=0x2Ce80374318B1d7Fb3345724457a182E0ad165c9
 | Date | Impl | Notes |
 |------|------|-------|
 | 2026-07-20 | `0x7a1A5FC5B1A6AC1127e2D8b63400615B2ea49C47` | **v2 redeploy (new proxy/beacon)**: provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement. Verified on chainscan. Bound to TappRegistry `0x2Ce8…65c9` (repointed from `0x95a0…` via setTappRegistry right after deploy). Supersedes the v1 testnet proxies `0xA07b0033…FC12c` and `0x3d4d8a05…cf6f` — both retired (refund-only) |
+| 2026-09-05 | (no impl change) | **Ownership rotated** — contract `owner` + beacon owner transferred `0xB831…CEd7` → `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f` (compromised deployer key, #95). No implementation change. |
 
 **Provider stake:** held in TappRegistry per node (not in SandboxServing); see `minStakeAmount()` on the registry (1 0G at the time of writing).
 
