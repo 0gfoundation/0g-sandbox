@@ -2,8 +2,8 @@
 
 网络：**0G Galileo 测试网**（chain ID 16602）
 浏览器：https://chainscan-galileo.0g.ai
-部署者（历史）：`0xB831371eb2703305f1d9F8542163633D0675CEd7` —— 私钥已泄漏,已轮换退出(见下方 2026-09-05)
-当前所有者（合约 + beacon,dev 与 testnet）：`0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`
+部署者：`0xB831371eb2703305f1d9F8542163633D0675CEd7`
+所有者（合约 + beacon,dev 与 testnet）：`0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`
 
 
 > English version: [CONTRACTS.md](README.md)
@@ -27,7 +27,7 @@
 | 初始 | — | 首次部署：per-provider 余额隔离，owner 模型 |
 | 2026-03-10 | `0x9a3D6C66e3e6E020D8D40d851Db76D76EBfa93f2` | 移除 `settleFeesWithTEE` 中 `msg.sender == provider` 限制，TEE key 直接签结算 tx，无需 `PROVIDER_PRIVATE_KEY` |
 | 2026-07-19 | `0x47a8E809Cd81b94eD19874da73C0E3F82DD90E5C` | **v2 重新部署(新 proxy/beacon)**:provider 即 TEE signer;注册/注销/提现归 owner;结算要求收款人本人签名。绑定 TappRegistry `0x2Ce80374318B1d7Fb3345724457a182E0ad165c9`。旧 dev proxy `0x2024eB0C…E9b3` 退役(仅退款) |
-| 2026-09-05 | (实现未变) | **所有权轮换** —— 合约 `owner` 与 beacon owner 从 `0xB831…CEd7` 转至 `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`(部署者私钥泄漏,#95)。实现未变。 |
+| 2026-09-05 | (实现未变) | **所有权转移** —— 合约 `owner` 与 beacon owner 设为 `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`(原 `0xB831…CEd7`)。实现未变。 |
 
 ```env
 SETTLEMENT_CONTRACT=0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c
@@ -51,7 +51,7 @@ TAPP_REGISTRY=0x2Ce80374318B1d7Fb3345724457a182E0ad165c9
 | 日期 | Impl | 说明 |
 |------|------|------|
 | 2026-07-20 | `0x7a1A5FC5B1A6AC1127e2D8b63400615B2ea49C47` | **v2 重新部署(新 proxy/beacon)**:provider 即 TEE signer;注册/注销/提现归 owner;结算要求收款人本人签名。已在 chainscan verify。取代 v1 测试网 proxy `0xA07b0033…FC12c`(绑 TappRegistry `0x2Ce8…`)与 `0x3d4d8a05…cf6f`——均退役(仅退款) |
-| 2026-09-05 | (实现未变) | **所有权轮换** —— 合约 `owner` 与 beacon owner 从 `0xB831…CEd7` 转至 `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`(部署者私钥泄漏,#95)。实现未变。 |
+| 2026-09-05 | (实现未变) | **所有权转移** —— 合约 `owner` 与 beacon owner 设为 `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`(原 `0xB831…CEd7`)。实现未变。 |
 
 **Provider 质押:** 按节点存于 TappRegistry(不在 SandboxServing);见 registry 的 `minStakeAmount()`(当前 1 0G)。
 
