@@ -1,12 +1,37 @@
 # 0G Sandbox — Contract Registry
 
-Network: **0G Galileo Testnet** (chain ID 16602)
-Explorer: https://chainscan-galileo.0g.ai
-Deployer: `0xB831371eb2703305f1d9F8542163633D0675CEd7`
-Owner (contract + beacon, dev & testnet): `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`
+Networks: **0G Mainnet** (chain ID 16661) · **0G Galileo Testnet** (chain ID 16602, used by dev + testnet). Each section below states its network, explorer, and RPC.
+
+Owner: mainnet contract/beacon = `0x73443d8C05c74F8C2F5D499Da2597a1EE49E431b` (deployer); dev + testnet contract/beacon = `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`.
 
 
 > Chinese version: [CONTRACTS.zh.md](README.zh.md)
+
+---
+
+## Mainnet Contract
+
+> 0G Mainnet (chain ID 16661) · Explorer: https://chainscan.0g.ai · RPC: https://evmrpc.0g.ai
+> Production deployment. Deployed 2026-09-09.
+
+| Component | Address |
+|-----------|---------|
+| **Proxy** (stable) | `0x650C16a491ad52dB6b7f3053bCaD650cb43d2206` |
+| Beacon | `0x3916925C9F34016d0182c731Cd8D1021fDEAe207` |
+| TappRegistry | `0x54874F536301c993922Dd95097e3902e7FBfe612` |
+
+**Upgrade history:**
+
+| Date | Impl | Notes |
+|------|------|-------|
+| 2026-09-09 | `0x90a0f1BcaCE1A516CF4D1918178EB99E08c16f24` | Initial mainnet deploy (v2): provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement. Bound to TappRegistry `0x5487…e612`. Owner = deployer `0x7344…431b`. |
+
+```env
+SETTLEMENT_CONTRACT=0x650C16a491ad52dB6b7f3053bCaD650cb43d2206
+TAPP_REGISTRY=0x54874F536301c993922Dd95097e3902e7FBfe612
+RPC_URL=https://evmrpc.0g.ai
+CHAIN_ID=16661
+```
 
 ---
 
