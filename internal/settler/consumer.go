@@ -19,6 +19,11 @@ import (
 
 const maxBatchSize = 50
 
+// maxSettleInterval caps SETTLE_INTERVAL_SEC at half the contract's refund
+// LOCK_TIME (2h), leaving a full hour of margin for a backlog to drain before a
+// requested refund becomes withdrawable.
+const maxSettleInterval = time.Hour
+
 // Run is the main settler loop: BLPOP → sign → settle → handle statuses.
 // nonceSigner assigns nonces and signs vouchers sequentially, guaranteeing
 // strict nonce ordering regardless of how many goroutines enqueued the vouchers.
@@ -70,6 +75,20 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 	settleInterval := time.Duration(cfg.Billing.SettleIntervalSec) * time.Second
 	if settleInterval <= 0 {
 		settleInterval = sweepInterval // unset = today's behaviour
+	}
+	// Hard ceiling: the contract lets a user move funds to pendingRefunds and
+	// withdraw them after LOCK_TIME (2h). Settlement can still seize
+	// pendingRefunds while the lock runs (_settleOne sweeps balances +
+	// pendingRefunds), so revenue is safe only while the settle window leaves
+	// room to land inside that lock. A window at or past LOCK_TIME would let a
+	// user request a refund, wait it out, withdraw, and have the settlement
+	// arrive at an empty account. Clamp well under it.
+	if settleInterval > maxSettleInterval {
+		log.Warn("settler: SETTLE_INTERVAL_SEC exceeds the safe ceiling; clamping",
+			zap.Duration("configured", settleInterval),
+			zap.Duration("clamped_to", maxSettleInterval),
+			zap.String("why", "contract refund LOCK_TIME is 2h; settlement must land inside it"))
+		settleInterval = maxSettleInterval
 	}
 	// Zero value means "never submitted yet", so the first batch goes out
 	// immediately rather than waiting out a full interval after a restart.

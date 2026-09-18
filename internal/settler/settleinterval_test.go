@@ -118,3 +118,44 @@ func TestSettleInterval_UnsetKeepsLegacyCadence(t *testing.T) {
 		t.Fatalf("with the interval unset each arrival past the window should submit; got %d (%v)", added, ch.submits)
 	}
 }
+
+// A backlog must drain at full speed regardless of the settle window: the gate
+// releases as soon as the queue holds a full batch, so outage recovery behaves
+// exactly as before this change.
+func TestSettleInterval_BacklogDrainsImmediately(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	prov := common.HexToAddress("0xPROV")
+	ch := &batchChain{provider: prov}
+
+	// A long settle window that would otherwise hold everything back...
+	cfg := &config.Config{Billing: config.BillingConfig{VoucherIntervalSec: 1, SettleIntervalSec: 600}}
+	// ...against a pre-existing backlog well past maxBatchSize.
+	queueVouchers(t, rdb, prov, 200)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go Run(ctx, cfg, rdb, ch, nopSigner{}, make(chan StopSignal, 8), alert.Nop{}, zap.NewNop())
+
+	// Within a couple of seconds the backlog must be moving — not waiting out
+	// the 600s window. What it collapses INTO is the aggregator's business: a
+	// same-user backlog folds into one covered aggregate (#87), so asserting on
+	// batch shape would encode the wrong invariant. Assert the queue drains.
+	time.Sleep(2500 * time.Millisecond)
+	if len(ch.submits) == 0 {
+		t.Fatal("a backlog must be submitted despite the settle window; nothing was submitted")
+	}
+	qlen, _ := rdb.LLen(context.Background(), "voucher:queue:"+prov.Hex()).Result()
+	if qlen > 50 {
+		t.Fatalf("backlog still %d deep after 2.5s; the gate must release once the queue holds a full batch", qlen)
+	}
+}
+
+// SETTLE_INTERVAL_SEC is clamped below the contract's refund LOCK_TIME (2h):
+// past that a user could requestRefund, wait out the lock, withdraw, and have
+// settlement arrive at an empty account.
+func TestSettleInterval_ClampedBelowRefundLock(t *testing.T) {
+	if maxSettleInterval >= 2*time.Hour {
+		t.Fatalf("maxSettleInterval (%v) must stay below the contract's 2h LOCK_TIME", maxSettleInterval)
+	}
+}
