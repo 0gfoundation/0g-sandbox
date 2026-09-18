@@ -9,7 +9,10 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
+	"github.com/ethereum/go-ethereum/common"
+
 	"github.com/0gfoundation/0g-sandbox/internal/alert"
+	"github.com/0gfoundation/0g-sandbox/internal/billing"
 	"github.com/0gfoundation/0g-sandbox/internal/chain"
 	"github.com/0gfoundation/0g-sandbox/internal/events"
 	"github.com/0gfoundation/0g-sandbox/internal/voucher"
@@ -60,13 +63,20 @@ func HandleStatuses(
 
 		case chain.StatusInsufficientBalance:
 			if v.IsAggregated() {
-				// Aggregated voucher: no specific sandbox to stop. Alert so the
-				// operator can intervene; per-(user, provider) stop sweep is
-				// future work if this becomes common.
-				log.Warn("aggregated voucher exhausted user balance",
+				// An aggregated voucher covers the user's whole backlog for this
+				// provider, so INSUFFICIENT_BALANCE means the account is
+				// exhausted outright — every sandbox they own is unpayable, and
+				// the right answer is simply "stop them all". The voucher itself
+				// carries no sandbox id (AggregatedSandboxID is empty), which is
+				// why this branch used to only alert; the owner is identity
+				// enough. persistStop dedups via SetNX, so sandboxes the sweep
+				// already stopped are not re-killed.
+				stopped := stopAllSandboxesOf(ctx, rdb, stopCh, v.User, v.Provider, log)
+				log.Warn("aggregated voucher exhausted user balance — stopping the owner's sandboxes",
 					zap.String("user", v.User.Hex()),
 					zap.String("provider", v.Provider.Hex()),
 					zap.String("amount", v.TotalFee.String()),
+					zap.Int("sandboxes_stopped", stopped),
 				)
 				alerter.Notify(ctx, alert.KindVoucherRejected, alert.SeverityCritical,
 					"Aggregated voucher exhausted user balance — multiple sandboxes affected",
@@ -190,4 +200,36 @@ func persistStop(ctx context.Context, rdb *redis.Client, stopCh chan<- StopSigna
 
 func extractSandboxID(v voucher.SandboxVoucher) string {
 	return v.SandboxID
+}
+
+// stopAllSandboxesOf queues a stop for every open billing session owned by user
+// under provider. Used when an AGGREGATED voucher settles INSUFFICIENT_BALANCE:
+// that voucher spans the user's whole backlog, so its rejection means the
+// account is empty and none of their sandboxes can be paid for — there is no
+// "which sandbox" to pick, the answer is all of them.
+//
+// The gas-free sweep (maybeSweep → AggregateCovered → persistStop) normally
+// stops these first, since it runs before submission and knows each held
+// voucher's sandbox id. This is the narrow tail it cannot cover: a balance that
+// empties between the sweep's split and the settlement landing on-chain.
+func stopAllSandboxesOf(ctx context.Context, rdb *redis.Client, stopCh chan<- StopSignal, user, provider common.Address, log *zap.Logger) int {
+	sessions, err := billing.ScanAllSessions(ctx, rdb)
+	if err != nil {
+		log.Error("aggregated-insufficient: scan sessions failed; sandboxes not stopped",
+			zap.String("user", user.Hex()), zap.Error(err))
+		return 0
+	}
+	stopped := 0
+	for _, s := range sessions {
+		if !strings.EqualFold(s.Owner, user.Hex()) || !strings.EqualFold(s.Provider, provider.Hex()) {
+			continue
+		}
+		if err := persistStop(ctx, rdb, stopCh, s.SandboxID, "insufficient_balance", log); err != nil {
+			log.Error("aggregated-insufficient: persist stop failed",
+				zap.String("sandbox", s.SandboxID), zap.Error(err))
+			continue
+		}
+		stopped++
+	}
+	return stopped
 }
