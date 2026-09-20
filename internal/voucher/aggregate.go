@@ -293,6 +293,8 @@ func AggregateCovered(ctx context.Context, rdb *redis.Client, queueKey string, u
 			var heldRaws []string
 			sbSeen := map[string]bool{}
 			var heldSandboxIDs []string
+			coveredBySandbox := map[string]*sandboxGroup{}
+			var coveredOrder []string // preserve queue order → stable nonce order
 			holding := false
 			dropped := 0
 
@@ -313,6 +315,21 @@ func AggregateCovered(ctx context.Context, rdb *redis.Client, queueKey string, u
 					if next.Cmp(balance) <= 0 {
 						coveredSum = next
 						coveredCount++
+						// Group the covered side per sandbox so the settled
+						// receipt keeps the dimension that makes it auditable:
+						// which sandbox the fee came from. Collapsing a user's
+						// whole backlog into one sandbox-less voucher (the
+						// previous shape) made the on-chain VoucherSettled
+						// event carry a total with no way back to the usage
+						// that produced it.
+						g, ok := coveredBySandbox[v.SandboxID]
+						if !ok {
+							g = &sandboxGroup{sandboxID: v.SandboxID, sum: new(big.Int)}
+							coveredBySandbox[v.SandboxID] = g
+							coveredOrder = append(coveredOrder, v.SandboxID)
+						}
+						g.sum.Add(g.sum, fee)
+						g.count++
 						continue
 					}
 					holding = true // first overflow — everything from here is debt
@@ -325,21 +342,25 @@ func AggregateCovered(ctx context.Context, rdb *redis.Client, queueKey string, u
 				}
 			}
 
-			var rawAgg string
+			var rawAggs []string
 			if coveredCount > 0 {
 				now := time.Now().Unix()
-				agg := SandboxVoucher{
-					SandboxID: AggregatedSandboxID,
-					User:      user,
-					Provider:  provider,
-					TotalFee:  coveredSum,
-					UsageHash: BuildUsageHash(AggregatedSandboxID, now, now, 0),
+				for _, sid := range coveredOrder {
+					g := coveredBySandbox[sid]
+					agg := SandboxVoucher{
+						SandboxID:  sid, // preserved: this is the point
+						User:       user,
+						Provider:   provider,
+						TotalFee:   g.sum,
+						UsageHash:  BuildUsageHash(sid, now, now, 0),
+						Aggregated: true,
+					}
+					b, err := json.Marshal(agg)
+					if err != nil {
+						return fmt.Errorf("marshal aggregated: %w", err)
+					}
+					rawAggs = append(rawAggs, string(b))
 				}
-				b, err := json.Marshal(agg)
-				if err != nil {
-					return fmt.Errorf("marshal aggregated: %w", err)
-				}
-				rawAgg = string(b)
 			}
 
 			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
@@ -352,8 +373,8 @@ func AggregateCovered(ctx context.Context, rdb *redis.Client, queueKey string, u
 					}
 					pipe.RPush(ctx, queueKey, vals...)
 				}
-				if coveredCount > 0 {
-					pipe.RPush(ctx, queueKey, rawAgg)
+				for _, ra := range rawAggs {
+					pipe.RPush(ctx, queueKey, ra)
 				}
 				// Rewrite the held list to exactly the new remainder, and keep the
 				// held-users index in sync so the settler's O(1) guard stays honest.
@@ -400,13 +421,28 @@ func AggregateCovered(ctx context.Context, rdb *redis.Client, queueKey string, u
 // signal "this voucher does not correspond to a single sandbox" — picking
 // any concrete sandbox_id as a representative would be misleading because
 // settle-time stop logic would target only one of N merged sandboxes.
+// AggregatedSandboxID was the sentinel for an aggregate that spanned a user's
+// whole backlog. Aggregates now keep their sandbox id (see sandboxGroup), so
+// this only remains to recognise pre-upgrade aggregates still sitting in a
+// queue or held list across a rollout.
 const AggregatedSandboxID = ""
 
-// IsAggregated reports whether v was produced by Aggregate (vs. a normal
-// per-period voucher). Used by the settler to skip per-sandbox stop logic
-// on settlement failure.
+// sandboxGroup accumulates one sandbox's covered vouchers during a split.
+type sandboxGroup struct {
+	sandboxID string
+	sum       *big.Int
+	count     int
+}
+
+// IsAggregated reports whether v is a collapsed aggregate rather than a normal
+// per-period voucher. It reads the explicit flag; the empty-sandbox-id check is
+// the legacy fallback for aggregates minted before aggregates carried one.
+//
+// The settler uses this to decide how a settlement failure maps to sandboxes:
+// an aggregate spans many periods, so INSUFFICIENT_BALANCE on one means the
+// owner is out of money outright.
 func (v *SandboxVoucher) IsAggregated() bool {
-	return v.SandboxID == AggregatedSandboxID
+	return v.Aggregated || v.SandboxID == AggregatedSandboxID
 }
 
 // Aggregate atomically replaces every queued voucher matching the target
@@ -467,12 +503,17 @@ func Aggregate(ctx context.Context, rdb *redis.Client, queueKey string, user, pr
 			}
 
 			now := time.Now().Unix()
+			// Operator-initiated collapse of a (user, provider) pair stays
+			// user-wide on purpose — the admin asked for one voucher, not one
+			// per sandbox. It keeps the sentinel sandbox id for that reason;
+			// the automatic sweep is the path that preserves sandbox identity.
 			agg := SandboxVoucher{
-				SandboxID: AggregatedSandboxID,
-				User:      user,
-				Provider:  provider,
-				TotalFee:  total,
-				UsageHash: BuildUsageHash(AggregatedSandboxID, now, now, 0),
+				SandboxID:  AggregatedSandboxID,
+				User:       user,
+				Provider:   provider,
+				TotalFee:   total,
+				UsageHash:  BuildUsageHash(AggregatedSandboxID, now, now, 0),
+				Aggregated: true,
 			}
 			rawAgg, err := json.Marshal(agg)
 			if err != nil {
