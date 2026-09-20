@@ -38,7 +38,18 @@ type RedisConfig struct {
 }
 
 type BillingConfig struct {
-	VoucherIntervalSec  int64  `mapstructure:"voucher_interval_sec"`
+	VoucherIntervalSec int64 `mapstructure:"voucher_interval_sec"`
+	// SettleIntervalSec decouples SETTLEMENT cadence from ACCOUNTING cadence.
+	// VoucherIntervalSec alone drove both: a voucher was emitted every interval
+	// and the settler, blocked in BLPOP, submitted it the moment it landed — so
+	// the queue never accumulated and every voucher cost its own transaction
+	// (measured on dev: ~0.00098 0G gas to collect a 0.004 0G voucher, ~25%).
+	// With this set, the settler waits before draining, so the existing batching
+	// (maxBatchSize, and the contract's per-voucher loop across users) actually
+	// has something to batch. 0 = fall back to VoucherIntervalSec (today's
+	// behaviour). Accounting granularity is unaffected — vouchers are still
+	// emitted every VoucherIntervalSec.
+	SettleIntervalSec   int64  `mapstructure:"settle_interval_sec"`
 	ComputePricePerSec  string `mapstructure:"compute_price_per_sec"`    // flat rate (fallback)
 	PricePerCPUPerSec   string `mapstructure:"price_per_cpu_per_sec"`    // per CPU core/sec
 	PricePerMemGBPerSec string `mapstructure:"price_per_mem_gb_per_sec"` // per GB memory/sec
@@ -108,6 +119,7 @@ func Load() (*Config, error) {
 	// Defaults
 	v.SetDefault("server.port", 8080)
 	v.SetDefault("billing.voucher_interval_sec", 3600)
+	v.SetDefault("billing.settle_interval_sec", 0) // 0 = same as voucher_interval_sec
 	v.SetDefault("billing.compute_price_per_sec", "16667")
 	v.SetDefault("billing.price_per_cpu_per_sec", "0")
 	v.SetDefault("billing.price_per_mem_gb_per_sec", "0")
@@ -136,6 +148,7 @@ func Load() (*Config, error) {
 		"redis.addr":                       "REDIS_ADDR",
 		"redis.password":                   "REDIS_PASSWORD",
 		"billing.voucher_interval_sec":     "VOUCHER_INTERVAL_SEC",
+		"billing.settle_interval_sec":      "SETTLE_INTERVAL_SEC",
 		"billing.compute_price_per_sec":    "COMPUTE_PRICE_PER_SEC",
 		"billing.price_per_cpu_per_sec":    "PRICE_PER_CPU_PER_SEC",
 		"billing.price_per_mem_gb_per_sec": "PRICE_PER_MEM_GB_PER_SEC",
