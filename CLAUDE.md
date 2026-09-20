@@ -104,6 +104,16 @@ contracts/
 3. `billing.RunGenerator` ticks every `VOUCHER_INTERVAL_SEC` → emits compute vouchers for all
    open sessions
 4. `settler.Run` drains the Redis voucher queue, calls `SettleFeesWithTEE` on-chain in batches
+   - **Settlement cadence is separate from accounting cadence.** `SETTLE_INTERVAL_SEC`
+     (default: same as `VOUCHER_INTERVAL_SEC`) is how long the settler lets vouchers
+     accumulate before draining. Unset, it submits on arrival — one transaction per
+     voucher, which on dev costs ~0.00098 0G of gas to collect a 0.004 0G voucher.
+     Set it higher and the existing batching (`maxBatchSize`, and the contract's
+     per-voucher loop, which spans users) has something to batch; accounting stays
+     per-`VOUCHER_INTERVAL_SEC`, so charges keep their granularity.
+   - The gas-free sweep (aggregation, held debt, **stop protection**) deliberately
+     stays on `VOUCHER_INTERVAL_SEC`: a slower settlement cadence must not let an
+     out-of-balance sandbox run longer.
 5. On `INSUFFICIENT_BALANCE`: settler writes `stop:sandbox:<id>` to Redis
 6. `runStopHandler` reads stop keys, calls Daytona stop, cleans up Redis keys
 
@@ -290,7 +300,7 @@ The server starts on port 8080 (`PORT` env var) and exposes:
 - `GET /api/sandbox` — list sandboxes (filtered to caller's own)
 - `GET /api/sandbox/paginated` — paginated list
 - `GET /api/sandbox/:id` — get sandbox (admin or owner)
-- `DELETE /api/sandbox/:id` — delete sandbox (admin or owner; billing: final compute voucher)
+- `DELETE /api/sandbox/:id` — delete sandbox (admin or owner; billing: closes the session — no final voucher, the current period was pre-charged at its start)
 - `POST /api/sandbox/:id/start` — start a stopped sandbox (owner only)
 - `POST /api/sandbox/:id/stop` — stop a running sandbox (admin or owner; billing: OnStop)
 - `POST /api/sandbox/:id/archive` — archive a stopped sandbox (admin or owner)

@@ -19,6 +19,11 @@ import (
 
 const maxBatchSize = 50
 
+// maxSettleInterval caps SETTLE_INTERVAL_SEC at half the contract's refund
+// LOCK_TIME (2h), leaving a full hour of margin for a backlog to drain before a
+// requested refund becomes withdrawable.
+const maxSettleInterval = time.Hour
+
 // Run is the main settler loop: BLPOP → sign → settle → handle statuses.
 // nonceSigner assigns nonces and signs vouchers sequentially, guaranteeing
 // strict nonce ordering regardless of how many goroutines enqueued the vouchers.
@@ -62,6 +67,32 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 	if sweepInterval <= 0 {
 		sweepInterval = time.Minute
 	}
+	// Settlement cadence, independent of accounting cadence. The sweep above
+	// deliberately stays on the ACCOUNTING clock: it is gas-free and it is what
+	// stops unpayable sandboxes (maybeSweep → AggregateCovered → persistStop),
+	// so a slower settlement cadence must not slow it down. Only the decision
+	// to drain the queue moves.
+	settleInterval := time.Duration(cfg.Billing.SettleIntervalSec) * time.Second
+	if settleInterval <= 0 {
+		settleInterval = sweepInterval // unset = today's behaviour
+	}
+	// Hard ceiling: the contract lets a user move funds to pendingRefunds and
+	// withdraw them after LOCK_TIME (2h). Settlement can still seize
+	// pendingRefunds while the lock runs (_settleOne sweeps balances +
+	// pendingRefunds), so revenue is safe only while the settle window leaves
+	// room to land inside that lock. A window at or past LOCK_TIME would let a
+	// user request a refund, wait it out, withdraw, and have the settlement
+	// arrive at an empty account. Clamp well under it.
+	if settleInterval > maxSettleInterval {
+		log.Warn("settler: SETTLE_INTERVAL_SEC exceeds the safe ceiling; clamping",
+			zap.Duration("configured", settleInterval),
+			zap.Duration("clamped_to", maxSettleInterval),
+			zap.String("why", "contract refund LOCK_TIME is 2h; settlement must land inside it"))
+		settleInterval = maxSettleInterval
+	}
+	// Zero value means "never submitted yet", so the first batch goes out
+	// immediately rather than waiting out a full interval after a restart.
+	var lastSubmit time.Time
 	var lastSweep time.Time
 	// Forced-sweep throttle: while the settler cannot submit (tx failure or
 	// rotation hold), maybeSweep is forced at the same cadence so unpayable
@@ -120,6 +151,29 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 			case <-time.After(5 * time.Second):
 			}
 			continue
+		}
+
+		// Batching gate: hold off draining until the settle window has elapsed
+		// or the queue already holds a full batch. Without this the loop sits in
+		// BLPOP and submits each voucher the instant it lands, so the queue
+		// never accumulates and maxBatchSize is never reached — one transaction
+		// per voucher. Vouchers are never popped-and-pushed-back here, only the
+		// decision to START draining moves, so the strictly-increasing nonce
+		// order the contract requires is untouched.
+		if !lastSubmit.IsZero() && time.Since(lastSubmit) < settleInterval {
+			qlen, qerr := rdb.LLen(ctx, queueKey).Result()
+			if qerr != nil {
+				log.Warn("settler: LLEN failed; draining without the batching gate", zap.Error(qerr))
+			} else if qlen < int64(maxBatchSize) {
+				// Not due and not full: keep the loop turning (node checks,
+				// sweep, stop protection) without consuming the queue.
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Second):
+				}
+				continue
+			}
 		}
 
 		// BLPOP blocks until an item appears or timeout
@@ -241,6 +295,7 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 			// re-queue (the tx is in flight).
 			log.Error("settler: persist pending tx failed; resolving in-memory", zap.Error(err))
 		}
+		lastSubmit = time.Now()
 		statuses := resolvePendingTx(ctx, rdb, onchain, queueKey, stopCh, onchain.ProviderAddress(), &p, alerter, log)
 		if statuses == nil {
 			continue // re-queued (dropped/reverted) or ctx done — nothing settled

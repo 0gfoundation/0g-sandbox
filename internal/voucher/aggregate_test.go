@@ -264,7 +264,12 @@ func queueAggFeeAndRest(t *testing.T, rdb *redis.Client) (aggFee *big.Int, rest 
 			continue
 		}
 		if v.IsAggregated() {
-			aggFee = v.TotalFee
+			// Aggregates are now per sandbox, so the queue can hold several:
+			// sum them for the total the caller is asserting on.
+			if aggFee == nil {
+				aggFee = new(big.Int)
+			}
+			aggFee = new(big.Int).Add(aggFee, v.TotalFee)
 		} else {
 			rest++
 		}
@@ -413,5 +418,50 @@ func TestAggregateCovered_ReclaimsHeldOnTopUp(t *testing.T) {
 	}
 	if len(r2.HeldSandboxIDs) != 2 {
 		t.Errorf("held sandbox ids: %v want 2 distinct", r2.HeldSandboxIDs)
+	}
+}
+
+// The point of per-sandbox aggregation: a settled aggregate still says WHICH
+// sandbox the fee came from. Collapsing a user's backlog into one sandbox-less
+// voucher made the on-chain VoucherSettled event a bare total with no way back
+// to the usage behind it.
+func TestAggregateCovered_KeepsSandboxIdentity(t *testing.T) {
+	rdb, mr := setup(t)
+	defer mr.Close()
+	user := common.HexToAddress("0xAAA")
+	prov := common.HexToAddress("0xBBB")
+
+	// Two sandboxes, two periods each — all affordable.
+	for _, sb := range []string{"sb-a", "sb-b"} {
+		for i := 0; i < 2; i++ {
+			enqueueRaw(t, rdb, voucherFor(sb, user, prov, 100))
+		}
+	}
+	res, err := AggregateCovered(context.Background(), rdb, testQueueKey, user, prov, big.NewInt(1000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Covered != 4 || res.CoveredFeeWei != "400" {
+		t.Fatalf("covered: %d / %s want 4 / 400", res.Covered, res.CoveredFeeWei)
+	}
+
+	items, _ := rdb.LRange(context.Background(), testQueueKey, 0, -1).Result()
+	bySandbox := map[string]string{}
+	for _, raw := range items {
+		var v SandboxVoucher
+		if json.Unmarshal([]byte(raw), &v) != nil || !v.IsAggregated() {
+			continue
+		}
+		if v.SandboxID == "" {
+			t.Error("an aggregate must carry its sandbox id, not the empty sentinel")
+		}
+		if !v.Aggregated {
+			t.Error("an aggregate must set the explicit Aggregated flag")
+		}
+		bySandbox[v.SandboxID] = v.TotalFee.String()
+	}
+	// One aggregate per sandbox, each carrying that sandbox's two periods.
+	if len(bySandbox) != 2 || bySandbox["sb-a"] != "200" || bySandbox["sb-b"] != "200" {
+		t.Fatalf("want one 200-fee aggregate per sandbox, got %v", bySandbox)
 	}
 }
