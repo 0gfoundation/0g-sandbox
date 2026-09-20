@@ -17,6 +17,11 @@ type SandboxVoucher struct {
 	UsageHash [32]byte       `json:"usage_hash"`
 	Nonce     *big.Int       `json:"nonce"`
 	Signature []byte         `json:"signature"`
+	// Aggregated marks a voucher minted by the sweep from several per-period
+	// vouchers. Off-chain only — the contract's SandboxVoucher has no such
+	// field and the EIP-712 digest does not cover it, so adding it changes
+	// neither the signature nor on-chain verification.
+	Aggregated bool `json:"aggregated,omitempty"`
 }
 
 // Redis key templates
