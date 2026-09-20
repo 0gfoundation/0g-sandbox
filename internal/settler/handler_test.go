@@ -511,3 +511,48 @@ func testSignerKey(t *testing.T) *ecdsa.PrivateKey {
 	}
 	return k
 }
+
+// An AGGREGATED voucher settling INSUFFICIENT_BALANCE means the user's account
+// is exhausted outright — the voucher spans their whole backlog. Every sandbox
+// they own must be stopped; previously this branch only alerted because the
+// aggregated voucher carries no sandbox id.
+func TestHandleStatuses_AggregatedInsufficient_StopsAllOwnerSandboxes(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	stopCh := make(chan StopSignal, 8)
+	ctx := context.Background()
+
+	owner := common.HexToAddress("0xAAA")
+	prov := common.HexToAddress("0xBBB")
+	other := common.HexToAddress("0xCCC")
+
+	// Two sandboxes for the broke owner, one for somebody else.
+	for _, s := range []billing.Session{
+		{SandboxID: "sb-1", Owner: owner.Hex(), Provider: prov.Hex(), PricePerSec: "1", NextVoucherAt: 1},
+		{SandboxID: "sb-2", Owner: owner.Hex(), Provider: prov.Hex(), PricePerSec: "1", NextVoucherAt: 1},
+		{SandboxID: "sb-other", Owner: other.Hex(), Provider: prov.Hex(), PricePerSec: "1", NextVoucherAt: 1},
+	} {
+		if err := billing.CreateSession(ctx, rdb, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	agg := voucher.SandboxVoucher{
+		SandboxID: voucher.AggregatedSandboxID, // empty = aggregated
+		User:      owner, Provider: prov,
+		TotalFee: big.NewInt(999), Nonce: big.NewInt(7),
+	}
+	HandleStatuses(ctx, rdb, stopCh, "q", "raw", []voucher.SandboxVoucher{agg},
+		[]chain.SettlementStatus{chain.StatusInsufficientBalance}, alert.Nop{}, zap.NewNop())
+
+	got := map[string]bool{}
+	for len(stopCh) > 0 {
+		got[(<-stopCh).SandboxID] = true
+	}
+	if !got["sb-1"] || !got["sb-2"] {
+		t.Fatalf("both of the owner's sandboxes must be stopped, got %v", got)
+	}
+	if got["sb-other"] {
+		t.Error("another owner's sandbox must NOT be stopped")
+	}
+}
