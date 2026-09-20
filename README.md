@@ -1,5 +1,7 @@
 # 0G Sandbox
 
+[![Skillselion Top 25](https://skillselion.com/badge/marketplace/0gfoundation/0g-sandbox.svg?award=1)](https://skillselion.com/marketplace/0gfoundation/0g-sandbox)
+
 Private, isolated sandboxes for vibe coding — powered by 0G Network.
 
 > 中文版：[README.zh.md](README.zh.md)
