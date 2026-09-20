@@ -63,14 +63,18 @@ func HandleStatuses(
 
 		case chain.StatusInsufficientBalance:
 			if v.IsAggregated() {
-				// An aggregated voucher covers the user's whole backlog for this
-				// provider, so INSUFFICIENT_BALANCE means the account is
-				// exhausted outright — every sandbox they own is unpayable, and
-				// the right answer is simply "stop them all". The voucher itself
-				// carries no sandbox id (AggregatedSandboxID is empty), which is
-				// why this branch used to only alert; the owner is identity
-				// enough. persistStop dedups via SetNX, so sandboxes the sweep
-				// already stopped are not re-killed.
+				// An aggregated voucher is the settle-now half of the owner's
+				// whole backlog for this provider, so INSUFFICIENT_BALANCE means
+				// the account is exhausted outright — every sandbox they own is
+				// unpayable, and the right answer is "stop them all".
+				//
+				// Stopping only v.SandboxID would be wrong in both aggregate
+				// shapes: the operator-initiated collapse names no sandbox at
+				// all, and a per-sandbox aggregate names just one of the several
+				// the same exhausted account is running. The owner is the
+				// identity that matters here, not the sandbox on the voucher.
+				// persistStop dedups via SetNX, so sandboxes the sweep already
+				// stopped are not re-killed.
 				stopped := stopAllSandboxesOf(ctx, rdb, stopCh, v.User, v.Provider, log)
 				log.Warn("aggregated voucher exhausted user balance — stopping the owner's sandboxes",
 					zap.String("user", v.User.Hex()),
