@@ -46,6 +46,17 @@ func HandleStatuses(
 	// Drop the entries this batch owns, minus the BLPOP'd first one. Done
 	// before the statuses are processed, matching the previous ordering: an
 	// entry is off the queue before anything acts on its settlement result.
+	//
+	// Popping by count rather than by value assumes the batch's remaining
+	// entries are still at the head of the queue. That holds because a single
+	// settler runs per provider and resolvePendingTx blocks its loop until the
+	// fate is known, so nothing — not even the sweep — rewrites the queue in
+	// between. A second concurrent drainer would break this.
+	//
+	// Entries that failed to deserialize are counted here and dropped without
+	// a voucher to match: Run already logged each one, and the batch owns the
+	// slot either way. Leaving them would re-read the same unparseable entry
+	// on every drain.
 	for i := 1; i < consumed; i++ {
 		rdb.LPop(ctx, queueKey)
 	}

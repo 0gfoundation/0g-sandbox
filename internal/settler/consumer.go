@@ -311,7 +311,7 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 			time.Sleep(5 * time.Second)
 			continue
 		}
-		p := pendingTx{TxHash: tx.Hash(), AccountNonce: tx.Nonce(), Vouchers: vouchers, FirstItem: firstItem}
+		p := intent.broadcast(tx.Hash(), tx.Nonce())
 		if err := savePendingTx(ctx, rdb, onchain.ProviderAddress(), p); err != nil { // backfill hash onto the intent
 			// Redis down right after broadcast: resolve in-memory — do NOT
 			// re-queue (the tx is in flight).
