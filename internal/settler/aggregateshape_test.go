@@ -56,7 +56,7 @@ func TestInsufficientBalance_PerSandboxAggregateStopsEveryOwnedSandbox(t *testin
 	}
 
 	stopCh := make(chan StopSignal, len(owned)+4)
-	HandleStatuses(ctx, rdb, stopCh, "q", "raw", []voucher.SandboxVoucher{agg},
+	HandleStatuses(ctx, rdb, stopCh, "q", "raw", 0, []voucher.SandboxVoucher{agg},
 		[]chain.SettlementStatus{chain.StatusInsufficientBalance}, alert.Nop{}, zap.NewNop())
 
 	stopped := map[string]bool{}

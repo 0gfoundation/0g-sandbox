@@ -87,7 +87,7 @@ func TestHandleStatuses_Success_NoSideEffects(t *testing.T) {
 	vs := []voucher.SandboxVoucher{makeVoucher("sb-ok")}
 	sts := []chain.SettlementStatus{chain.StatusSuccess}
 
-	HandleStatuses(ctx, rdb, stopCh, testQueueKey, "item0", vs, sts, alert.Nop{}, zap.NewNop())
+	HandleStatuses(ctx, rdb, stopCh, testQueueKey, "item0", 0, vs, sts, alert.Nop{}, zap.NewNop())
 
 	// No stop key written
 	exists, _ := rdb.Exists(ctx, stopKey("sb-ok")).Result()
@@ -110,7 +110,7 @@ func TestHandleStatuses_InsufficientBalance_PersistsAndSignals(t *testing.T) {
 	vs := []voucher.SandboxVoucher{makeVoucher("sb-broke")}
 	sts := []chain.SettlementStatus{chain.StatusInsufficientBalance}
 
-	HandleStatuses(ctx, rdb, stopCh, testQueueKey, "item0", vs, sts, alert.Nop{}, zap.NewNop())
+	HandleStatuses(ctx, rdb, stopCh, testQueueKey, "item0", 0, vs, sts, alert.Nop{}, zap.NewNop())
 
 	// Stop key persisted
 	reason, err := rdb.Get(ctx, stopKey("sb-broke")).Result()
@@ -143,7 +143,7 @@ func TestHandleStatuses_NotAcknowledged_PersistsAndSignals(t *testing.T) {
 	vs := []voucher.SandboxVoucher{makeVoucher("sb-nack")}
 	sts := []chain.SettlementStatus{chain.StatusNotAcknowledged}
 
-	HandleStatuses(ctx, rdb, stopCh, testQueueKey, "item0", vs, sts, alert.Nop{}, zap.NewNop())
+	HandleStatuses(ctx, rdb, stopCh, testQueueKey, "item0", 0, vs, sts, alert.Nop{}, zap.NewNop())
 
 	reason, _ := rdb.Get(ctx, stopKey("sb-nack")).Result()
 	if reason != "not_acknowledged" {
@@ -168,7 +168,7 @@ func TestHandleStatuses_ProviderMismatch_WritesToDLQ(t *testing.T) {
 	vs := []voucher.SandboxVoucher{makeVoucher("sb-mismatch")}
 	sts := []chain.SettlementStatus{chain.StatusProviderMismatch}
 
-	HandleStatuses(ctx, rdb, stopCh, testQueueKey, "item0", vs, sts, alert.Nop{}, zap.NewNop())
+	HandleStatuses(ctx, rdb, stopCh, testQueueKey, "item0", 0, vs, sts, alert.Nop{}, zap.NewNop())
 
 	// DLQ has 1 entry
 	dlq := dlqKey(testProvider)
@@ -195,7 +195,7 @@ func TestHandleStatuses_InvalidSignature_WritesToDLQ(t *testing.T) {
 	vs := []voucher.SandboxVoucher{makeVoucher("sb-badsig")}
 	sts := []chain.SettlementStatus{chain.StatusInvalidSignature}
 
-	HandleStatuses(ctx, rdb, stopCh, testQueueKey, "item0", vs, sts, alert.Nop{}, zap.NewNop())
+	HandleStatuses(ctx, rdb, stopCh, testQueueKey, "item0", 0, vs, sts, alert.Nop{}, zap.NewNop())
 
 	dlq := dlqKey(testProvider)
 	n, _ := rdb.LLen(ctx, dlq).Result()
@@ -217,7 +217,7 @@ func TestHandleStatuses_InvalidNonce_Discarded(t *testing.T) {
 	vs := []voucher.SandboxVoucher{makeVoucher("sb-nonce")}
 	sts := []chain.SettlementStatus{chain.StatusInvalidNonce}
 
-	HandleStatuses(ctx, rdb, stopCh, testQueueKey, "item0", vs, sts, alert.Nop{}, zap.NewNop())
+	HandleStatuses(ctx, rdb, stopCh, testQueueKey, "item0", 0, vs, sts, alert.Nop{}, zap.NewNop())
 
 	// No stop key, no DLQ, no signal
 	exists, _ := rdb.Exists(ctx, stopKey("sb-nonce")).Result()
@@ -261,7 +261,7 @@ func TestHandleStatuses_Batch_PopsRemainingItems(t *testing.T) {
 	}
 
 	raw0, _ := json.Marshal(vs[0])
-	HandleStatuses(ctx, rdb, stopCh, testQueueKey, string(raw0), vs, sts, alert.Nop{}, zap.NewNop())
+	HandleStatuses(ctx, rdb, stopCh, testQueueKey, string(raw0), 0, vs, sts, alert.Nop{}, zap.NewNop())
 
 	// All items consumed; queue empty
 	if n := queueLen(t, rdb, testQueueKey); n != 0 {
@@ -291,7 +291,7 @@ func TestHandleStatuses_MixedBatch(t *testing.T) {
 
 	pushRemaining(t, rdb, testQueueKey, vs)
 	raw0, _ := json.Marshal(vs[0])
-	HandleStatuses(ctx, rdb, stopCh, testQueueKey, string(raw0), vs, sts, alert.Nop{}, zap.NewNop())
+	HandleStatuses(ctx, rdb, stopCh, testQueueKey, string(raw0), 0, vs, sts, alert.Nop{}, zap.NewNop())
 
 	// Only sb-broke triggers a stop signal
 	if len(stopCh) != 1 {
@@ -327,7 +327,7 @@ func TestHandleStatuses_StopChFull_KeyStillPersisted(t *testing.T) {
 	sts := []chain.SettlementStatus{chain.StatusInsufficientBalance}
 
 	// Must not block or panic
-	HandleStatuses(ctx, rdb, stopCh, testQueueKey, "item0", vs, sts, alert.Nop{}, zap.NewNop())
+	HandleStatuses(ctx, rdb, stopCh, testQueueKey, "item0", 0, vs, sts, alert.Nop{}, zap.NewNop())
 
 	// Stop key still written (crash-safe persistence)
 	reason, err := rdb.Get(ctx, stopKey("sb-full")).Result()
@@ -375,7 +375,7 @@ func TestHandleStatuses_DLQEntry_IsValidVoucher(t *testing.T) {
 	vs := []voucher.SandboxVoucher{original}
 	sts := []chain.SettlementStatus{chain.StatusProviderMismatch}
 
-	HandleStatuses(ctx, rdb, stopCh, testQueueKey, "item0", vs, sts, alert.Nop{}, zap.NewNop())
+	HandleStatuses(ctx, rdb, stopCh, testQueueKey, "item0", 0, vs, sts, alert.Nop{}, zap.NewNop())
 
 	raw, err := rdb.RPop(ctx, dlqKey(testProvider)).Result()
 	if err != nil {
@@ -409,7 +409,7 @@ func TestHandleStatuses_NotAcknowledged_ParksVoucher(t *testing.T) {
 		Nonce:     big.NewInt(42),
 		Signature: []byte{1, 2, 3},
 	}
-	HandleStatuses(context.Background(), rdb, stopCh, "q", "raw", []voucher.SandboxVoucher{v},
+	HandleStatuses(context.Background(), rdb, stopCh, "q", "raw", 0, []voucher.SandboxVoucher{v},
 		[]chain.SettlementStatus{chain.StatusNotAcknowledged}, alert.Nop{}, zap.NewNop())
 
 	heldKey := fmt.Sprintf(voucher.VoucherHeldKeyFmt,
@@ -452,7 +452,7 @@ func TestHandleStatuses_InvalidNonce_ResetsCounter(t *testing.T) {
 		strings.ToLower(v.User.Hex()), strings.ToLower(v.Provider.Hex()))
 	rdb.Set(context.Background(), nonceKey, "1", 0) // the stale counter that produced nonce=1
 
-	HandleStatuses(context.Background(), rdb, stopCh, "q", "raw", []voucher.SandboxVoucher{v},
+	HandleStatuses(context.Background(), rdb, stopCh, "q", "raw", 0, []voucher.SandboxVoucher{v},
 		[]chain.SettlementStatus{chain.StatusInvalidNonce}, alert.Nop{}, zap.NewNop())
 
 	if mr.Exists(nonceKey) {
@@ -489,7 +489,7 @@ func TestHandleStatuses_InvalidNonce_DeletesSignerCreatedKey(t *testing.T) {
 		SandboxID: "sb", User: common.HexToAddress(owner), Provider: common.HexToAddress(prov),
 		TotalFee: big.NewInt(1), Nonce: big.NewInt(1),
 	}
-	HandleStatuses(context.Background(), rdb, make(chan StopSignal, 1), "q", "raw",
+	HandleStatuses(context.Background(), rdb, make(chan StopSignal, 1), "q", "raw", 0,
 		[]voucher.SandboxVoucher{v}, []chain.SettlementStatus{chain.StatusInvalidNonce}, alert.Nop{}, zap.NewNop())
 
 	if mr.Exists(signerKey) {
@@ -542,7 +542,7 @@ func TestHandleStatuses_AggregatedInsufficient_StopsAllOwnerSandboxes(t *testing
 		User:      owner, Provider: prov,
 		TotalFee: big.NewInt(999), Nonce: big.NewInt(7),
 	}
-	HandleStatuses(ctx, rdb, stopCh, "q", "raw", []voucher.SandboxVoucher{agg},
+	HandleStatuses(ctx, rdb, stopCh, "q", "raw", 0, []voucher.SandboxVoucher{agg},
 		[]chain.SettlementStatus{chain.StatusInsufficientBalance}, alert.Nop{}, zap.NewNop())
 
 	got := map[string]bool{}
