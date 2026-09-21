@@ -19,25 +19,50 @@ import (
 )
 
 // HandleStatuses processes settlement results for a batch of vouchers.
-// firstItem is already BLPOP'd; remaining items are LPOP'd here as they are processed.
+// firstItem is already BLPOP'd; the rest of the batch's queue entries are
+// LPOP'd here.
+//
+// consumed is how many queue entries the batch took, which is NOT len(vouchers):
+// the batch is collapsed by sandbox before submission, so one voucher can stand
+// for several entries. Popping per voucher would leave the surplus entries in
+// the queue to be settled a second time — the user charged twice for the same
+// compute. Pass 0 for consumed to fall back to one entry per voucher, which is
+// what a pending-tx record written before collapsing existed carries.
 func HandleStatuses(
 	ctx context.Context,
 	rdb *redis.Client,
 	stopCh chan<- StopSignal,
 	queueKey string,
 	firstItem string,
+	consumed int,
 	vouchers []voucher.SandboxVoucher,
 	statuses []chain.SettlementStatus,
 	alerter alert.Alerter,
 	log *zap.Logger,
 ) {
+	if consumed <= 0 {
+		consumed = len(vouchers)
+	}
+	// Drop the entries this batch owns, minus the BLPOP'd first one. Done
+	// before the statuses are processed, matching the previous ordering: an
+	// entry is off the queue before anything acts on its settlement result.
+	//
+	// Popping by count rather than by value assumes the batch's remaining
+	// entries are still at the head of the queue. That holds because a single
+	// settler runs per provider and resolvePendingTx blocks its loop until the
+	// fate is known, so nothing — not even the sweep — rewrites the queue in
+	// between. A second concurrent drainer would break this.
+	//
+	// Entries that failed to deserialize are counted here and dropped without
+	// a voucher to match: Run already logged each one, and the batch owns the
+	// slot either way. Leaving them would re-read the same unparseable entry
+	// on every drain.
+	for i := 1; i < consumed; i++ {
+		rdb.LPop(ctx, queueKey)
+	}
+
 	for i, status := range statuses {
 		v := vouchers[i]
-
-		// For items after the first (already BLPOP'd), pop from queue
-		if i > 0 {
-			rdb.LPop(ctx, queueKey)
-		}
 
 		sandboxID := extractSandboxID(v)
 

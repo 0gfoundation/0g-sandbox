@@ -217,6 +217,28 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 			continue
 		}
 
+		// Queue entries this batch owns. Tracked separately from the voucher
+		// count because the collapse below merges several entries into one
+		// voucher; the pop bookkeeping still has to clear every entry.
+		consumed := len(rawItems)
+
+		// Collapse by sandbox before signing. Batching alone puts many
+		// vouchers in one transaction but the contract still runs _settleOne
+		// per array element, so the per-voucher cost — signature recovery, the
+		// ack lookup, the balance and nonce writes — scales with accounting
+		// periods rather than with sandboxes. Merging here is what turns a
+		// slower settlement cadence into less on-chain work instead of just
+		// fewer transactions.
+		//
+		// Before signing, because the merge rewrites total_fee and usage_hash;
+		// nonces are assigned below, so the strictly-increasing order the
+		// contract requires is unaffected.
+		vouchers = voucher.CollapseBySandbox(vouchers, time.Now().Unix())
+		if consumed > len(vouchers) {
+			log.Debug("settler: collapsed batch by sandbox",
+				zap.Int("entries", consumed), zap.Int("vouchers", len(vouchers)))
+		}
+
 		// Assign nonces and sign in order. The settler is the sole consumer,
 		// so sequential Sign calls guarantee strictly-increasing nonces.
 		signingOK := true
@@ -246,7 +268,7 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 		// lose the in-flight tx and re-sign on restart (the double-charge
 		// shape again, just a much smaller window). A hashless record is
 		// reconciled at startup against on-chain lastNonce per voucher.
-		intent := pendingTx{Vouchers: vouchers, FirstItem: firstItem}
+		intent := pendingTx{Vouchers: vouchers, FirstItem: firstItem, Consumed: consumed}
 		if err := savePendingTx(ctx, rdb, onchain.ProviderAddress(), intent); err != nil {
 			log.Error("settler: persist intent failed; holding batch", zap.Error(err))
 			_ = rdb.LPush(ctx, queueKey, firstItem)
@@ -289,7 +311,7 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 			time.Sleep(5 * time.Second)
 			continue
 		}
-		p := pendingTx{TxHash: tx.Hash(), AccountNonce: tx.Nonce(), Vouchers: vouchers, FirstItem: firstItem}
+		p := intent.broadcast(tx.Hash(), tx.Nonce())
 		if err := savePendingTx(ctx, rdb, onchain.ProviderAddress(), p); err != nil { // backfill hash onto the intent
 			// Redis down right after broadcast: resolve in-memory — do NOT
 			// re-queue (the tx is in flight).

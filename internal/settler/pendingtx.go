@@ -40,6 +40,28 @@ type pendingTx struct {
 	// FirstItem is the raw (unsigned) BLPOP'd queue item, needed by
 	// HandleStatuses' pop bookkeeping when the fate resolves to mined.
 	FirstItem string `json:"first_item"`
+	// Consumed is how many queue entries the batch took. Vouchers are
+	// collapsed by sandbox before submission, so this is usually larger than
+	// len(Vouchers) and cannot be recovered from it — without it a crash
+	// between broadcast and receipt would leave the surplus entries queued and
+	// settle them again. Absent (0) in records written before collapsing
+	// existed; HandleStatuses then falls back to one entry per voucher, which
+	// is what those records meant.
+	Consumed int `json:"consumed,omitempty"`
+}
+
+// broadcast returns the record to persist once the transaction is in flight:
+// this same intent with the hash and account nonce filled in.
+//
+// Derived from the intent rather than built fresh. The two used to be written
+// out separately and the post-broadcast one silently omitted Consumed, so the
+// pop bookkeeping fell back to one entry per voucher on every collapsed batch
+// — settled entries stayed queued and were charged a second time. Copying
+// forward means a field added to the intent cannot be forgotten here.
+func (p pendingTx) broadcast(txHash common.Hash, accountNonce uint64) pendingTx {
+	p.TxHash = txHash
+	p.AccountNonce = accountNonce
+	return p
 }
 
 // fateResolver is the slice of the chain client the pending-tx machinery uses.
@@ -146,7 +168,7 @@ func resolvePendingTx(ctx context.Context, rdb *redis.Client, resolver fateResol
 				break
 			}
 			log.Info("settler: pending tx mined; applying statuses", zap.String("tx", p.TxHash.Hex()), zap.Int("batch", len(p.Vouchers)))
-			HandleStatuses(ctx, rdb, stopCh, queueKey, p.FirstItem, p.Vouchers, statuses, alerter, log)
+			HandleStatuses(ctx, rdb, stopCh, queueKey, p.FirstItem, p.Consumed, p.Vouchers, statuses, alerter, log)
 			clearPendingTx(ctx, rdb, provider)
 			return statuses
 		case chain.TxDropped:
