@@ -181,14 +181,20 @@ func HandleStatuses(
 			}
 			log.Warn("voucher discarded: invalid nonce — counter reset for reseed",
 				zap.String("user", v.User.Hex()),
+				zap.String("sandbox", sandboxID),
 				zap.String("nonce", v.Nonce.String()),
 			)
+			// No sandbox in the details on purpose: the broken thing is the
+			// (user, provider) nonce counter deleted just above, not any one
+			// sandbox. Alert dedup keys on the identity fields it finds here,
+			// so including the sandbox would open one slot per sandbox for a
+			// single stale counter and report the same root cause N times.
+			// The sandbox stays on the log line for whoever is digging.
 			alerter.Notify(ctx, alert.KindVoucherInvalidNonce, alert.SeverityCritical,
 				"Voucher with invalid nonce — possible replay or settler bug",
 				map[string]any{
 					"user":     v.User.Hex(),
 					"provider": v.Provider.Hex(),
-					"sandbox":  sandboxID,
 					"nonce":    v.Nonce.String(),
 				},
 			)

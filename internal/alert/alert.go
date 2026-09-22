@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -71,8 +72,9 @@ type Nop struct{}
 
 func (Nop) Notify(context.Context, Kind, Severity, string, map[string]any) {}
 
-// Webhook posts JSON to webhookURL, deduped per (kind) via a Redis key
-// with TTL = dedupWindow. Same-kind alerts within the window are suppressed.
+// Webhook posts JSON to webhookURL, deduped per (kind, subject) via a Redis
+// key with TTL = dedupWindow. Repeats for the same subject within the window
+// are suppressed; a different subject is a different alert.
 type Webhook struct {
 	webhookURL   string
 	provider     string // address surfaced in payload for multi-provider routing
@@ -82,8 +84,8 @@ type Webhook struct {
 	log          *zap.Logger
 }
 
-// NewWebhook returns a Webhook alerter. dedupWindow is the per-kind
-// suppression window; pass 0 to disable dedup.
+// NewWebhook returns a Webhook alerter. dedupWindow is the per-(kind,
+// subject) suppression window; pass 0 to disable dedup.
 func NewWebhook(webhookURL, providerAddr string, rdb *redis.Client, dedupWindow time.Duration, log *zap.Logger) *Webhook {
 	return &Webhook{
 		webhookURL:  webhookURL,
@@ -108,11 +110,14 @@ type payload struct {
 // asynchronously dispatches to the webhook if one is configured.
 //
 // Dedup applies to BOTH persist and dispatch: within the dedup window only
-// the first call per kind logs an entry and fires the webhook. Subsequent
-// calls in the window are still logged at WARN (for ops grep) but suppressed
-// from the dashboard history and webhook — otherwise a persistent failure
-// (e.g. settler with 0 balance checked every 60s) spams the history with
-// dozens of identical entries.
+// the first call per kind AND subject logs an entry and fires the webhook.
+// Subsequent calls for that same subject are still logged at WARN (for ops
+// grep) but suppressed from the dashboard history and webhook — otherwise a
+// persistent failure (e.g. settler with 0 balance checked every 60s) spams
+// the history with dozens of identical entries.
+//
+// The subject comes from details (see claimDedup), so a different user or
+// sandbox reporting the same kind is a different alert and gets through.
 func (w *Webhook) Notify(ctx context.Context, kind Kind, sev Severity, message string, details map[string]any) {
 	// Always log — even when dedup suppresses everything else, ops can grep.
 	w.log.Warn("alert",
@@ -122,7 +127,7 @@ func (w *Webhook) Notify(ctx context.Context, kind Kind, sev Severity, message s
 		zap.Any("details", details),
 	)
 
-	if w.dedupWindow > 0 && !w.claimDedup(ctx, kind) {
+	if w.dedupWindow > 0 && !w.claimDedup(ctx, kind, details) {
 		return
 	}
 
@@ -189,10 +194,82 @@ func History(ctx context.Context, rdb *redis.Client, n int) ([]Entry, error) {
 	return out, nil
 }
 
-// claimDedup returns true if this is the first call for kind within the
-// dedup window. SETNX-style atomic check.
-func (w *Webhook) claimDedup(ctx context.Context, kind Kind) bool {
-	key := "alert:dedup:" + string(kind)
+// subjectKeys are the detail fields that identify WHAT an alert is about, in
+// the order they join the dedup key. Identity only: a field that varies
+// between two reports of the same ongoing condition (an amount, a nonce, a
+// timestamp) would make every report unique and defeat dedup entirely, which
+// is worse than the over-suppression this fixes — one chronic account would
+// then fill the whole history ring instead of holding one slot in it.
+//
+// A kind whose call sites pass different identity fields gets one slot per
+// shape — voucher_rejected is raised both for an exhausted balance (user,
+// provider) and for a malformed voucher (user, provider, sandbox), so one
+// user can hold two slots under that kind in a window. They report different
+// conditions, so two alerts is the intent, not a leak.
+//
+// A call site should pass only the fields its condition is actually about.
+// Adding one that is incidental splits a single root cause across slots and
+// reports it once per value; see the invalid-nonce site in
+// internal/settler/handler.go, where the counter is per (user, provider) and
+// the sandbox is deliberately left off the details.
+var subjectKeys = []string{"user", "provider", "sandbox"}
+
+// subject builds the identity half of the dedup key from an alert's details.
+// Returns "" for kinds that carry no subject — those are about the node
+// itself, where the kind already is the subject.
+//
+// Values may be strings or fmt.Stringer. Accepting Stringer matters: every
+// caller today passes addr.Hex(), but a call site that passes the typed
+// common.Address instead would otherwise be skipped, the subject would come
+// back empty, and that kind would silently fall back to per-kind dedup — the
+// exact over-suppression this key format exists to prevent, with nothing
+// failing to show it. Anything else is skipped, since a value with no stable
+// text form would vary between reports and defeat dedup the other way.
+//
+// Components are joined on ':' without escaping. Every identity field in
+// practice is a hex address or a Daytona UUID, neither of which contains a
+// colon, so two different subjects cannot produce one key. A future identity
+// field with free-form text would need escaping here.
+func subject(details map[string]any) string {
+	var b strings.Builder
+	for _, k := range subjectKeys {
+		v, ok := details[k]
+		if !ok {
+			continue
+		}
+		var s string
+		switch t := v.(type) {
+		case string:
+			s = t
+		case fmt.Stringer:
+			s = t.String()
+		default:
+			continue
+		}
+		if s == "" {
+			continue
+		}
+		b.WriteByte(':')
+		b.WriteString(strings.ToLower(s))
+	}
+	return b.String()
+}
+
+// claimDedup returns true if this is the first call for this kind AND subject
+// within the dedup window. SETNX-style atomic check.
+//
+// The subject is part of the key because a kind is a category, not an event:
+// voucher_rejected covers every user's rejection, stop_persist_failure every
+// sandbox's. Keying on the kind alone let one chronically failing account hold
+// the key for the whole window and silenced everyone else's first report —
+// measured on dev, an account with 1140 rejections kept a second account's 4
+// from reaching the history at all.
+//
+// Kinds about the node itself (settler balance, signer mismatch, queue
+// backlog) carry no subject, so they keep the bare key and the
+// one-per-window behaviour the dedup was built for.
+func (w *Webhook) claimDedup(ctx context.Context, kind Kind, details map[string]any) bool {
+	key := "alert:dedup:" + string(kind) + subject(details)
 	ok, err := w.rdb.SetNX(ctx, key, "1", w.dedupWindow).Result()
 	if err != nil {
 		// Redis trouble: fail open so we don't lose a real alert.
