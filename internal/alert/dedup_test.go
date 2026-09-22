@@ -2,6 +2,8 @@ package alert
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -154,5 +156,84 @@ func TestDedup_DisabledPersistsEveryAlert(t *testing.T) {
 
 	if got := len(historyKinds(t, rdb)); got != 3 {
 		t.Errorf("want 3 entries with dedup disabled, got %d", got)
+	}
+}
+
+// stringerAddr stands in for a typed identity value such as common.Address.
+type stringerAddr string
+
+func (s stringerAddr) String() string { return string(s) }
+
+// A call site passing a typed identity value (common.Address rather than its
+// .Hex()) must key the same as the string form. Skipping it would empty the
+// subject and drop that kind back to per-kind dedup — the over-suppression
+// this key format exists to prevent, and silent, since nothing errors.
+func TestDedup_StringerValueKeysLikeItsString(t *testing.T) {
+	w, rdb := newTestWebhook(t)
+	ctx := context.Background()
+
+	w.Notify(ctx, KindVoucherRejected, SeverityCritical, "rejected",
+		map[string]any{"user": stringerAddr("0xAAA"), "provider": "0xPROV"})
+	// Same subject, spelled as a plain string: must be suppressed, not a
+	// second slot.
+	w.Notify(ctx, KindVoucherRejected, SeverityCritical, "rejected",
+		map[string]any{"user": "0xaaa", "provider": "0xPROV"})
+	// A different subject, also typed: must get through.
+	w.Notify(ctx, KindVoucherRejected, SeverityCritical, "rejected",
+		map[string]any{"user": stringerAddr("0xBBB"), "provider": "0xPROV"})
+
+	// Assert on which subjects landed, not how many entries there are. If the
+	// typed values were skipped, both of them would key on the provider alone:
+	// 0xAAA claims that key, 0xaaa claims its own, and 0xBBB is swallowed as a
+	// repeat of 0xAAA. The count is still two, so only naming the subjects
+	// catches it.
+	got := map[string]bool{}
+	for _, e := range historyKinds(t, rdb) {
+		got[strings.ToLower(fmt.Sprint(e.Details["user"]))] = true
+	}
+	if !got["0xaaa"] {
+		t.Errorf("first subject missing from history; got %v", got)
+	}
+	if !got["0xbbb"] {
+		t.Errorf("second subject was swallowed as a repeat of the first — the typed "+
+			"value keyed on nothing, so both fell back to the same key; got %v", got)
+	}
+	if len(got) != 2 {
+		t.Errorf("want exactly 2 distinct subjects, got %v", got)
+	}
+}
+
+// Two users must not be able to collide into one key through the ':' join.
+// Today's identity values are hex addresses and UUIDs, so this is a guard on
+// the format rather than a live hazard.
+func TestDedup_AdjacentFieldsDoNotCollide(t *testing.T) {
+	w, rdb := newTestWebhook(t)
+	ctx := context.Background()
+
+	w.Notify(ctx, KindVoucherRejected, SeverityCritical, "rejected",
+		map[string]any{"user": "0xAA", "provider": "0xBB"})
+	w.Notify(ctx, KindVoucherRejected, SeverityCritical, "rejected",
+		map[string]any{"user": "0xAAB", "provider": "0xB"})
+
+	if got := len(historyKinds(t, rdb)); got != 2 {
+		t.Errorf("want 2 entries for two distinct (user, provider) pairs, got %d", got)
+	}
+}
+
+// One stale (user, provider) nonce counter is one condition, however many of
+// that user's sandboxes trip over it. The settler's invalid-nonce site leaves
+// the sandbox out of the details for this reason; this pins the behaviour the
+// key format gives it.
+func TestDedup_InvalidNonceIsOnePerUserProvider(t *testing.T) {
+	w, rdb := newTestWebhook(t)
+	ctx := context.Background()
+
+	for _, nonce := range []string{"7", "8", "9"} {
+		w.Notify(ctx, KindVoucherInvalidNonce, SeverityCritical, "invalid nonce",
+			map[string]any{"user": "0xAAA", "provider": "0xPROV", "nonce": nonce})
+	}
+
+	if got := len(historyKinds(t, rdb)); got != 1 {
+		t.Errorf("want 1 entry for one stale counter, got %d", got)
 	}
 }

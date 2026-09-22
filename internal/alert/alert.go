@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -199,11 +200,36 @@ func History(ctx context.Context, rdb *redis.Client, n int) ([]Entry, error) {
 // timestamp) would make every report unique and defeat dedup entirely, which
 // is worse than the over-suppression this fixes — one chronic account would
 // then fill the whole history ring instead of holding one slot in it.
+//
+// A kind whose call sites pass different identity fields gets one slot per
+// shape — voucher_rejected is raised both for an exhausted balance (user,
+// provider) and for a malformed voucher (user, provider, sandbox), so one
+// user can hold two slots under that kind in a window. They report different
+// conditions, so two alerts is the intent, not a leak.
+//
+// A call site should pass only the fields its condition is actually about.
+// Adding one that is incidental splits a single root cause across slots and
+// reports it once per value; see the invalid-nonce site in
+// internal/settler/handler.go, where the counter is per (user, provider) and
+// the sandbox is deliberately left off the details.
 var subjectKeys = []string{"user", "provider", "sandbox"}
 
 // subject builds the identity half of the dedup key from an alert's details.
 // Returns "" for kinds that carry no subject — those are about the node
 // itself, where the kind already is the subject.
+//
+// Values may be strings or fmt.Stringer. Accepting Stringer matters: every
+// caller today passes addr.Hex(), but a call site that passes the typed
+// common.Address instead would otherwise be skipped, the subject would come
+// back empty, and that kind would silently fall back to per-kind dedup — the
+// exact over-suppression this key format exists to prevent, with nothing
+// failing to show it. Anything else is skipped, since a value with no stable
+// text form would vary between reports and defeat dedup the other way.
+//
+// Components are joined on ':' without escaping. Every identity field in
+// practice is a hex address or a Daytona UUID, neither of which contains a
+// colon, so two different subjects cannot produce one key. A future identity
+// field with free-form text would need escaping here.
 func subject(details map[string]any) string {
 	var b strings.Builder
 	for _, k := range subjectKeys {
@@ -211,8 +237,16 @@ func subject(details map[string]any) string {
 		if !ok {
 			continue
 		}
-		s, ok := v.(string)
-		if !ok || s == "" {
+		var s string
+		switch t := v.(type) {
+		case string:
+			s = t
+		case fmt.Stringer:
+			s = t.String()
+		default:
+			continue
+		}
+		if s == "" {
 			continue
 		}
 		b.WriteByte(':')
