@@ -211,13 +211,13 @@ func main() {
 
 	// ── Goroutines ────────────────────────────────────────────────────────────
 	// Recovery must start after stopCh is ready but before settler writes to it.
-	go recoverPendingStops(ctx, rdb, stopCh, log)
+	go runPendingStopRecovery(ctx, rdb, stopCh, log)
 	// settler.Run also runs the pre-settle sweep (issue #69): each interval it
 	// re-splits backlogged users' vouchers (queued + held) against their balance
 	// — affordable prefix aggregates and settles, the rest parks as held debt,
 	// unpayable sandboxes stop. O(1) guards keep steady state untouched.
 	go settler.Run(ctx, cfg, rdb, onchain, signer, stopCh, alerter, log)
-	go billing.RunGenerator(ctx, rdb, billingHandler, log)
+	go billing.RunGenerator(ctx, rdb, billingHandler, daytonaBillable{dtona}, log)
 
 	// Balance + queue depth + signer-mismatch monitors. All best-effort —
 	// they surface problems but don't gate the hot path. Signer-mismatch in
@@ -815,8 +815,41 @@ func archiveRunningOnShutdown(ctx context.Context, dtona *daytona.Client, log *z
 	}
 }
 
-// recoverPendingStops scans stop:sandbox:* on startup and re-queues any
-// sandboxes that were scheduled for stop but not yet processed (crash recovery).
+// pendingStopRetryInterval is how often outstanding stop markers are re-queued
+// after the startup pass. Package var so tests can shrink it.
+var pendingStopRetryInterval = 5 * time.Minute
+
+// runPendingStopRecovery re-queues outstanding stop markers, at startup and
+// then on an interval.
+//
+// The marker is the durable intent behind a stop: the stop handler keeps it
+// (and the billing session) when an archive fails, so the work can be retried
+// rather than dropped. Retrying only at startup broke that promise in the
+// worst possible way — startup is exactly when the Daytona API is least likely
+// to be reachable, so the recovery pass ran at the one moment it was most
+// likely to fail, and the marker then blocked persistStop from ever queueing
+// another signal for that sandbox. A marker that survives one bad pass now
+// gets another chance a few minutes later instead of waiting for the next
+// restart.
+func runPendingStopRecovery(ctx context.Context, rdb *redis.Client, stopCh chan<- settler.StopSignal, log *zap.Logger) {
+	recoverPendingStops(ctx, rdb, stopCh, log)
+
+	ticker := time.NewTicker(pendingStopRetryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			recoverPendingStops(ctx, rdb, stopCh, log)
+		}
+	}
+}
+
+// recoverPendingStops scans stop:sandbox:* and re-queues any sandboxes that
+// were scheduled for stop but not yet processed. Re-queueing an already-handled
+// sandbox is harmless: the stop handler's step 0 recognises a terminal sandbox
+// and cleans up the marker and session instead of repeating the stop.
 func recoverPendingStops(ctx context.Context, rdb *redis.Client, stopCh chan<- settler.StopSignal, log *zap.Logger) {
 	var cursor uint64
 	for {
@@ -963,6 +996,36 @@ func classifySandbox(ctx context.Context, dtona *daytona.Client, id string) sand
 		return dispositionArchived
 	}
 	return dispositionActive
+}
+
+// daytonaBillable adapts the Daytona client to billing.BillableSandboxes.
+// Archived counts as not billable: the container is gone and the user is
+// getting no compute, so a session still pointed at one is as wrong as a
+// session pointed at nothing. Archived is also the only terminal state
+// classifySandbox recognises, so the two agree by construction.
+type daytonaBillable struct{ c *daytona.Client }
+
+func (d daytonaBillable) BillableSandboxIDs(ctx context.Context) (map[string]bool, error) {
+	list, err := d.c.ListSandboxes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(list))
+	for _, s := range list {
+		if strings.EqualFold(s.State, "archived") {
+			continue
+		}
+		out[s.ID] = true
+	}
+	return out, nil
+}
+
+// ConfirmGone answers true only for a definitive 404. classifySandbox already
+// draws that line — a transient lookup failure classifies as active — so
+// deleting billing state rides on the same taxonomy the stop pipeline uses,
+// and an unreachable Daytona can never authorise it.
+func (d daytonaBillable) ConfirmGone(ctx context.Context, sandboxID string) bool {
+	return classifySandbox(ctx, d.c, sandboxID) == dispositionGone
 }
 
 // appOwnerReader is the slice of the chain client the owner resolver needs.

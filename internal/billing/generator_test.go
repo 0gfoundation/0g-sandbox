@@ -46,7 +46,7 @@ func TestRunGeneration_NoSessions_NoVouchers(t *testing.T) {
 	ms := &mockSigner{}
 	h := NewEventHandler(rdb, testProvider, big.NewInt(100), big.NewInt(0), new(big.Int), new(big.Int), 3600, ms, zap.NewNop())
 
-	runGeneration(context.Background(), rdb, h, zap.NewNop())
+	runGeneration(context.Background(), rdb, h, nil, map[string]int{}, zap.NewNop())
 
 	if ms.count() != 0 {
 		t.Errorf("expected 0 vouchers for empty Redis, got %d", ms.count())
@@ -69,7 +69,7 @@ func TestRunGeneration_SessionNotDue_NoVoucher(t *testing.T) {
 		NextVoucherAt: future,
 	})
 
-	runGeneration(ctx, rdb, h, zap.NewNop())
+	runGeneration(ctx, rdb, h, nil, map[string]int{}, zap.NewNop())
 
 	if ms.count() != 0 {
 		t.Errorf("expected 0 vouchers for future NextVoucherAt, got %d", ms.count())
@@ -92,7 +92,7 @@ func TestRunGeneration_SessionDue_EmitsPeriodVoucher(t *testing.T) {
 		NextVoucherAt: due, PricePerSec: "100",
 	})
 
-	runGeneration(ctx, rdb, h, zap.NewNop())
+	runGeneration(ctx, rdb, h, nil, map[string]int{}, zap.NewNop())
 
 	v := ms.last()
 	if v == nil {
@@ -123,7 +123,7 @@ func TestRunGeneration_UpdatesNextVoucherAt(t *testing.T) {
 		NextVoucherAt: due, PricePerSec: "100",
 	})
 
-	runGeneration(ctx, rdb, h, zap.NewNop())
+	runGeneration(ctx, rdb, h, nil, map[string]int{}, zap.NewNop())
 
 	sess, err := GetSession(ctx, rdb, "sb-adv")
 	if err != nil || sess == nil {
@@ -152,13 +152,13 @@ func TestRunGeneration_AfterUpdate_NoDoubleVoucher(t *testing.T) {
 	})
 
 	// First run → voucher emitted, NextVoucherAt = due + interval (future)
-	runGeneration(ctx, rdb, h, zap.NewNop())
+	runGeneration(ctx, rdb, h, nil, map[string]int{}, zap.NewNop())
 	if ms.count() != 1 {
 		t.Fatalf("first run: expected 1 voucher, got %d", ms.count())
 	}
 
 	// Second run immediately → NextVoucherAt is now in the future → no voucher
-	runGeneration(ctx, rdb, h, zap.NewNop())
+	runGeneration(ctx, rdb, h, nil, map[string]int{}, zap.NewNop())
 	if ms.count() != 1 {
 		t.Errorf("second run: expected still 1 voucher total, got %d", ms.count())
 	}
@@ -181,7 +181,7 @@ func TestRunGeneration_MultipleSessions_OneVoucherEach(t *testing.T) {
 		})
 	}
 
-	runGeneration(ctx, rdb, h, zap.NewNop())
+	runGeneration(ctx, rdb, h, nil, map[string]int{}, zap.NewNop())
 
 	if ms.count() != 3 {
 		t.Errorf("expected 3 vouchers for 3 sessions, got %d", ms.count())
@@ -235,7 +235,7 @@ func TestRunGeneration_EnqueueError_OtherSessionsUnaffected(t *testing.T) {
 		NextVoucherAt: due, PricePerSec: "10",
 	})
 
-	runGeneration(ctx, rdb, h, zap.NewNop())
+	runGeneration(ctx, rdb, h, nil, map[string]int{}, zap.NewNop())
 
 	if ms.count() != 1 {
 		t.Errorf("expected 1 voucher (ok session only), got %d", ms.count())
@@ -260,7 +260,7 @@ func TestRunGeneration_EnqueueError_NextVoucherAtUnchanged(t *testing.T) {
 		NextVoucherAt: due, PricePerSec: "100",
 	})
 
-	runGeneration(ctx, rdb, h, zap.NewNop())
+	runGeneration(ctx, rdb, h, nil, map[string]int{}, zap.NewNop())
 
 	sess, _ := GetSession(ctx, rdb, "sb-enq-err")
 	if sess.NextVoucherAt != due {
@@ -283,7 +283,7 @@ func TestRunGeneration_VoucherHasCorrectAddresses(t *testing.T) {
 		NextVoucherAt: due, PricePerSec: "100",
 	})
 
-	runGeneration(ctx, rdb, h, zap.NewNop())
+	runGeneration(ctx, rdb, h, nil, map[string]int{}, zap.NewNop())
 
 	v := ms.last()
 	if v == nil {
@@ -316,7 +316,7 @@ func TestRunGeneration_FlatRateFallback(t *testing.T) {
 		// PricePerSec intentionally empty → falls back to h.computePricePerSec
 	})
 
-	runGeneration(ctx, rdb, h, zap.NewNop())
+	runGeneration(ctx, rdb, h, nil, map[string]int{}, zap.NewNop())
 
 	v := ms.last()
 	if v == nil {
@@ -347,7 +347,7 @@ func TestRunGeneration_Backlog_CatchesUpInChunks(t *testing.T) {
 		NextVoucherAt: start, PricePerSec: "100",
 	})
 
-	runGeneration(ctx, rdb, h, zap.NewNop())
+	runGeneration(ctx, rdb, h, nil, map[string]int{}, zap.NewNop())
 
 	ms.mu.Lock()
 	n := len(ms.vouchers)
@@ -384,7 +384,7 @@ func TestRunGeneration_DeepBacklog_BoundedPerTick(t *testing.T) {
 		NextVoucherAt: start, PricePerSec: "100",
 	})
 
-	runGeneration(ctx, rdb, h, zap.NewNop())
+	runGeneration(ctx, rdb, h, nil, map[string]int{}, zap.NewNop())
 	ms.mu.Lock()
 	n1 := len(ms.vouchers)
 	ms.mu.Unlock()
@@ -398,7 +398,7 @@ func TestRunGeneration_DeepBacklog_BoundedPerTick(t *testing.T) {
 	}
 
 	// Second tick continues from where the first stopped.
-	runGeneration(ctx, rdb, h, zap.NewNop())
+	runGeneration(ctx, rdb, h, nil, map[string]int{}, zap.NewNop())
 	sess2, _ := GetSession(ctx, rdb, "sb-deep")
 	if sess2.NextVoucherAt <= sess.NextVoucherAt {
 		t.Error("second tick must keep advancing the backlog")
