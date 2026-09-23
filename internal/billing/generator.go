@@ -16,7 +16,17 @@ type BillableSandboxes interface {
 	// BillableSandboxIDs returns the set of sandbox ids that exist and are not
 	// in a terminal state. An error means "unknown", not "none".
 	BillableSandboxIDs(ctx context.Context) (map[string]bool, error)
+	// ConfirmGone reports whether the runtime definitively has no such
+	// sandbox — a 404, not a lookup that failed. Anything short of proof must
+	// answer false: this is what authorises deleting billing state.
+	ConfirmGone(ctx context.Context, sandboxID string) bool
 }
+
+// phantomSkipsBeforeConfirm is how many consecutive ticks a session must be
+// absent from the listing before its existence is checked against the
+// authoritative per-id lookup. Well beyond any create that raced one listing,
+// and short enough that a session does not linger for hours.
+const phantomSkipsBeforeConfirm = 10
 
 // RunGenerator periodically scans all billing sessions and pre-charges the next
 // compute period for any session whose NextVoucherAt has elapsed.
@@ -42,18 +52,24 @@ func RunGenerator(ctx context.Context, rdb *redis.Client, h *EventHandler, billa
 
 	log.Info("voucher generator started", zap.Duration("interval", interval), zap.Bool("existence_gate", billable != nil))
 
+	// Consecutive ticks each session has been absent from the listing. In
+	// memory on purpose: a restart resetting the count only delays a cleanup,
+	// while persisting it would add a write per session per tick to defend
+	// against nothing.
+	skips := map[string]int{}
+
 	for {
 		select {
 		case <-ctx.Done():
 			log.Info("voucher generator stopped")
 			return
 		case <-ticker.C:
-			runGeneration(ctx, rdb, h, billable, log)
+			runGeneration(ctx, rdb, h, billable, skips, log)
 		}
 	}
 }
 
-func runGeneration(ctx context.Context, rdb *redis.Client, h *EventHandler, billable BillableSandboxes, log *zap.Logger) {
+func runGeneration(ctx context.Context, rdb *redis.Client, h *EventHandler, billable BillableSandboxes, skips map[string]int, log *zap.Logger) {
 	sessions, err := ScanAllSessions(ctx, rdb)
 	if err != nil {
 		log.Error("generator: scan sessions", zap.Error(err))
@@ -76,6 +92,12 @@ func runGeneration(ctx context.Context, rdb *redis.Client, h *EventHandler, bill
 	}
 
 	now := time.Now().Unix()
+	// Reported once per tick rather than once per session: five phantoms at a
+	// voucher a minute is 7,200 log lines a day, which buries the shape of the
+	// problem instead of showing it. One line per tick also makes the
+	// pathological case — every session skipped, i.e. an empty or wrongly
+	// scoped listing — visible as a number rather than as noise.
+	var skipped []string
 
 	for _, sess := range sessions {
 		s := sess
@@ -83,15 +105,27 @@ func runGeneration(ctx context.Context, rdb *redis.Client, h *EventHandler, bill
 			continue
 		}
 		if live != nil && !live[s.SandboxID] {
-			// The runtime has no such sandbox. Skip rather than delete the
-			// session: closing it is a lifecycle decision that belongs to the
-			// stop path, and a sandbox absent from one listing may be a
-			// listing that raced a create. Not billing is the part that has to
-			// happen now.
-			log.Warn("generator: session has no live sandbox; not billing this period",
-				zap.String("sandbox", s.SandboxID), zap.String("owner", s.Owner))
+			// The runtime has no such sandbox. Not billing has to happen now;
+			// closing the session does not, because one listing that raced a
+			// create is not proof of deletion.
+			//
+			// Sessions reached through a stop are cleaned up by the stop
+			// handler once its marker is retried. A sandbox deleted straight
+			// through Daytona fires no billing hook and leaves no marker, so
+			// nothing would ever close it — skipped every tick for the life of
+			// the process, one warning each time. After enough consecutive
+			// absences to rule out a race, ask the authoritative per-id
+			// lookup, and act only on a definitive answer.
+			skips[s.SandboxID]++
+			if skips[s.SandboxID] >= phantomSkipsBeforeConfirm && billable.ConfirmGone(ctx, s.SandboxID) {
+				closePhantomSession(ctx, rdb, s, log)
+				delete(skips, s.SandboxID)
+				continue
+			}
+			skipped = append(skipped, s.SandboxID)
 			continue
 		}
+		delete(skips, s.SandboxID)
 
 		// Use per-sandbox rate stored in session; fall back to global flat rate.
 		price := h.computePricePerSec
@@ -134,6 +168,29 @@ func runGeneration(ctx context.Context, rdb *redis.Client, h *EventHandler, bill
 			overdue -= chunk
 		}
 	}
+
+	if len(skipped) > 0 {
+		log.Warn("generator: sessions with no live sandbox were not billed",
+			zap.Int("skipped", len(skipped)),
+			zap.Int("sessions", len(sessions)),
+			zap.Strings("sandboxes", skipped),
+		)
+	}
+}
+
+// closePhantomSession removes billing state for a sandbox the runtime has
+// confirmed is gone. Mirrors the stop handler's gone-branch: the session is
+// what drives billing and the marker is a stop order for something that no
+// longer exists, so both are dropped together. Called only behind a definitive
+// 404, never on a lookup that merely failed.
+func closePhantomSession(ctx context.Context, rdb *redis.Client, s Session, log *zap.Logger) {
+	if err := DeleteSession(ctx, rdb, s.SandboxID); err != nil {
+		log.Error("generator: close phantom session", zap.String("sandbox", s.SandboxID), zap.Error(err))
+		return
+	}
+	rdb.Del(ctx, "stop:sandbox:"+s.SandboxID) //nolint:errcheck
+	log.Warn("generator: closed billing session for a sandbox the runtime confirms is gone",
+		zap.String("sandbox", s.SandboxID), zap.String("owner", s.Owner))
 }
 
 const (

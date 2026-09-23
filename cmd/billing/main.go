@@ -984,10 +984,25 @@ const (
 // Transient lookup errors classify as active so the preserve-on-failure path
 // keeps the retry state. State comparison is case-insensitive to match the
 // shutdown path and proxy.
-// daytonaBillable adapts the Daytona client to billing.BillableSandboxes: the
-// set of sandboxes that exist and are not archived. Archived counts as not
-// billable — the container is gone and the user is getting no compute, so a
-// session still pointed at one is as wrong as a session pointed at nothing.
+func classifySandbox(ctx context.Context, dtona *daytona.Client, id string) sandboxDisposition {
+	s, err := dtona.GetSandbox(ctx, id)
+	if err != nil {
+		if errors.Is(err, daytona.ErrNotFound) {
+			return dispositionGone
+		}
+		return dispositionActive
+	}
+	if s != nil && strings.EqualFold(s.State, "archived") {
+		return dispositionArchived
+	}
+	return dispositionActive
+}
+
+// daytonaBillable adapts the Daytona client to billing.BillableSandboxes.
+// Archived counts as not billable: the container is gone and the user is
+// getting no compute, so a session still pointed at one is as wrong as a
+// session pointed at nothing. Archived is also the only terminal state
+// classifySandbox recognises, so the two agree by construction.
 type daytonaBillable struct{ c *daytona.Client }
 
 func (d daytonaBillable) BillableSandboxIDs(ctx context.Context) (map[string]bool, error) {
@@ -1005,18 +1020,12 @@ func (d daytonaBillable) BillableSandboxIDs(ctx context.Context) (map[string]boo
 	return out, nil
 }
 
-func classifySandbox(ctx context.Context, dtona *daytona.Client, id string) sandboxDisposition {
-	s, err := dtona.GetSandbox(ctx, id)
-	if err != nil {
-		if errors.Is(err, daytona.ErrNotFound) {
-			return dispositionGone
-		}
-		return dispositionActive
-	}
-	if s != nil && strings.EqualFold(s.State, "archived") {
-		return dispositionArchived
-	}
-	return dispositionActive
+// ConfirmGone answers true only for a definitive 404. classifySandbox already
+// draws that line — a transient lookup failure classifies as active — so
+// deleting billing state rides on the same taxonomy the stop pipeline uses,
+// and an unreachable Daytona can never authorise it.
+func (d daytonaBillable) ConfirmGone(ctx context.Context, sandboxID string) bool {
+	return classifySandbox(ctx, d.c, sandboxID) == dispositionGone
 }
 
 // appOwnerReader is the slice of the chain client the owner resolver needs.
