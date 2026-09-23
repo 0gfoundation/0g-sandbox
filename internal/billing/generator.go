@@ -9,15 +9,38 @@ import (
 	"go.uber.org/zap"
 )
 
+// BillableSandboxes reports which sandboxes the runtime still has, so a
+// session cannot outlive what it bills for. One call covers every session in
+// a tick, rather than a lookup per session.
+type BillableSandboxes interface {
+	// BillableSandboxIDs returns the set of sandbox ids that exist and are not
+	// in a terminal state. An error means "unknown", not "none".
+	BillableSandboxIDs(ctx context.Context) (map[string]bool, error)
+}
+
 // RunGenerator periodically scans all billing sessions and pre-charges the next
 // compute period for any session whose NextVoucherAt has elapsed.
-func RunGenerator(ctx context.Context, rdb *redis.Client, h *EventHandler, log *zap.Logger) {
+//
+// billable gates the scan against the runtime's own view. A session is the
+// only record that drives billing, and nothing guarantees it matches reality:
+// it is deleted on a user stop/delete or after a successful archive, and by
+// nothing else. A stop that fails to archive deliberately keeps the session
+// so a still-running sandbox is not billed for free — correct in itself, but
+// it leaves the session with no remaining path to deletion once the retry
+// stops happening, and the generator has no way to tell. Observed on dev:
+// five sessions for sandboxes long gone from the runtime, each still emitting
+// a voucher a minute. The account was empty so nothing was collected, which is
+// what kept it invisible; a deposit would have been drained at the full rate
+// for compute that did not exist.
+//
+// Pass nil to disable the gate (tests, or a deployment with no runtime view).
+func RunGenerator(ctx context.Context, rdb *redis.Client, h *EventHandler, billable BillableSandboxes, log *zap.Logger) {
 	interval := time.Duration(h.voucherIntervalSec) * time.Second
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	log.Info("voucher generator started", zap.Duration("interval", interval))
+	log.Info("voucher generator started", zap.Duration("interval", interval), zap.Bool("existence_gate", billable != nil))
 
 	for {
 		select {
@@ -25,16 +48,31 @@ func RunGenerator(ctx context.Context, rdb *redis.Client, h *EventHandler, log *
 			log.Info("voucher generator stopped")
 			return
 		case <-ticker.C:
-			runGeneration(ctx, rdb, h, log)
+			runGeneration(ctx, rdb, h, billable, log)
 		}
 	}
 }
 
-func runGeneration(ctx context.Context, rdb *redis.Client, h *EventHandler, log *zap.Logger) {
+func runGeneration(ctx context.Context, rdb *redis.Client, h *EventHandler, billable BillableSandboxes, log *zap.Logger) {
 	sessions, err := ScanAllSessions(ctx, rdb)
 	if err != nil {
 		log.Error("generator: scan sessions", zap.Error(err))
 		return
+	}
+
+	// Fetch once per tick, not once per session.
+	//
+	// A failed lookup bills as before rather than skipping. Sandboxes run on
+	// the runners, so the control plane being unreachable does not stop the
+	// compute the user is getting — declining to bill through an outage would
+	// give it away. Unknown must not be read as gone.
+	var live map[string]bool
+	if billable != nil {
+		live, err = billable.BillableSandboxIDs(ctx)
+		if err != nil {
+			log.Warn("generator: sandbox list unavailable; billing every session this tick", zap.Error(err))
+			live = nil
+		}
 	}
 
 	now := time.Now().Unix()
@@ -42,6 +80,16 @@ func runGeneration(ctx context.Context, rdb *redis.Client, h *EventHandler, log 
 	for _, sess := range sessions {
 		s := sess
 		if now < s.NextVoucherAt {
+			continue
+		}
+		if live != nil && !live[s.SandboxID] {
+			// The runtime has no such sandbox. Skip rather than delete the
+			// session: closing it is a lifecycle decision that belongs to the
+			// stop path, and a sandbox absent from one listing may be a
+			// listing that raced a create. Not billing is the part that has to
+			// happen now.
+			log.Warn("generator: session has no live sandbox; not billing this period",
+				zap.String("sandbox", s.SandboxID), zap.String("owner", s.Owner))
 			continue
 		}
 
