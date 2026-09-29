@@ -83,7 +83,7 @@ func TestGenerator_SkipsSessionWithNoLiveSandbox(t *testing.T) {
 	rdb, h, sig := phantomFixture(t, "sb-live", "sb-phantom")
 	billable := &staticBillable{live: map[string]bool{"sb-live": true}}
 
-	runGeneration(context.Background(), rdb, h, billable, map[string]int{}, zap.NewNop())
+	runGeneration(context.Background(), rdb, h, billable, nil, map[string]int{}, zap.NewNop())
 
 	if got := sig.billed("sb-phantom"); got != 0 {
 		t.Errorf("phantom sandbox billed %d times; the session outlived the sandbox "+
@@ -102,7 +102,7 @@ func TestGenerator_ArchivedSandboxIsNotBillable(t *testing.T) {
 	// archived sandbox is simply absent from the set.
 	billable := &staticBillable{live: map[string]bool{}}
 
-	runGeneration(context.Background(), rdb, h, billable, map[string]int{}, zap.NewNop())
+	runGeneration(context.Background(), rdb, h, billable, nil, map[string]int{}, zap.NewNop())
 
 	if got := sig.billed("sb-archived"); got != 0 {
 		t.Errorf("archived sandbox billed %d times", got)
@@ -117,7 +117,7 @@ func TestGenerator_BillsWhenSandboxListUnavailable(t *testing.T) {
 	rdb, h, sig := phantomFixture(t, "sb-live")
 	billable := &staticBillable{err: errors.New("connection refused")}
 
-	runGeneration(context.Background(), rdb, h, billable, map[string]int{}, zap.NewNop())
+	runGeneration(context.Background(), rdb, h, billable, nil, map[string]int{}, zap.NewNop())
 
 	if got := sig.billed("sb-live"); got == 0 {
 		t.Error("nothing billed while the sandbox list was unavailable — an outage " +
@@ -129,7 +129,7 @@ func TestGenerator_BillsWhenSandboxListUnavailable(t *testing.T) {
 func TestGenerator_NilGateBillsEverySession(t *testing.T) {
 	rdb, h, sig := phantomFixture(t, "sb-one", "sb-two")
 
-	runGeneration(context.Background(), rdb, h, nil, map[string]int{}, zap.NewNop())
+	runGeneration(context.Background(), rdb, h, nil, nil, map[string]int{}, zap.NewNop())
 
 	for _, sb := range []string{"sb-one", "sb-two"} {
 		if sig.billed(sb) == 0 {
@@ -150,7 +150,7 @@ func TestGenerator_SkippedSessionKeepsItsClock(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	runGeneration(ctx, rdb, h, &staticBillable{live: map[string]bool{}}, map[string]int{}, zap.NewNop())
+	runGeneration(ctx, rdb, h, &staticBillable{live: map[string]bool{}}, nil, map[string]int{}, zap.NewNop())
 
 	after, err := GetSession(ctx, rdb, "sb-phantom")
 	if err != nil || after == nil {
@@ -179,7 +179,7 @@ func TestGenerator_ClosesSessionOnceRuntimeConfirmsItIsGone(t *testing.T) {
 	// Below the threshold the session survives: one absent listing is not
 	// proof, and the authoritative lookup is not worth a call per tick.
 	for i := 0; i < phantomSkipsBeforeConfirm-1; i++ {
-		runGeneration(ctx, rdb, h, billable, skips, zap.NewNop())
+		runGeneration(ctx, rdb, h, billable, nil, skips, zap.NewNop())
 	}
 	if s, _ := GetSession(ctx, rdb, "sb-deleted"); s == nil {
 		t.Fatalf("session closed after %d skips; the threshold is %d",
@@ -189,7 +189,7 @@ func TestGenerator_ClosesSessionOnceRuntimeConfirmsItIsGone(t *testing.T) {
 		t.Errorf("authoritative lookup called %d times below the threshold", billable.confirms)
 	}
 
-	runGeneration(ctx, rdb, h, billable, skips, zap.NewNop())
+	runGeneration(ctx, rdb, h, billable, nil, skips, zap.NewNop())
 
 	if s, _ := GetSession(ctx, rdb, "sb-deleted"); s != nil {
 		t.Error("session survived a confirmed deletion; it would be skipped forever")
@@ -211,7 +211,7 @@ func TestGenerator_KeepsSessionWhenDeletionIsUnconfirmed(t *testing.T) {
 	skips := map[string]int{}
 
 	for i := 0; i < phantomSkipsBeforeConfirm+5; i++ {
-		runGeneration(ctx, rdb, h, billable, skips, zap.NewNop())
+		runGeneration(ctx, rdb, h, billable, nil, skips, zap.NewNop())
 	}
 
 	if s, _ := GetSession(ctx, rdb, "sb-unlisted"); s == nil {
@@ -233,20 +233,67 @@ func TestGenerator_ReappearingSandboxResetsTheSkipCount(t *testing.T) {
 	skips := map[string]int{}
 
 	for i := 0; i < phantomSkipsBeforeConfirm-1; i++ {
-		runGeneration(ctx, rdb, h, absent, skips, zap.NewNop())
+		runGeneration(ctx, rdb, h, absent, nil, skips, zap.NewNop())
 	}
 	// One sighting clears the streak.
-	runGeneration(ctx, rdb, h, present, skips, zap.NewNop())
+	runGeneration(ctx, rdb, h, present, nil, skips, zap.NewNop())
 	if got := skips["sb-flaky"]; got != 0 {
 		t.Fatalf("skip count %d after the sandbox reappeared; want 0", got)
 	}
 	// Another near-threshold run must still not reach it.
 	for i := 0; i < phantomSkipsBeforeConfirm-1; i++ {
-		runGeneration(ctx, rdb, h, absent, skips, zap.NewNop())
+		runGeneration(ctx, rdb, h, absent, nil, skips, zap.NewNop())
 	}
 
 	if s, _ := GetSession(ctx, rdb, "sb-flaky"); s == nil {
 		t.Error("session deleted even though the sandbox was seen in between; " +
 			"the streak must be consecutive, not cumulative")
+	}
+}
+
+// Closing a phantom must also remove state held outside this package. The
+// stop handler's gone-branch deregisters the broker-side session entry, which
+// is written with no TTL — for a sandbox deleted straight through Daytona,
+// this callback is that entry's only removal path. Without it the broker
+// monitor scans a dead sandbox forever and reports it as an active session.
+func TestGenerator_PhantomCloseFiresTheDeregisterCallback(t *testing.T) {
+	rdb, h, _ := phantomFixture(t, "sb-deleted")
+	ctx := context.Background()
+	billable := &staticBillable{
+		live: map[string]bool{},
+		gone: map[string]bool{"sb-deleted": true},
+	}
+	skips := map[string]int{}
+	var deregistered []string
+	cb := func(_ context.Context, id string) { deregistered = append(deregistered, id) }
+
+	for i := 0; i < phantomSkipsBeforeConfirm; i++ {
+		runGeneration(ctx, rdb, h, billable, cb, skips, zap.NewNop())
+	}
+
+	if len(deregistered) != 1 || deregistered[0] != "sb-deleted" {
+		t.Errorf("broker deregister callback got %v, want exactly [sb-deleted]; "+
+			"the broker-side entry has no other removal path and would be "+
+			"reported as an active session forever", deregistered)
+	}
+}
+
+// The callback must not fire for sessions that are merely skipped or whose
+// deletion is unconfirmed — it removes broker state, so it rides the same
+// definitive-404 authorisation as the deletion itself.
+func TestGenerator_NoDeregisterWithoutConfirmedDeletion(t *testing.T) {
+	rdb, h, _ := phantomFixture(t, "sb-unlisted")
+	ctx := context.Background()
+	billable := &staticBillable{live: map[string]bool{}, gone: map[string]bool{}}
+	skips := map[string]int{}
+	fired := 0
+	cb := func(context.Context, string) { fired++ }
+
+	for i := 0; i < phantomSkipsBeforeConfirm+5; i++ {
+		runGeneration(ctx, rdb, h, billable, cb, skips, zap.NewNop())
+	}
+
+	if fired != 0 {
+		t.Errorf("deregister fired %d times without a confirmed deletion", fired)
 	}
 }

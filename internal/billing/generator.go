@@ -44,7 +44,12 @@ const phantomSkipsBeforeConfirm = 10
 // for compute that did not exist.
 //
 // Pass nil to disable the gate (tests, or a deployment with no runtime view).
-func RunGenerator(ctx context.Context, rdb *redis.Client, h *EventHandler, billable BillableSandboxes, log *zap.Logger) {
+//
+// onPhantomClosed runs after a phantom session is confirmed gone and deleted,
+// so state held outside this package — the broker's session entry — is
+// removed by the same event. Same shape as runStopHandler's deregisterBroker
+// parameter; nil to disable.
+func RunGenerator(ctx context.Context, rdb *redis.Client, h *EventHandler, billable BillableSandboxes, onPhantomClosed func(context.Context, string), log *zap.Logger) {
 	interval := time.Duration(h.voucherIntervalSec) * time.Second
 
 	ticker := time.NewTicker(interval)
@@ -64,12 +69,12 @@ func RunGenerator(ctx context.Context, rdb *redis.Client, h *EventHandler, billa
 			log.Info("voucher generator stopped")
 			return
 		case <-ticker.C:
-			runGeneration(ctx, rdb, h, billable, skips, log)
+			runGeneration(ctx, rdb, h, billable, onPhantomClosed, skips, log)
 		}
 	}
 }
 
-func runGeneration(ctx context.Context, rdb *redis.Client, h *EventHandler, billable BillableSandboxes, skips map[string]int, log *zap.Logger) {
+func runGeneration(ctx context.Context, rdb *redis.Client, h *EventHandler, billable BillableSandboxes, onPhantomClosed func(context.Context, string), skips map[string]int, log *zap.Logger) {
 	sessions, err := ScanAllSessions(ctx, rdb)
 	if err != nil {
 		log.Error("generator: scan sessions", zap.Error(err))
@@ -118,7 +123,7 @@ func runGeneration(ctx context.Context, rdb *redis.Client, h *EventHandler, bill
 			// lookup, and act only on a definitive answer.
 			skips[s.SandboxID]++
 			if skips[s.SandboxID] >= phantomSkipsBeforeConfirm && billable.ConfirmGone(ctx, s.SandboxID) {
-				closePhantomSession(ctx, rdb, s, log)
+				closePhantomSession(ctx, rdb, s, onPhantomClosed, log)
 				delete(skips, s.SandboxID)
 				continue
 			}
@@ -179,16 +184,21 @@ func runGeneration(ctx context.Context, rdb *redis.Client, h *EventHandler, bill
 }
 
 // closePhantomSession removes billing state for a sandbox the runtime has
-// confirmed is gone. Mirrors the stop handler's gone-branch: the session is
-// what drives billing and the marker is a stop order for something that no
-// longer exists, so both are dropped together. Called only behind a definitive
-// 404, never on a lookup that merely failed.
-func closePhantomSession(ctx context.Context, rdb *redis.Client, s Session, log *zap.Logger) {
+// confirmed is gone. Mirrors the stop handler's gone-branch in full: the
+// session (what drives billing), the stop marker (a stop order for something
+// that no longer exists), and — through onPhantomClosed — the broker-side
+// session entry, which is written with no TTL and has no other removal path
+// for a sandbox deleted straight through Daytona. Called only behind a
+// definitive 404, never on a lookup that merely failed.
+func closePhantomSession(ctx context.Context, rdb *redis.Client, s Session, onPhantomClosed func(context.Context, string), log *zap.Logger) {
 	if err := DeleteSession(ctx, rdb, s.SandboxID); err != nil {
 		log.Error("generator: close phantom session", zap.String("sandbox", s.SandboxID), zap.Error(err))
 		return
 	}
 	rdb.Del(ctx, "stop:sandbox:"+s.SandboxID) //nolint:errcheck
+	if onPhantomClosed != nil {
+		onPhantomClosed(ctx, s.SandboxID)
+	}
 	log.Warn("generator: closed billing session for a sandbox the runtime confirms is gone",
 		zap.String("sandbox", s.SandboxID), zap.String("owner", s.Owner))
 }

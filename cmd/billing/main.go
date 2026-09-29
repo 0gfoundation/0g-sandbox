@@ -217,7 +217,11 @@ func main() {
 	// — affordable prefix aggregates and settles, the rest parks as held debt,
 	// unpayable sandboxes stop. O(1) guards keep steady state untouched.
 	go settler.Run(ctx, cfg, rdb, onchain, signer, stopCh, alerter, log)
-	go billing.RunGenerator(ctx, rdb, billingHandler, daytonaBillable{dtona}, log)
+	// The voucher generator starts later, once proxyHandler exists: closing a
+	// phantom session must deregister the broker-side entry through the same
+	// callback the stop handler uses, and that callback lives on proxyHandler.
+	// Its first tick is a full voucher interval away regardless, so the later
+	// launch changes nothing.
 
 	// Balance + queue depth + signer-mismatch monitors. All best-effort —
 	// they surface problems but don't gate the hot path. Signer-mismatch in
@@ -485,6 +489,7 @@ func main() {
 	proxyHandler.RegisterPublic(apiPublic)
 	proxyHandler.Register(api)
 	go runStopHandler(ctx, stopCh, dtona, rdb, alerter, log, proxyHandler.BrokerDeregister)
+	go billing.RunGenerator(ctx, rdb, billingHandler, daytonaBillable{dtona}, proxyHandler.BrokerDeregister, log)
 
 	// Admin-only: pull an image from an external registry into the internal registry.
 	// The import runs synchronously (crane.Copy) — may take minutes for large images.
