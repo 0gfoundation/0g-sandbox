@@ -1365,9 +1365,18 @@ func (h *Handler) handleCatchAll(c *gin.Context) {
 	case method == http.MethodPut && action == "/labels":
 		h.withOwner(h.handleLabels)(c)
 
-	// ── Transparent proxy (owner check) ───────────────────────────────────
+	// ── Transparent proxy (owner check, sealed denied) ─────────────────────
+	// Everything not named above is forwarded to Daytona as admin, so this
+	// branch is only as safe as the least-guarded Daytona endpoint it reaches.
+	// On a sealed sandbox that includes port preview URLs/tokens (a path to
+	// any port, not just the attested :8080) and the public toggle (exposes
+	// every port). Sealing promises the owner no channel into the workload
+	// beyond :8080; SSH and toolbox were blocked by name, which left this
+	// catch-all open to whatever Daytona adds. Deny by default instead: the
+	// lifecycle operations a sealed owner legitimately needs all have their
+	// own cases above and are unaffected.
 	default:
-		h.withOwner(h.stripVolumesThenForward)(c)
+		h.withOwnerNotSealed(h.stripVolumesThenForward)(c)
 	}
 }
 
@@ -1440,7 +1449,8 @@ func (h *Handler) withOwnerOrAdmin(next gin.HandlerFunc) gin.HandlerFunc {
 }
 
 // withOwnerNotSealed wraps a handler with ownership + sealed checks.
-// Used for toolbox routes: sealed sandboxes block all remote access channels.
+// Used for toolbox routes and the transparent sandbox catch-all: sealed
+// sandboxes block every remote access channel into the workload.
 func (h *Handler) withOwnerNotSealed(next gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
