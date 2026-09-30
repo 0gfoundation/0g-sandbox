@@ -152,7 +152,9 @@ When a sandbox create request includes `"sealed": true`, the proxy:
    - `SANDBOX_SEAL_KEY` — hex private key; the container's signing identity.
      Never returned through the API; stripped from the create response.
    - `SANDBOX_SEAL_ATTESTATION` — JSON: `{seal_id, pubkey, image_hash, signature, ts}`
-5. Sets label `0g-sealed: "true"` → blocks SSH and toolbox access for the sandbox lifetime
+5. Sets label `0g-sealed: "true"` → blocks SSH, toolbox, and the transparent `/api/sandbox/:id/<other>`
+   passthrough for the sandbox lifetime (the passthrough reaches Daytona's port-preview and public-toggle
+   endpoints, either of which would open ports beyond :8080; lifecycle routes keep working)
 6. Sets label `0g-seal-id: <32-char hex>` → operators can correlate sandbox ↔ attestation
 
 Sealing requires the image to be present in the internal registry (needed to resolve the
@@ -199,7 +201,8 @@ time via `publicPorts` and is immutable afterward.
 
 **`publicPorts` (per-port public preview)** — a create request may include
 `"publicPorts": [8080, 3000]`: only listed ports are publicly reachable; all other
-ports fall back to Daytona's private-sandbox auth (owner preview tokens still work).
+ports fall back to Daytona's private-sandbox auth (owner preview tokens still work — except on
+sealed sandboxes, where the passthrough that issues them is blocked).
 Omit to keep every user port private. Requires the 0g-daytona fork images
 (compose defaults to them via `REGISTRY_PREFIX`); against stock Daytona images
 the billing proxy rejects such creates with 502 instead of silently ignoring the
@@ -307,7 +310,7 @@ The server starts on port 8080 (`PORT` env var) and exposes:
 - `POST /api/sandbox/:id/ensure-billing` — idempotent backfill if the create-time billing hook missed
 - `POST /api/sandbox/:id/ssh-access` — owner-only; sealed sandboxes return 403
 - `PUT /api/sandbox/:id/labels` — owner only (strips `daytona-owner` from the payload)
-- `Any /api/sandbox/:id/<other>` — transparent Daytona proxy (owner only)
+- `Any /api/sandbox/:id/<other>` — transparent Daytona proxy (owner only, sealed sandboxes blocked)
 - `Any /api/toolbox/:id/*` — Daytona toolbox proxy (owner only, sealed sandboxes blocked)
 - `GET /api/volumes` — list volumes owned by caller
 - `GET /api/snapshots` `POST /api/snapshots` `DELETE /api/snapshots/:id` — snapshot mgmt
