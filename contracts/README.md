@@ -2,7 +2,7 @@
 
 Networks: **0G Mainnet** (chain ID 16661) · **0G Galileo Testnet** (chain ID 16602, used by dev + testnet). Each section below states its network, explorer, and RPC.
 
-Owner: mainnet contract/beacon = `0x73443d8C05c74F8C2F5D499Da2597a1EE49E431b` (deployer); dev + testnet contract/beacon = `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`.
+Owner: mainnet contract/beacon = `0x87605Ec8E10Eb373C1d070e15E5d78FAC4D7621d` (since 2026-10-04; deployed by `0x73443d…`); dev + testnet contract/beacon = `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`.
 
 
 > Chinese version: [CONTRACTS.zh.md](README.zh.md)
@@ -25,6 +25,7 @@ Owner: mainnet contract/beacon = `0x73443d8C05c74F8C2F5D499Da2597a1EE49E431b` (d
 | Date | Impl | Notes |
 |------|------|-------|
 | 2026-09-09 | `0x90a0f1BcaCE1A516CF4D1918178EB99E08c16f24` | Initial mainnet deploy (v2): provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement. Bound to TappRegistry `0x5487…e612`. Owner = deployer `0x7344…431b`. |
+| 2026-10-04 | (no impl change) | **Ownership transferred** — contract `owner` + beacon owner set to `0x87605Ec8E10Eb373C1d070e15E5d78FAC4D7621d` (previously `0x7344…431b`). No implementation change. |
 
 ```env
 SETTLEMENT_CONTRACT=0x650C16a491ad52dB6b7f3053bCaD650cb43d2206

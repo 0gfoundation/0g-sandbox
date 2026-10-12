@@ -1,7 +1,7 @@
 # 0G Sandbox — 合约注册表
 
 网络:**0G 主网**(chain ID 16661)· **0G Galileo 测试网**(chain ID 16602,dev + testnet 用)。各段自述网络/浏览器/RPC。
-所有者:主网 合约/beacon = `0x73443d8C05c74F8C2F5D499Da2597a1EE49E431b`(部署者);dev + testnet 合约/beacon = `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`。
+所有者:主网 合约/beacon = `0x87605Ec8E10Eb373C1d070e15E5d78FAC4D7621d`(2026-10-04 起;部署者为 `0x73443d…`);dev + testnet 合约/beacon = `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`。
 
 
 > English version: [CONTRACTS.md](README.md)
@@ -24,6 +24,7 @@
 | 日期 | Impl | 说明 |
 |------|------|------|
 | 2026-09-09 | `0x90a0f1BcaCE1A516CF4D1918178EB99E08c16f24` | 主网首次部署(v2):provider 即 TEE signer;注册/注销/提现归 owner;结算要求收款人本人签名。绑定 TappRegistry `0x5487…e612`。Owner = 部署者 `0x7344…431b`。 |
+| 2026-10-04 | (实现未变) | **所有权转移** —— 合约 `owner` 与 beacon owner 设为 `0x87605Ec8E10Eb373C1d070e15E5d78FAC4D7621d`(原 `0x7344…431b`)。实现未变。 |
 
 ```env
 SETTLEMENT_CONTRACT=0x650C16a491ad52dB6b7f3053bCaD650cb43d2206
