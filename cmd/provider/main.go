@@ -40,6 +40,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -632,7 +633,7 @@ func createSnapshot(privKey *ecdsa.PrivateKey, apiURL, imageName, name string, c
 		"disk":      disk,
 	}
 	payloadBytes, _ := json.Marshal(body)
-	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(apiURL), "snapshot", "", json.RawMessage(payloadBytes))
+	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(apiURL), http.MethodPost, "/api/snapshots", "", payloadBytes)
 
 	req, err := http.NewRequest(http.MethodPost, apiURL+"/api/snapshots", bytes.NewReader(payloadBytes))
 	if err != nil {
@@ -674,7 +675,7 @@ func runListSnapshots(args []string) {
 	_ = fs.Parse(args)
 
 	privKey := resolveOwnerKey(*keyHex)
-	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), "list", "", json.RawMessage(`{}`))
+	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), http.MethodGet, "/api/snapshots", "", nil)
 
 	req, err := http.NewRequest(http.MethodGet, *apiURL+"/api/snapshots", nil)
 	if err != nil {
@@ -724,7 +725,7 @@ func runDeleteSnapshot(args []string) {
 		fatalf("--id is required")
 	}
 	privKey := resolveOwnerKey(*keyHex)
-	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), "delete-snapshot", *id, json.RawMessage(`{}`))
+	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), http.MethodDelete, "/api/snapshots/"+*id, *id, nil)
 
 	req, err := http.NewRequest(http.MethodDelete, *apiURL+"/api/snapshots/"+*id, nil)
 	if err != nil {
@@ -756,13 +757,13 @@ func runGCImages(args []string) {
 	_ = fs.Parse(args)
 
 	privKey := resolveOwnerKey(*keyHex)
-	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), "gc-images", "", json.RawMessage(`{}`))
-
-	url := *apiURL + "/api/registry/gc"
+	path := "/api/registry/gc"
 	if *dryRun {
-		url += "?dry_run=true"
+		path += "?dry_run=true"
 	}
-	req, err := http.NewRequest(http.MethodPost, url, nil)
+	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), http.MethodPost, path, "", nil)
+
+	req, err := http.NewRequest(http.MethodPost, *apiURL+path, nil)
 	if err != nil {
 		fatalf("build request: %v", err)
 	}
@@ -846,20 +847,25 @@ func providerAddressFor(apiBase string) string {
 	return addr
 }
 
-func signRequest(privKey *ecdsa.PrivateKey, provider, action, resourceID string, payload json.RawMessage) (signedMsg, sig, walletAddr string) {
+// signRequest signs one request: path is the API path as the provider sees
+// it ("/api/...", query included) and body the exact bytes that will be sent
+// (nil for none) — the server rejects the signature for any other request.
+func signRequest(privKey *ecdsa.PrivateKey, provider, method, path, resourceID string, body []byte) (signedMsg, sig, walletAddr string) {
 	addr := crypto.PubkeyToAddress(privKey.PublicKey)
 	nonceBuf := make([]byte, 16)
 	rand.Read(nonceBuf) //nolint:errcheck
 	nonce := hex.EncodeToString(nonceBuf)
+	bodySum := sha256.Sum256(body)
 	type signedRequest struct {
 		Action     string          `json:"action"`
+		BodySHA256 string          `json:"body_sha256"`
 		ExpiresAt  int64           `json:"expires_at"`
 		Nonce      string          `json:"nonce"`
 		Payload    json.RawMessage `json:"payload"`
 		Provider   string          `json:"provider,omitempty"`
 		ResourceID string          `json:"resource_id"`
 	}
-	reqObj := signedRequest{Action: action, ExpiresAt: time.Now().Add(3 * time.Minute).Unix(), Nonce: nonce, Payload: payload, Provider: provider, ResourceID: resourceID}
+	reqObj := signedRequest{Action: method + ":" + path, BodySHA256: "0x" + hex.EncodeToString(bodySum[:]), ExpiresAt: time.Now().Add(3 * time.Minute).Unix(), Nonce: nonce, Payload: json.RawMessage(`{}`), Provider: provider, ResourceID: resourceID}
 	msgBytes, _ := json.Marshal(reqObj)
 	prefix := fmt.Sprintf("\x19Ethereum Signed Message:\n%d", len(msgBytes))
 	hash := crypto.Keccak256([]byte(prefix), msgBytes)

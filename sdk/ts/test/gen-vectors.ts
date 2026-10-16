@@ -5,6 +5,7 @@
 import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sha256, stringToBytes } from 'viem';
 import { buildAuthHeaders, privateKeySigner } from '../src/signer.js';
 
 // Well-known throwaway key (hardhat account #0) — never fund it.
@@ -12,22 +13,28 @@ const KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 const NONCE = '000102030405060708090a0b0c0d0e0f';
 const NOW = 1893456000 - 180; // expires_at pins to 1893456000 (2030-01-01T00:00:00Z)
 
-const cases = [
+// `body` marks a request-bound vector: action is METHOD:path[?query] and the
+// message carries body_sha256 of exactly these bytes ('' = no body).
+const cases: { name: string; action: string; resourceId: string; payload: unknown; body?: string }[] = [
   { name: 'create-with-payload', action: 'create', resourceId: '', payload: { snapshot: '0g-ubuntu22', cpu: 2, sealed: true, publicPorts: [8080] } },
   { name: 'list-empty-payload', action: 'list', resourceId: '', payload: {} },
   { name: 'toolbox-with-resource', action: 'toolbox', resourceId: 'a1b2c3d4-0000-1111-2222-333344445555', payload: {} },
   { name: 'unicode-payload', action: 'create', resourceId: '', payload: { name: '沙盒-α', env: { GREETING: 'héllo & <world>' } } },
+  { name: 'bound-create', action: 'POST:/api/sandbox', resourceId: '', payload: { name: '沙盒-α', snapshot: '0g-ubuntu22' }, body: '{"name":"沙盒-α","snapshot":"0g-ubuntu22"}' },
+  { name: 'bound-get-with-query', action: 'GET:/api/toolbox/a1b2c3d4-0000-1111-2222-333344445555/toolbox/files?path=%2Fhome', resourceId: 'a1b2c3d4-0000-1111-2222-333344445555', payload: {}, body: '' },
 ];
 
 const signer = privateKeySigner(KEY);
 const vectors = [] as unknown[];
 for (const c of cases) {
-  const headers = await buildAuthHeaders(signer, c.action, c.resourceId, c.payload, { nonce: NONCE, nowSec: NOW });
+  const bodySha256 = c.body !== undefined ? sha256(stringToBytes(c.body)) : undefined;
+  const headers = await buildAuthHeaders(signer, c.action, c.resourceId, c.payload, { nonce: NONCE, nowSec: NOW, bodySha256 });
   vectors.push({
     name: c.name,
     privateKey: KEY,
     address: signer.address,
     action: c.action,
+    ...(c.body !== undefined ? { body: c.body, bodySha256 } : {}),
     resourceId: c.resourceId,
     payload: c.payload,
     nonce: NONCE,

@@ -249,7 +249,8 @@ Broker 追踪每个 session 的 CPU/内存，计算用户的总消耗速率。�
 | `BROKER_THRESHOLD_INTERVALS` | `2` | 余额 < burn × interval × N 时触发告警 |
 | `BROKER_TOPUP_INTERVALS` | `3` | 充值目标为 burn × interval × N neuron |
 | `PAYMENT_LAYER_URL` | — | Payment Layer HTTP 地址；为空则仅记录日志（noop）|
-| `BROKER_DEBUG` | `false` | 开启 `GET /api/monitor` 查看实时 session 列表 |
+| `BROKER_DEBUG` | `false` | 开启 `GET /api/monitor` 查看实时 session 列表——仅限管理员签名调用,且需同时设置 `ADMIN_ADDRESSES` |
+| `ADMIN_ADDRESSES` | — | 允许调用 `GET /api/monitor` 的钱包地址,逗号分隔(用法见 `docs/router-design.md`) |
 
 ### Tapp 部署
 
