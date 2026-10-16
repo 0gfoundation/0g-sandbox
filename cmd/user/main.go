@@ -42,6 +42,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -541,12 +542,9 @@ func runCreate(args []string) {
 	}
 	payloadBytes, _ := json.Marshal(body)
 
-	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), "create", "", json.RawMessage(payloadBytes))
+	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), http.MethodPost, "/api/sandbox", "", payloadBytes)
 
-	var bodyBuf bytes.Buffer
-	json.NewEncoder(&bodyBuf).Encode(body) //nolint:errcheck
-
-	req, err := http.NewRequest(http.MethodPost, *apiURL+"/api/sandbox", &bodyBuf)
+	req, err := http.NewRequest(http.MethodPost, *apiURL+"/api/sandbox", bytes.NewReader(payloadBytes))
 	if err != nil {
 		fatalf("build request: %v", err)
 	}
@@ -580,7 +578,7 @@ func runList(args []string) {
 	_ = fs.Parse(args)
 
 	privKey := mustLoadKey(*keyHex)
-	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), "list", "", json.RawMessage(`{}`))
+	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), http.MethodGet, "/api/sandbox", "", nil)
 
 	req, err := http.NewRequest(http.MethodGet, *apiURL+"/api/sandbox", nil)
 	if err != nil {
@@ -628,7 +626,7 @@ func runStop(args []string) {
 		fatalf("--id is required")
 	}
 	privKey := mustLoadKey(*keyHex)
-	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), "stop", *id, json.RawMessage(`{}`))
+	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), http.MethodPost, "/api/sandbox/"+*id+"/stop", *id, nil)
 
 	req, err := http.NewRequest(http.MethodPost, *apiURL+"/api/sandbox/"+*id+"/stop", nil)
 	if err != nil {
@@ -664,7 +662,7 @@ func runDelete(args []string) {
 		fatalf("--id is required")
 	}
 	privKey := mustLoadKey(*keyHex)
-	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), "delete", *id, json.RawMessage(`{}`))
+	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), http.MethodDelete, "/api/sandbox/"+*id, *id, nil)
 
 	req, err := http.NewRequest(http.MethodDelete, *apiURL+"/api/sandbox/"+*id, nil)
 	if err != nil {
@@ -707,11 +705,11 @@ func runExec(args []string) {
 	}
 
 	privKey := mustLoadKey(*keyHex)
-	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), "toolbox", *id, json.RawMessage(`{}`))
-
 	body, _ := json.Marshal(map[string]any{"command": *command, "timeout": *timeout})
-	url := *apiURL + "/api/toolbox/" + *id + "/toolbox/process/execute"
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	path := "/api/toolbox/" + *id + "/toolbox/process/execute"
+	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), http.MethodPost, path, *id, body)
+
+	req, err := http.NewRequest(http.MethodPost, *apiURL+path, bytes.NewReader(body))
 	if err != nil {
 		fatalf("build request: %v", err)
 	}
@@ -817,10 +815,10 @@ func runToolbox(args []string) {
 	}
 
 	privKey := mustLoadKey(*keyHex)
-	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), "toolbox", *id, json.RawMessage(`{}`))
+	path := "/api/toolbox/" + *id + "/toolbox/" + strings.TrimPrefix(*action, "/")
+	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), strings.ToUpper(*method), path, *id, []byte(*body))
 
-	url := *apiURL + "/api/toolbox/" + *id + "/toolbox/" + strings.TrimPrefix(*action, "/")
-	req, err := http.NewRequest(strings.ToUpper(*method), url, strings.NewReader(*body))
+	req, err := http.NewRequest(strings.ToUpper(*method), *apiURL+path, strings.NewReader(*body))
 	if err != nil {
 		fatalf("build request: %v", err)
 	}
@@ -858,7 +856,7 @@ func runStart(args []string) {
 	}
 
 	privKey := mustLoadKey(*keyHex)
-	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), "start", *id, json.RawMessage(`{}`))
+	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), http.MethodPost, "/api/sandbox/"+*id+"/start", *id, nil)
 
 	url := *apiURL + "/api/sandbox/" + *id + "/start"
 	req, err := http.NewRequest(http.MethodPost, url, nil)
@@ -896,7 +894,7 @@ func runSSHAccess(args []string) {
 	}
 
 	privKey := mustLoadKey(*keyHex)
-	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), "ssh-access", *id, json.RawMessage(`{}`))
+	msg, sig, walletAddr := signRequest(privKey, providerAddressFor(*apiURL), http.MethodPost, "/api/sandbox/"+*id+"/ssh-access", *id, nil)
 
 	url := *apiURL + "/api/sandbox/" + *id + "/ssh-access"
 	req, err := http.NewRequest(http.MethodPost, url, nil)
@@ -1010,17 +1008,22 @@ func providerAddressFor(apiBase string) string {
 	return addr
 }
 
-// signRequest builds the three auth headers required by the billing proxy.
+// signRequest builds the three auth headers required by the billing proxy,
+// bound to one request: path is the API path as the provider sees it
+// ("/api/...", query included) and body the exact bytes that will be sent
+// (nil for none) — the server rejects the signature for any other request.
 // Returns (X-Signed-Message value, X-Wallet-Signature value, X-Wallet-Address value).
-func signRequest(privKey *ecdsa.PrivateKey, provider, action, resourceID string, payload json.RawMessage) (signedMsg, sig, walletAddr string) {
+func signRequest(privKey *ecdsa.PrivateKey, provider, method, path, resourceID string, body []byte) (signedMsg, sig, walletAddr string) {
 	addr := crypto.PubkeyToAddress(privKey.PublicKey)
 
 	nonceBuf := make([]byte, 16)
 	rand.Read(nonceBuf) //nolint:errcheck
 	nonce := hex.EncodeToString(nonceBuf)
+	bodySum := sha256.Sum256(body)
 
 	type signedRequest struct {
 		Action     string          `json:"action"`
+		BodySHA256 string          `json:"body_sha256"`
 		ExpiresAt  int64           `json:"expires_at"`
 		Nonce      string          `json:"nonce"`
 		Payload    json.RawMessage `json:"payload"`
@@ -1029,10 +1032,11 @@ func signRequest(privKey *ecdsa.PrivateKey, provider, action, resourceID string,
 	}
 
 	reqObj := signedRequest{
-		Action:     action,
+		Action:     method + ":" + path,
+		BodySHA256: "0x" + hex.EncodeToString(bodySum[:]),
 		ExpiresAt:  time.Now().Add(3 * time.Minute).Unix(),
 		Nonce:      nonce,
-		Payload:    payload,
+		Payload:    json.RawMessage(`{}`),
 		Provider:   provider,
 		ResourceID: resourceID,
 	}

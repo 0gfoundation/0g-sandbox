@@ -81,7 +81,8 @@ Construct this JSON object and serialize it **with fields in this order**:
 
 ```json
 {
-  "action":      "create",
+  "action":      "POST:/api/sandbox",
+  "body_sha256": "0x6f2a…",
   "expires_at":  1709500000,
   "nonce":       "a3f8c2d1e4b7069512345678abcdef01",
   "payload":     {},
@@ -92,10 +93,11 @@ Construct this JSON object and serialize it **with fields in this order**:
 
 | Field | Type | Rules |
 |-------|------|-------|
-| `action` | string | Operation name: `create`, `list`, `stop`, `delete`, `toolbox`, etc. |
+| `action` | string | `METHOD:path` of the request: uppercase method, the API path as the provider receives it (`/api/...`), plus `?query` when the request has one — e.g. `POST:/api/sandbox/<id>/stop`. Legacy clients signed a verb (`create`, `list`, …); that form is only accepted on messages without `body_sha256`. |
+| `body_sha256` | string | `0x`-hex SHA-256 of the exact body bytes sent — of zero bytes when there is no body (`0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`). Binds the signature to this one request: the server rejects it with `401` if `action` or the hash does not match what arrived. Omit only in legacy-compatible messages. |
 | `expires_at` | int64 | Unix timestamp (seconds). Must be `> now` and `≤ now + 5 minutes`. |
 | `nonce` | string | 32-char hex (16 random bytes). Each nonce is accepted only once (stored in Redis until expiry). |
-| `payload` | JSON | Request body as JSON object. Use `{}` for requests with no body. |
+| `payload` | JSON | Informational — not verified (the body is bound by `body_sha256`). Send the JSON body or `{}`. |
 | `provider` | string | The **destination provider's on-chain address** (`provider_address` from `GET /api/info`). Binds the signature to that provider so a captured request cannot be replayed at another one. **Omit the key entirely** (not `""`) for legacy-compatible unbound messages. |
 | `resource_id` | string | Sandbox ID for resource-specific operations; empty string for `create` / `list`. When set, it must equal the `:id` in the request path. |
 
@@ -107,6 +109,15 @@ Construct this JSON object and serialize it **with fields in this order**:
 > alphabetical position shown above, since the signature covers the exact
 > bytes). All first-party clients (cmd/user, cmd/provider, TS SDK ≥ the version
 > shipping this change, web UIs) already send them.
+
+> **Migration — `AUTH_REQUIRE_REQUEST_BINDING`.** A message that carries
+> `body_sha256` is always checked against the request, whatever the server
+> mode. Messages without it are still accepted for older clients until a
+> provider sets `AUTH_REQUIRE_REQUEST_BINDING=true`; from then on they are
+> rejected with `401 {"error": "signed message must bind the request (action
+> METHOD:path and body_sha256)"}`. This is separate from `AUTH_STRICT`, so a
+> provider already running strict keeps working with provider-bound clients
+> that predate request binding. All first-party clients send the binding.
 
 ### Signing Algorithm
 
@@ -128,6 +139,7 @@ Construct this JSON object and serialize it **with fields in this order**:
 ```go
 import (
     "crypto/rand"
+    "crypto/sha256"
     "encoding/base64"
     "encoding/hex"
     "encoding/json"
@@ -139,23 +151,30 @@ import (
 
 type signedRequest struct {
     Action     string          `json:"action"`
+    BodySHA256 string          `json:"body_sha256"`
     ExpiresAt  int64           `json:"expires_at"`
     Nonce      string          `json:"nonce"`
     Payload    json.RawMessage `json:"payload"`
+    Provider   string          `json:"provider,omitempty"`
     ResourceID string          `json:"resource_id"`
 }
 
-func signRequest(privKey *ecdsa.PrivateKey, action, resourceID string, payload json.RawMessage) (xSignedMessage, xSignature, xWalletAddr string) {
+// path is the API path ("/api/...", query included); body the exact bytes
+// that will be sent (nil for none).
+func signRequest(privKey *ecdsa.PrivateKey, provider, method, path, resourceID string, body []byte) (xSignedMessage, xSignature, xWalletAddr string) {
     addr := crypto.PubkeyToAddress(privKey.PublicKey)
 
     nonceBuf := make([]byte, 16)
     rand.Read(nonceBuf)
+    bodySum := sha256.Sum256(body)
 
     req := signedRequest{
-        Action:     action,
+        Action:     method + ":" + path,
+        BodySHA256: "0x" + hex.EncodeToString(bodySum[:]),
         ExpiresAt:  time.Now().Add(3 * time.Minute).Unix(),
         Nonce:      hex.EncodeToString(nonceBuf),
-        Payload:    payload,
+        Payload:    json.RawMessage(`{}`),
+        Provider:   provider,
         ResourceID: resourceID,
     }
     msgBytes, _ := json.Marshal(req)
@@ -177,11 +196,20 @@ func signRequest(privKey *ecdsa.PrivateKey, action, resourceID string, payload j
 ```js
 import { ethers } from "ethers";
 
-async function signRequest(wallet, action, resourceId, payload = {}) {
+// path: API path ("/api/...", query included); bodyStr: the exact body sent ("" for none).
+async function signRequest(wallet, provider, method, path, resourceId, bodyStr = "") {
   const nonce = ethers.hexlify(ethers.randomBytes(16)).slice(2); // 32 hex chars
   const expiresAt = Math.floor(Date.now() / 1000) + 180; // 3 min
 
-  const req = { action, expires_at: expiresAt, nonce, payload, resource_id: resourceId };
+  const req = {
+    action: `${method}:${path}`,
+    body_sha256: ethers.sha256(ethers.toUtf8Bytes(bodyStr)),
+    expires_at: expiresAt,
+    nonce,
+    payload: {},
+    provider,
+    resource_id: resourceId,
+  };
   const msgBytes = new TextEncoder().encode(JSON.stringify(req));
 
   // ethers.signMessage prepends the EIP-191 prefix automatically
@@ -196,11 +224,12 @@ async function signRequest(wallet, action, resourceId, payload = {}) {
 
 // Usage
 const wallet = new ethers.Wallet("0x<private-key>");
-const headers = await signRequest(wallet, "create", "", {});
+const body = JSON.stringify({ snapshot: "0g-ubuntu22" });
+const headers = await signRequest(wallet, "0x<provider_address>", "POST", "/api/sandbox", "", body);
 const resp = await fetch("http://<proxy>/api/sandbox", {
   method: "POST",
   headers: { ...headers, "Content-Type": "application/json" },
-  body: JSON.stringify({}),
+  body,
 });
 ```
 
@@ -275,7 +304,7 @@ All monetary amounts are in **neuron** (1 0G = 10¹⁸ neuron).
 
 #### `POST /api/sandbox` — Create sandbox
 
-**Headers:** auth headers (action = `"create"`, resource_id = `""`)
+**Headers:** auth headers (action = `"POST:/api/sandbox"`, resource_id = `""`)
 
 **Body:**
 ```json
@@ -322,7 +351,7 @@ with HTTP 400 (`{"error": "this provider only accepts sealed sandboxes; set \"se
 
 #### `GET /api/sandbox` — List sandboxes
 
-**Headers:** auth headers (action = `"list"`, resource_id = `""`)
+**Headers:** auth headers (action = `"GET:/api/sandbox"`, resource_id = `""`)
 
 **Response `200`:** Array of sandbox objects filtered to the caller's own sandboxes.
 
@@ -332,7 +361,7 @@ Also available as `GET /api/sandbox/paginated` with the same semantics.
 
 #### `GET /api/sandbox/:id` — Get sandbox
 
-**Headers:** auth headers (action = `"list"`, resource_id = `":id"`)
+**Headers:** auth headers (action = `"GET:/api/sandbox/:id"`, resource_id = `":id"`)
 
 **Response `200`:** Sandbox object
 **Response `403`:** Not the owner
@@ -341,7 +370,7 @@ Also available as `GET /api/sandbox/paginated` with the same semantics.
 
 #### `POST /api/sandbox/:id/stop` — Stop sandbox
 
-**Headers:** auth headers (action = `"stop"`, resource_id = `":id"`)
+**Headers:** auth headers (action = `"POST:/api/sandbox/:id/stop"`, resource_id = `":id"`)
 
 **Response `200`:** Response from Daytona
 **Billing:** Emits a final compute voucher for elapsed time since last voucher.
@@ -350,7 +379,7 @@ Also available as `GET /api/sandbox/paginated` with the same semantics.
 
 #### `DELETE /api/sandbox/:id` — Delete sandbox
 
-**Headers:** auth headers (action = `"delete"`, resource_id = `":id"`)
+**Headers:** auth headers (action = `"DELETE:/api/sandbox/:id"`, resource_id = `":id"`)
 
 **Response `200`:** Response from Daytona
 **Billing:** Emits a final compute voucher before deletion.
@@ -359,7 +388,7 @@ Also available as `GET /api/sandbox/paginated` with the same semantics.
 
 #### `POST /api/sandbox/:id/start` — Start a stopped sandbox
 
-**Headers:** auth headers (action = `"start"`, resource_id = `":id"`)
+**Headers:** auth headers (action = `"POST:/api/sandbox/:id/start"`, resource_id = `":id"`)
 
 **Response `200`:** Response from Daytona
 **Response `402`:** TEE signer not acknowledged
@@ -369,7 +398,7 @@ Also available as `GET /api/sandbox/paginated` with the same semantics.
 
 #### `POST /api/sandbox/:id/archive` — Archive sandbox
 
-**Headers:** auth headers (action = `"archive"`, resource_id = `":id"`)
+**Headers:** auth headers (action = `"POST:/api/sandbox/:id/archive"`, resource_id = `":id"`)
 
 **Response `200`:** Response from Daytona
 **Billing:** Emits a final compute voucher; closes compute session.
@@ -378,7 +407,7 @@ Also available as `GET /api/sandbox/paginated` with the same semantics.
 
 #### `PUT /api/sandbox/:id/labels` — Update labels
 
-**Headers:** auth headers (action = `"labels"`, resource_id = `":id"`)
+**Headers:** auth headers (action = `"PUT:/api/sandbox/:id/labels"`, resource_id = `":id"`)
 
 **Body:**
 ```json
@@ -390,7 +419,7 @@ Also available as `GET /api/sandbox/paginated` with the same semantics.
 
 #### `POST /api/sandbox/:id/ssh-access` — Get SSH access token
 
-**Headers:** auth headers (action = `"ssh-access"`, resource_id = `":id"`)
+**Headers:** auth headers (action = `"POST:/api/sandbox/:id/ssh-access"`, resource_id = `":id"`)
 
 **Response `200`:**
 ```json
@@ -405,7 +434,7 @@ Also available as `GET /api/sandbox/paginated` with the same semantics.
 
 #### `POST /api/sandbox/:id/ensure-billing` — Ensure billing session exists
 
-**Headers:** auth headers (action = `"ensure-billing"`, resource_id = `":id"`)
+**Headers:** auth headers (action = `"POST:/api/sandbox/:id/ensure-billing"`, resource_id = `":id"`)
 
 Idempotent. Ensures a billing session exists for a sandbox whose `OnCreate` hook may not have
 fired (e.g., client disconnected before the 2xx response arrived).
@@ -425,7 +454,7 @@ fired (e.g., client disconnected before the 2xx response arrived).
 
 #### `GET /api/events` — Query settlement events
 
-**Headers:** auth headers (action = `"list"`, resource_id = `""`)
+**Headers:** auth headers (action = `"GET:/api/events"`, resource_id = `""`)
 
 **Query params:** `?lookback=<blocks>` (default ≈ 43200, ~24h at 2s/block; `0` = all history)
 
@@ -453,7 +482,7 @@ fired (e.g., client disconnected before the 2xx response arrived).
 
 #### `GET /api/sessions` — Active billing sessions (admin only)
 
-**Headers:** auth headers (action = `"list"`, resource_id = `""`)
+**Headers:** auth headers (action = `"GET:/api/sessions"`, resource_id = `""`)
 
 Caller wallet must be in `ADMIN_ADDRESSES`.
 
@@ -539,7 +568,7 @@ verification. Path format: `/api/toolbox/{sandboxId}/toolbox/{action}`.
 
 **Note:** Returns `403 Forbidden` for sealed sandboxes (`0g-sealed: "true"`).
 
-**Auth headers:** action = `"toolbox"`, resource_id = `"{sandboxId}"`
+**Auth headers:** action = `"<METHOD>:/api/toolbox/{sandboxId}/toolbox/<path>"`, resource_id = `"{sandboxId}"`
 
 All HTTP methods (GET, POST, PUT, DELETE) are supported.
 

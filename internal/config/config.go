@@ -101,6 +101,11 @@ type ServerConfig struct {
 	// that predate provider binding are still in circulation — an omitted
 	// binding is exactly what a replayed legacy capture looks like.
 	AuthStrict bool `mapstructure:"auth_strict"`
+
+	// AuthRequireRequestBinding requires every signed request to bind the
+	// request itself (action METHOD:path + body_sha256). Separate from
+	// AuthStrict: turn it on once every client in use signs the binding.
+	AuthRequireRequestBinding bool `mapstructure:"auth_bind_request"`
 }
 
 // AlertConfig drives the operator-facing alert pipeline (settler tx failures,
@@ -163,6 +168,7 @@ func Load() (*Config, error) {
 		"server.broker_url":                "BROKER_URL",
 		"server.sealed_only":               "SEALED_ONLY",
 		"server.auth_strict":               "AUTH_STRICT",
+		"server.auth_bind_request":         "AUTH_REQUIRE_REQUEST_BINDING",
 		"alert.webhook_url":                "ALERT_WEBHOOK_URL",
 		"alert.dedup_window_sec":           "ALERT_DEDUP_WINDOW_SEC",
 		"alert.settler_low_balance_factor": "SETTLER_LOW_BALANCE_FACTOR",
@@ -212,6 +218,7 @@ func LoadBroker() (*Config, error) {
 		"chain.contract_address":           "SETTLEMENT_CONTRACT",
 		"chain.tapp_registry":              "TAPP_REGISTRY",
 		"chain.chain_id":                   "CHAIN_ID",
+		"chain.admin_addresses":            "ADMIN_ADDRESSES",
 		"server.port":                      "BROKER_PORT",
 		"broker.monitor_interval_sec":      "BROKER_MONITOR_INTERVAL_SEC",
 		"broker.topup_intervals":           "BROKER_TOPUP_INTERVALS",

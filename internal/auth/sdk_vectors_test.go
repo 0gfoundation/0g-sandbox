@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -24,6 +25,8 @@ func TestSDKVectors(t *testing.T) {
 		Name       string          `json:"name"`
 		Address    string          `json:"address"`
 		Action     string          `json:"action"`
+		Body       *string         `json:"body"`
+		BodySHA256 string          `json:"bodySha256"`
 		ResourceID string          `json:"resourceId"`
 		Payload    json.RawMessage `json:"payload"`
 		Nonce      string          `json:"nonce"`
@@ -55,8 +58,18 @@ func TestSDKVectors(t *testing.T) {
 				t.Fatalf("unmarshal SignedRequest: %v", err)
 			}
 			if req.Action != v.Action || req.ResourceID != v.ResourceID ||
-				req.Nonce != v.Nonce || req.ExpiresAt != v.ExpiresAt {
+				req.Nonce != v.Nonce || req.ExpiresAt != v.ExpiresAt ||
+				req.BodySHA256 != v.BodySHA256 {
 				t.Fatalf("SignedRequest fields mismatch: %+v", req)
+			}
+
+			// Request-bound vectors: the TS body hash must be the hash the
+			// middleware computes over the same bytes.
+			if v.Body != nil {
+				sum := sha256.Sum256([]byte(*v.Body))
+				if !strings.EqualFold(strings.TrimPrefix(req.BodySHA256, "0x"), hex.EncodeToString(sum[:])) {
+					t.Fatalf("body_sha256 %s is not sha256(%q)", req.BodySHA256, *v.Body)
+				}
 			}
 
 			// Signature must recover to the declared wallet — same code path

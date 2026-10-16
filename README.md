@@ -344,7 +344,8 @@ Derived from **T_react** — time from alert to funds landing on-chain:
 | `BROKER_THRESHOLD_INTERVALS` | `2` | Alert when balance < burn × interval × N |
 | `BROKER_TOPUP_INTERVALS` | `3` | Top-up to burn × interval × N neuron |
 | `PAYMENT_LAYER_URL` | — | Payment Layer HTTP endpoint; empty = log-only (noop) |
-| `BROKER_DEBUG` | `false` | Expose `GET /api/monitor` to inspect live sessions |
+| `BROKER_DEBUG` | `false` | Expose `GET /api/monitor` to inspect live sessions — admin-signed only, and only when `ADMIN_ADDRESSES` is set |
+| `ADMIN_ADDRESSES` | — | Comma-separated wallets allowed to call `GET /api/monitor` (see `docs/router-design.md`) |
 
 ### Tapp Deployment
 
