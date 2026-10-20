@@ -1,13 +1,15 @@
-// cmd/provider — provider-side management CLI (v2: provider IS the TEE signer)
+// cmd/provider — provider-side management CLI
 //
-// The provider address in SandboxServing is the node's TEE signer address;
-// its key lives inside the enclave and dies with the machine. All on-chain
-// management is therefore signed by the appId's TappRegistry OWNER key
+// The provider address in SandboxServing is either the node's TEE signer
+// address, whose key lives inside the enclave and dies with the machine, or
+// — when the node runs PROVIDER_KEY_SOURCE=kms — the app's KMS key, the same
+// on every boot (register --kms). Neither key ever leaves the TEE, so all
+// on-chain management is signed by the appId's TappRegistry OWNER key
 // (OWNER_KEY env, PROVIDER_KEY accepted as a legacy alias).
 //
 // Subcommands:
 //
-//	register        Register/update a node's service: bind --signer to an appId, set URL + prices
+//	register        Register/update a service: bind --signer (or, with --kms, the node's KMS provider) to an appId, set URL + prices
 //	remove-service  Remove a node's service (sweeps pending earnings to the owner)
 //	rotate          After a machine rebuild: re-register the new signer with the old terms, remove the old
 //	status          Show a node's registration and earnings
@@ -27,6 +29,10 @@
 //	  --price-per-cpu  1000000000000000 \
 //	  --price-per-mem   500000000000000 \
 //	  --fee           60000000000000000
+//
+//	# KMS provider: address and the node's endorsement come from <url>/api/info
+//	OWNER_KEY=0x<hex> go run ./cmd/provider/ register --kms \
+//	  --contract 0x... --app-id 0g-sandbox-provider --url https://sandbox-host
 //
 //	go run ./cmd/provider/ status   --contract 0x... --address 0x<signer>
 //	OWNER_KEY=0x<hex> go run ./cmd/provider/ withdraw --contract 0x... --signer 0x<signer>
@@ -59,6 +65,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/0gfoundation/0g-sandbox/internal/chain"
+	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
 
 const (
@@ -140,8 +147,10 @@ func runRegister(args []string) {
 	chainID := fs.Int64("chain-id", defaultChainID, "Chain ID")
 	contractHex := fs.String("contract", envOrDefault("SETTLEMENT_CONTRACT", ""), "Settlement contract address (required: --contract or SETTLEMENT_CONTRACT env)")
 	keyHex := fs.String("key", "", "App owner private key (hex); or set OWNER_KEY env")
-	signerHex := fs.String("signer", "", "Node's TEE signer address = the provider address (required; get it from the node's /api/info or tapp-cli get-app-key)")
+	signerHex := fs.String("signer", "", "Node's TEE signer address = the provider address (required without --kms; get it from the node's /api/info or tapp-cli get-app-key)")
 	appId := fs.String("app-id", "", "TappRegistry appId to bind (required; signer must already be an active node of it)")
+	kms := fs.Bool("kms", false, "Register the node's KMS provider (PROVIDER_KEY_SOURCE=kms): its address and the node's endorsement are read from <url>/api/info")
+	infoURL := fs.String("info", "", "With --kms: where to read /api/info (default: --url)")
 	serviceURL := fs.String("url", "", "Provider service URL (required)")
 	pricePerCPU := fs.String("price-per-cpu", "1000000000000000", "Price per CPU per minute (neuron)")
 	pricePerMemGB := fs.String("price-per-mem", "500000000000000", "Price per GB memory per minute (neuron)")
@@ -153,6 +162,14 @@ func runRegister(args []string) {
 	}
 	if *appId == "" {
 		fatalf("--app-id is required")
+	}
+	if *kms {
+		base := *infoURL
+		if base == "" {
+			base = *serviceURL
+		}
+		registerKms(base, *rpc, *chainID, *contractHex, *keyHex, *appId, *serviceURL, *pricePerCPU, *pricePerMemGB, *createFee)
+		return
 	}
 	if *signerHex == "" {
 		fatalf("--signer is required (the node's TEE address; see its /api/info `provider_address` or tapp-cli get-app-key)")
@@ -191,6 +208,112 @@ func runRegister(args []string) {
 	}
 	fmt.Println("      confirmed ✓")
 	fmt.Printf("\nDone. Provider (signer) address: %s\n", signerAddr.Hex())
+}
+
+// kmsNodeInfo is the part of a node's /api/info that registers its KMS provider.
+type kmsNodeInfo struct {
+	ProviderAddress     string `json:"provider_address"`
+	ProviderKeySource   string `json:"provider_key_source"`
+	ProviderEndorsement string `json:"provider_endorsement"`
+	ProviderKeyMaterial string `json:"provider_key_material"`
+	ProviderInEvidence  bool   `json:"provider_in_evidence"`
+	NodeAddress         string `json:"node_address"`
+	ContractAddress     string `json:"contract_address"`
+	AppId               string `json:"app_id"`
+	ChainID             int64  `json:"chain_id"`
+}
+
+// checkKmsNodeInfo validates a node's /api/info for registering its KMS
+// provider under appId on contract/chainID, and returns the provider and the
+// endorsement. The endorsement is verified on chain anyway (an active node of
+// appId must have signed it); checking here first names the mistake instead
+// of a bare revert.
+func checkKmsNodeInfo(info kmsNodeInfo, chainID int64, contract common.Address, appId string) (common.Address, []byte, error) {
+	if info.ProviderKeySource != "kms" {
+		return common.Address{}, nil, fmt.Errorf("node reports provider_key_source %q: set PROVIDER_KEY_SOURCE=kms on it first", info.ProviderKeySource)
+	}
+	if !common.IsHexAddress(info.ProviderAddress) || !common.IsHexAddress(info.NodeAddress) {
+		return common.Address{}, nil, fmt.Errorf("node /api/info lacks provider_address or node_address")
+	}
+	if info.AppId != appId {
+		return common.Address{}, nil, fmt.Errorf("node runs app %q, not --app-id %q", info.AppId, appId)
+	}
+	if info.ChainID != chainID || !common.IsHexAddress(info.ContractAddress) || common.HexToAddress(info.ContractAddress) != contract {
+		return common.Address{}, nil, fmt.Errorf("node is configured for contract %s on chain %d, not %s on %d",
+			info.ContractAddress, info.ChainID, contract.Hex(), chainID)
+	}
+	provider := common.HexToAddress(info.ProviderAddress)
+	sig, err := hex.DecodeString(strings.TrimPrefix(info.ProviderEndorsement, "0x"))
+	if err != nil {
+		return common.Address{}, nil, fmt.Errorf("provider_endorsement: %w", err)
+	}
+	endorser, err := voucher.KmsProviderEndorser(sig, big.NewInt(chainID), contract, provider, appId)
+	if err != nil {
+		return common.Address{}, nil, fmt.Errorf("provider_endorsement: %w", err)
+	}
+	if endorser != common.HexToAddress(info.NodeAddress) {
+		return common.Address{}, nil, fmt.Errorf("provider_endorsement is signed by %s, not the node %s", endorser.Hex(), info.NodeAddress)
+	}
+	return provider, sig, nil
+}
+
+func registerKms(infoBase, rpc string, chainID int64, contractHex, keyHex, appId, serviceURL, pricePerCPU, pricePerMemGB, createFee string) {
+	if contractHex == "" {
+		fatalf("--contract (or SETTLEMENT_CONTRACT) is required")
+	}
+	resp, err := http.Get(strings.TrimRight(infoBase, "/") + "/api/info")
+	if err != nil {
+		fatalf("read %s/api/info: %v", infoBase, err)
+	}
+	var info kmsNodeInfo
+	err = json.NewDecoder(resp.Body).Decode(&info)
+	resp.Body.Close()
+	if err != nil {
+		fatalf("decode %s/api/info: %v", infoBase, err)
+	}
+	contract := common.HexToAddress(contractHex)
+	provider, endorsement, err := checkKmsNodeInfo(info, chainID, contract, appId)
+	if err != nil {
+		fatalf("%v", err)
+	}
+
+	privKey := resolveOwnerKey(keyHex)
+	pricePerCPUBig := parseBigInt(pricePerCPU, "--price-per-cpu")
+	pricePerMemGBBig := parseBigInt(pricePerMemGB, "--price-per-mem")
+	createFeeBig := parseBigInt(createFee, "--fee")
+
+	fmt.Printf("App owner:          %s\n", crypto.PubkeyToAddress(privKey.PublicKey).Hex())
+	fmt.Printf("Provider (KMS key): %s\n", provider.Hex())
+	fmt.Printf("Endorsed by node:   %s\n", info.NodeAddress)
+	fmt.Printf("AppId:              %s\n", appId)
+	fmt.Printf("Contract:           %s\n", contractHex)
+	fmt.Printf("Service URL:        %s\n", serviceURL)
+	fmt.Printf("CPU price/min:      %s neuron\n", pricePerCPUBig.String())
+	fmt.Printf("Mem price/min:      %s neuron/GB\n", pricePerMemGBBig.String())
+	fmt.Printf("Create fee:         %s neuron\n", createFeeBig.String())
+	if !info.ProviderInEvidence {
+		fmt.Println("\nwarn: the node's tapp-server does not list the provider key in its evidence (needs tapp-server >= 0.11.0);")
+		fmt.Println("      until it does, nothing but this endorsement ties the provider to the TEE.")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	eth, c := dialContract(ctx, rpc, contractHex)
+	defer eth.Close()
+
+	auth := buildAuth(ctx, privKey, chainID)
+	fmt.Println("\n[1/1] AddOrUpdateKmsService...")
+	tx, err := c.AddOrUpdateKmsService(auth, provider, serviceURL, appId, pricePerCPUBig, createFeeBig, pricePerMemGBBig, endorsement)
+	if err != nil {
+		fatalf("AddOrUpdateKmsService: %v\n\nReminders:\n  - the caller key must be the TappRegistry owner of %s\n  - the endorsing node %s must be an active node of %s\n  - tapp.authorizeInvalidator(%s, %s) must have been called\n  - a KMS provider stays bound to the app instance it was first registered under", err, appId, info.NodeAddress, appId, appId, contractHex)
+	}
+	fmt.Printf("      tx: %s\n", tx.Hash().Hex())
+	if _, err := bind.WaitMined(ctx, eth, tx); err != nil {
+		fatalf("wait mined: %v", err)
+	}
+	fmt.Println("      confirmed ✓")
+	fmt.Printf("\nDone. Provider (KMS key) address: %s — fund it for settlement gas.\n", provider.Hex())
+	fmt.Printf("Clients pin it through the node's evidence: runtime_data.kms_keys, material %s.\n", info.ProviderKeyMaterial)
 }
 
 // ── remove-service ────────────────────────────────────────────────────────────
@@ -297,6 +420,9 @@ func runRotate(args []string) {
 	if !oldExists {
 		fatalf("no service registered for old signer %s — nothing to rotate from", oldAddr.Hex())
 	}
+	if b, err := contract.KmsBindings(opts, oldAddr); err == nil && b.Epoch.Sign() != 0 {
+		fatalf("%s is a KMS provider: it survives reboots and machine rebuilds, there is nothing to rotate", oldAddr.Hex())
+	}
 	svc, err := contract.Services(opts, oldAddr)
 	if err != nil {
 		fatalf("Services(old): %v", err)
@@ -401,6 +527,14 @@ func runStatus(args []string) {
 		fmt.Printf("  Mem price/min:    %s neuron/GB\n", svc.PricePerMemGBPerMin.String())
 		fmt.Printf("  Create fee:       %s neuron\n", svc.CreateFee.String())
 		fmt.Printf("  Earnings:         %s neuron\n", earnings.String())
+		binding, bindErr := contract.KmsBindings(opts, providerAddr)
+		isKms := bindErr == nil && binding.Epoch.Sign() != 0
+		if isKms {
+			fmt.Printf("  KMS provider:     bound to the app instance registered at %s\n", binding.Epoch.String())
+		}
+		if active, err := contract.IsActiveProvider(opts, providerAddr); err == nil {
+			fmt.Printf("  Can settle:       %v\n", active)
+		}
 		if *tappHex != "" && svc.AppId != "" {
 			tapp, err := chain.NewTappRegistry(common.HexToAddress(*tappHex), eth)
 			if err != nil {
@@ -411,6 +545,12 @@ func runStatus(args []string) {
 				fatalf("tapp.getAppInfo: %v", err)
 			}
 			fmt.Printf("  App owner:        %s (manages this service + withdraws earnings)\n", appInfo.Owner.Hex())
+			if isKms {
+				if appInfo.RegisteredAt.Cmp(binding.Epoch) != 0 {
+					fmt.Printf("  App instance:     registered at %s — NOT the instance the provider is bound to; its vouchers cannot settle\n", appInfo.RegisteredAt.String())
+				}
+				return
+			}
 			node, err := tapp.GetNode(opts, svc.AppId, providerAddr)
 			if err != nil {
 				fatalf("tapp.getNode: %v", err)

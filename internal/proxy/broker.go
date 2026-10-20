@@ -22,17 +22,17 @@ import (
 // billing proxy, signing each request with the provider's TEE key.
 type brokerClient struct {
 	url                string
-	teeKey             *ecdsa.PrivateKey
+	providerKey        *ecdsa.PrivateKey // signs broker requests: the broker checks signer == provider
 	providerAddr       string
 	voucherIntervalSec int64
 	httpClient         *http.Client
 	log                *zap.Logger
 }
 
-func newBrokerClient(url string, teeKey *ecdsa.PrivateKey, providerAddr string, voucherIntervalSec int64, log *zap.Logger) *brokerClient {
+func newBrokerClient(url string, providerKey *ecdsa.PrivateKey, providerAddr string, voucherIntervalSec int64, log *zap.Logger) *brokerClient {
 	return &brokerClient{
 		url:                url,
-		teeKey:             teeKey,
+		providerKey:        providerKey,
 		providerAddr:       providerAddr,
 		voucherIntervalSec: voucherIntervalSec,
 		httpClient:         &http.Client{Timeout: 3 * time.Minute},
@@ -134,7 +134,7 @@ func (b *brokerClient) deregisterSession(ctx context.Context, sandboxID string) 
 // sign applies EIP-191 wrapping and signs msgHash with the TEE key.
 func (b *brokerClient) sign(msgHash []byte) ([]byte, error) {
 	prefixed := auth.HashMessage(msgHash)
-	sig, err := crypto.Sign(prefixed, b.teeKey)
+	sig, err := crypto.Sign(prefixed, b.providerKey)
 	if err != nil {
 		return nil, err
 	}

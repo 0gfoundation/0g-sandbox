@@ -110,7 +110,7 @@ type Handler struct {
 	sshGatewayHost      string   // if set, replaces localhost in SSH commands
 	computePricePerSec  *big.Int
 	rdb                 *redis.Client
-	teeKey              *ecdsa.PrivateKey // TEE signing key; nil = sealed containers disabled
+	sealKey             *ecdsa.PrivateKey // node's TEE signer, signs seal attestations; nil = sealed containers disabled
 	broker              *brokerClient     // nil = broker integration disabled
 	log                 *zap.Logger
 
@@ -128,7 +128,7 @@ type Handler struct {
 	AppOwner func(ctx context.Context) (string, error)
 }
 
-func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec *big.Int, providerAddress string, adminAddresses []string, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, teeKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
+func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec *big.Int, providerAddress string, adminAddresses []string, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, providerKey, sealKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
 	target, _ := url.Parse(dtona.BaseURL())
 	rp := httputil.NewSingleHostReverseProxy(target)
 
@@ -193,8 +193,8 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 	}
 
 	var broker *brokerClient
-	if brokerURL != "" && teeKey != nil {
-		broker = newBrokerClient(brokerURL, teeKey, providerAddress, voucherIntervalSec, log)
+	if brokerURL != "" && providerKey != nil {
+		broker = newBrokerClient(brokerURL, providerKey, providerAddress, voucherIntervalSec, log)
 	}
 	admins := make([]string, 0, len(adminAddresses))
 	for _, a := range adminAddresses {
@@ -203,7 +203,7 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 			admins = append(admins, strings.ToLower(a))
 		}
 	}
-	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, ackCheck: ackCheck, eventFetcher: eventFetcher, createFee: createFee, pricePerCPUPerSec: pricePerCPUPerSec, pricePerMemGBPerSec: pricePerMemGBPerSec, voucherIntervalSec: voucherIntervalSec, computePricePerSec: computePricePerSec, providerAddress: providerAddress, adminAddresses: admins, sshGatewayHost: sshGatewayHost, rdb: rdb, teeKey: teeKey, broker: broker, log: log}
+	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, ackCheck: ackCheck, eventFetcher: eventFetcher, createFee: createFee, pricePerCPUPerSec: pricePerCPUPerSec, pricePerMemGBPerSec: pricePerMemGBPerSec, voucherIntervalSec: voucherIntervalSec, computePricePerSec: computePricePerSec, providerAddress: providerAddress, adminAddresses: admins, sshGatewayHost: sshGatewayHost, rdb: rdb, sealKey: sealKey, broker: broker, log: log}
 }
 
 // IsAdmin is the exported admin check for routes registered outside this
@@ -460,7 +460,7 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		})
 		return
 	}
-	if sealed && h.teeKey == nil {
+	if sealed && h.sealKey == nil {
 		c.JSON(http.StatusNotImplemented, gin.H{"error": "sealed containers not available: TEE key not configured"})
 		return
 	}
@@ -513,7 +513,7 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	}
 
 	if sealed {
-		modified, err = InjectSeal(modified, h.teeKey, imageHash)
+		modified, err = InjectSeal(modified, h.sealKey, imageHash)
 		if err != nil {
 			if strings.HasPrefix(err.Error(), "seal_id must be") {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

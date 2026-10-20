@@ -27,9 +27,14 @@ services:
       BACKEND_TAPP_IP:         ${BACKEND_TAPP_IP:-127.0.0.1}
       BACKEND_TAPP_PORT:       ${BACKEND_TAPP_PORT:-50051}
       BACKEND_APP_NAME:        ${BACKEND_APP_NAME:-0g-sandbox}
+      # Provider identity: local = the TEE signer (new on every tapp-server
+      # restart); kms = the app's KMS key, the same on every boot (needs the
+      # node to consume a KMS; tapp-server >= 0.11.0 lists it in the evidence).
+      PROVIDER_KEY_SOURCE:     ${PROVIDER_KEY_SOURCE:-local}
       # Dev-only mock overrides (leave empty in production)
       MOCK_TEE:                ${MOCK_TEE:-}
       MOCK_APP_PRIVATE_KEY:    ${MOCK_APP_PRIVATE_KEY:-}
+      MOCK_PROVIDER_PRIVATE_KEY: ${MOCK_PROVIDER_PRIVATE_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

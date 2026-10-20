@@ -63,6 +63,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/0gfoundation/0g-sandbox/internal/chain"
+	"github.com/0gfoundation/0g-sandbox/internal/tee"
 )
 
 func main() {
@@ -306,16 +307,25 @@ func runAcknowledge(args []string) {
 	if appInfo.Owner == (common.Address{}) {
 		fatalf("app %q is not registered in TappRegistry (or was unregistered)", svc.AppId)
 	}
-	// Sanity check (v2: provider IS the TEE signer): the provider address must
-	// be an active node of the appId — that is the machine whose vouchers will
-	// charge this deposit bucket. A provider that isn't a registered node can
-	// never settle, so an ack against it would be meaningless.
-	provNode, err := tapp.GetNode(opts, svc.AppId, providerAddr)
+	// Sanity check: the provider's own key must be able to settle — it signs
+	// the vouchers that charge this deposit bucket. A node-signer provider
+	// must be an active node of the appId; a KMS provider must be bound to
+	// the app's current instance (SandboxServing isActiveProvider). A
+	// provider that can't settle makes an ack against it meaningless.
+	binding, bindErr := contract.KmsBindings(opts, providerAddr)
+	isKms := bindErr == nil && binding.Epoch.Sign() != 0
+	active, err := contract.IsActiveProvider(opts, providerAddr)
 	if err != nil {
-		fatalf("tapp.getNode: %v", err)
+		// A SandboxServing that predates isActiveProvider has only
+		// node-signer providers.
+		provNode, nerr := tapp.GetNode(opts, svc.AppId, providerAddr)
+		if nerr != nil {
+			fatalf("tapp.getNode: %v", nerr)
+		}
+		active = provNode.AddedAt.Sign() != 0
 	}
-	if provNode.AddedAt.Sign() == 0 {
-		fatalf("trust mismatch: provider %s is not an active TappRegistry node of app %q — refuse to ack",
+	if !active {
+		fatalf("trust mismatch: provider %s cannot settle for app %q (not an active TappRegistry node, or a KMS provider bound to an earlier instance of the app) — refuse to ack",
 			providerAddr.Hex(), svc.AppId)
 	}
 	nodes, err := tapp.GetNodeList(opts, svc.AppId)
@@ -343,7 +353,12 @@ func runAcknowledge(args []string) {
 	fmt.Println()
 	fmt.Printf("== Trust root (TappRegistry %s) ==\n", cf.tapp)
 	fmt.Printf("  App owner:     %s\n", appInfo.Owner.Hex())
-	fmt.Printf("  Provider node: %s   (active node of this app ✓)\n", providerAddr.Hex())
+	if isKms {
+		fmt.Printf("  Provider:      %s   (the app's KMS key, bound to this app instance ✓)\n", providerAddr.Hex())
+		fmt.Printf("                 verify it in a node's evidence: runtime_data.kms_keys, material %s\n", tee.ProviderMaterial)
+	} else {
+		fmt.Printf("  Provider node: %s   (active node of this app ✓)\n", providerAddr.Hex())
+	}
 	fmt.Printf("  Registered:    %s\n", time.Unix(appInfo.RegisteredAt.Int64(), 0).UTC().Format(time.RFC3339))
 	fmt.Printf("  Ack version:   %s\n", ackVersion.String())
 	fmt.Printf("  Compose hash:  0x%s\n", hex.EncodeToString(appInfo.ComposeHash))

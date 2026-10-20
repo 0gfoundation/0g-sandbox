@@ -94,6 +94,41 @@ contracts/
   `cmd/provider rotate` migrates the service entry; users move balances off
   the old signer via the normal refund flow.
 
+### KMS provider (`PROVIDER_KEY_SOURCE=kms`)
+- **Key:** the provider is the app's KMS key instead of the node signer:
+  `GetSecretResource(BACKEND_APP_NAME, material hex("provider"))`
+  (`tee.GetProviderKey`, `tee.ProviderMaterial`). It is the same on every boot
+  and every node of the app, so a reboot moves no balance, service or gas.
+  Default is `local`, today's model above.
+- **Two keys at runtime:**
+  - `chain.Client.ProviderKey()` signs vouchers, settlement txs and broker
+    requests.
+  - `NodeKey()`, the TEE signer, signs sealed attestations (the attestor
+    requires an active node) and the provider's endorsement.
+- **Registration:** `addOrUpdateKmsService` (`cmd/provider register --kms`)
+  needs an active node's EIP-712 endorsement of `(provider, appId)`. That
+  endorsement is served by `/api/info`.
+- **Settlement:** valid when `recovered == v.provider` and the app is still the
+  TappRegistry instance the provider was first bound to
+  (`getAppInfo(appId).registeredAt`, pinned in `kmsBindings`).
+  - The pin is why the binding outlives `removeService`. Whoever registers an
+    appId after its last node is removed gets the same KMS key but not the
+    balances or earnings.
+  - Only the contract owner can re-pin (`repinKmsProvider`), and only after a
+    TappRegistry redeploy.
+- **Readiness:** `isActiveProvider(provider)` is the readiness check shared by
+  the settler gate, the broker, `cmd/user acknowledge` and the SDK.
+- **Evidence:** tapp-server ≥ 0.11.0 lists the key in the node's evidence
+  (`runtime_data.kms_keys`). A tapp-server process lists only what it handed
+  out, so billing re-takes the key every 10 min.
+- **Prerequisites:** the KMS must run attested admission. Without it, the
+  owner could register a plain key as a node and take the provider key
+  outside any TEE.
+- **One billing instance per appId:** every node of the app derives the same
+  provider. Two billing instances would share its balance bucket and voucher
+  nonces without seeing each other's reservations or nonce counters. When
+  replacing a machine, stop the old billing first.
+
 ### Billing Flow
 1. User sends EIP-191-signed `POST /api/sandbox` → proxy authenticates, injects `daytona-owner`
    label, forwards to Daytona
