@@ -1,7 +1,7 @@
 # 0G Sandbox — 合约注册表
 
 网络:**0G 主网**(chain ID 16661)· **0G Galileo 测试网**(chain ID 16602,dev + testnet 用)。各段自述网络/浏览器/RPC。
-所有者:主网 合约/beacon = `0x87605Ec8E10Eb373C1d070e15E5d78FAC4D7621d`(2026-10-04 起;部署者为 `0x73443d…`);dev + testnet 合约/beacon = `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`。
+所有者(合约 + beacon):主网 = `0xc0603224dE8c3B910a4487368E476e19dC6127cF`,Fordefi MPC vault(2026-10-16 起;部署者为 `0x73443d…`);testnet = `0x9C58F839451EBf3e7f82442bC48E4088746380Bb`(2026-10-14 起);dev = `0x2AB7F05bA6560ef2B21Aa1b52FCc96DB51Cfa0B3`(2026-10-19 起)。
 
 
 > English version: [CONTRACTS.md](README.md)
@@ -25,6 +25,7 @@
 |------|------|------|
 | 2026-09-09 | `0x90a0f1BcaCE1A516CF4D1918178EB99E08c16f24` | 主网首次部署(v2):provider 即 TEE signer;注册/注销/提现归 owner;结算要求收款人本人签名。绑定 TappRegistry `0x5487…e612`。Owner = 部署者 `0x7344…431b`。 |
 | 2026-10-04 | (实现未变) | **所有权转移** —— 合约 `owner` 与 beacon owner 设为 `0x87605Ec8E10Eb373C1d070e15E5d78FAC4D7621d`(原 `0x7344…431b`)。实现未变。 |
+| 2026-10-16 | (实现未变) | **所有权转移** —— 合约 `owner` 与 beacon owner 设为 `0xc0603224dE8c3B910a4487368E476e19dC6127cF`(Fordefi vault;原 `0x8760…621d`)。实现未变。 |
 
 ```env
 SETTLEMENT_CONTRACT=0x650C16a491ad52dB6b7f3053bCaD650cb43d2206
@@ -53,6 +54,7 @@ CHAIN_ID=16661
 | 2026-03-10 | `0x9a3D6C66e3e6E020D8D40d851Db76D76EBfa93f2` | 移除 `settleFeesWithTEE` 中 `msg.sender == provider` 限制，TEE key 直接签结算 tx，无需 `PROVIDER_PRIVATE_KEY` |
 | 2026-07-19 | `0x47a8E809Cd81b94eD19874da73C0E3F82DD90E5C` | **v2 重新部署(新 proxy/beacon)**:provider 即 TEE signer;注册/注销/提现归 owner;结算要求收款人本人签名。绑定 TappRegistry `0x2Ce80374318B1d7Fb3345724457a182E0ad165c9`。旧 dev proxy `0x2024eB0C…E9b3` 退役(仅退款) |
 | 2026-09-05 | (实现未变) | **所有权转移** —— 合约 `owner` 与 beacon owner 设为 `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`(原 `0xB831…CEd7`)。实现未变。 |
+| 2026-10-19 | (实现未变) | **所有权转移** —— 合约 `owner` 与 beacon owner 设为 `0x2AB7F05bA6560ef2B21Aa1b52FCc96DB51Cfa0B3`(原 `0x3f1a…ef9f`)。实现未变。 |
 
 ```env
 SETTLEMENT_CONTRACT=0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c
@@ -77,6 +79,7 @@ TAPP_REGISTRY=0x2Ce80374318B1d7Fb3345724457a182E0ad165c9
 |------|------|------|
 | 2026-07-20 | `0x7a1A5FC5B1A6AC1127e2D8b63400615B2ea49C47` | **v2 重新部署(新 proxy/beacon)**:provider 即 TEE signer;注册/注销/提现归 owner;结算要求收款人本人签名。已在 chainscan verify。取代 v1 测试网 proxy `0xA07b0033…FC12c`(绑 TappRegistry `0x2Ce8…`)与 `0x3d4d8a05…cf6f`——均退役(仅退款) |
 | 2026-09-05 | (实现未变) | **所有权转移** —— 合约 `owner` 与 beacon owner 设为 `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`(原 `0xB831…CEd7`)。实现未变。 |
+| 2026-10-14 | (实现未变) | **所有权转移** —— 合约 `owner` 与 beacon owner 设为 `0x9C58F839451EBf3e7f82442bC48E4088746380Bb`(原 `0x3f1a…ef9f`)。实现未变。 |
 
 **Provider 质押:** 按节点存于 TappRegistry(不在 SandboxServing);见 registry 的 `minStakeAmount()`(当前 1 0G)。
 

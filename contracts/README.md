@@ -2,7 +2,7 @@
 
 Networks: **0G Mainnet** (chain ID 16661) · **0G Galileo Testnet** (chain ID 16602, used by dev + testnet). Each section below states its network, explorer, and RPC.
 
-Owner: mainnet contract/beacon = `0x87605Ec8E10Eb373C1d070e15E5d78FAC4D7621d` (since 2026-10-04; deployed by `0x73443d…`); dev + testnet contract/beacon = `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`.
+Owner (contract + beacon): mainnet = `0xc0603224dE8c3B910a4487368E476e19dC6127cF`, a Fordefi MPC vault (since 2026-10-16; deployed by `0x73443d…`); testnet = `0x9C58F839451EBf3e7f82442bC48E4088746380Bb` (since 2026-10-14); dev = `0x2AB7F05bA6560ef2B21Aa1b52FCc96DB51Cfa0B3` (since 2026-10-19).
 
 
 > Chinese version: [CONTRACTS.zh.md](README.zh.md)
@@ -26,6 +26,7 @@ Owner: mainnet contract/beacon = `0x87605Ec8E10Eb373C1d070e15E5d78FAC4D7621d` (s
 |------|------|-------|
 | 2026-09-09 | `0x90a0f1BcaCE1A516CF4D1918178EB99E08c16f24` | Initial mainnet deploy (v2): provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement. Bound to TappRegistry `0x5487…e612`. Owner = deployer `0x7344…431b`. |
 | 2026-10-04 | (no impl change) | **Ownership transferred** — contract `owner` + beacon owner set to `0x87605Ec8E10Eb373C1d070e15E5d78FAC4D7621d` (previously `0x7344…431b`). No implementation change. |
+| 2026-10-16 | (no impl change) | **Ownership transferred** — contract `owner` + beacon owner set to `0xc0603224dE8c3B910a4487368E476e19dC6127cF` (Fordefi vault; previously `0x8760…621d`). No implementation change. |
 
 ```env
 SETTLEMENT_CONTRACT=0x650C16a491ad52dB6b7f3053bCaD650cb43d2206
@@ -54,6 +55,7 @@ CHAIN_ID=16661
 | 2026-03-10 | `0x9a3D6C66e3e6E020D8D40d851Db76D76EBfa93f2` | Removed `msg.sender == provider` check in `settleFeesWithTEE`; TEE key signs settlement txs directly, no `PROVIDER_PRIVATE_KEY` needed |
 | 2026-07-19 | `0x47a8E809Cd81b94eD19874da73C0E3F82DD90E5C` | **v2 redeploy (new proxy/beacon)**: provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement.  Previous dev proxy `0x2024eB0C…E9b3` retired (refund-only) |
 | 2026-09-05 | (no impl change) | **Ownership transferred** — contract `owner` + beacon owner set to `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f` (previously `0xB831…CEd7`). No implementation change. |
+| 2026-10-19 | (no impl change) | **Ownership transferred** — contract `owner` + beacon owner set to `0x2AB7F05bA6560ef2B21Aa1b52FCc96DB51Cfa0B3` (previously `0x3f1a…ef9f`). No implementation change. |
 
 ```env
 SETTLEMENT_CONTRACT=0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c
@@ -78,6 +80,7 @@ TAPP_REGISTRY=0x2Ce80374318B1d7Fb3345724457a182E0ad165c9
 |------|------|-------|
 | 2026-07-20 | `0x7a1A5FC5B1A6AC1127e2D8b63400615B2ea49C47` | **v2 redeploy (new proxy/beacon)**: provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement. Verified on chainscan. Bound to TappRegistry `0x2Ce8…65c9` (repointed from `0x95a0…` via setTappRegistry right after deploy). Supersedes the v1 testnet proxies `0xA07b0033…FC12c` and `0x3d4d8a05…cf6f` — both retired (refund-only) |
 | 2026-09-05 | (no impl change) | **Ownership transferred** — contract `owner` + beacon owner set to `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f` (previously `0xB831…CEd7`). No implementation change. |
+| 2026-10-14 | (no impl change) | **Ownership transferred** — contract `owner` + beacon owner set to `0x9C58F839451EBf3e7f82442bC48E4088746380Bb` (previously `0x3f1a…ef9f`). No implementation change. |
 
 **Provider stake:** held in TappRegistry per node (not in SandboxServing); see `minStakeAmount()` on the registry (1 0G at the time of writing).
 
