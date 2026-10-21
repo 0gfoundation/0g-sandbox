@@ -26,16 +26,19 @@ type ChainClient interface {
 	// original tx later settles (double charge).
 	SubmitSettleFees(ctx context.Context, vouchers []voucher.SandboxVoucher) (*types.Transaction, error)
 	fateResolver
-	// ProviderAddress is this deployment's provider identity (= the TEE
-	// signer address); it keys the voucher queue the settler drains.
+	// ProviderAddress is this deployment's provider identity (the address of
+	// the key that signs vouchers); it keys the voucher queue the settler
+	// drains.
 	ProviderAddress() common.Address
-	// IsLocalTEEActiveNode reports whether our signer is currently a
-	// registered node of the app in TappRegistry. While false, the settler
-	// holds the queue instead of submitting: after a machine rebuild the
-	// new signer's vouchers would all settle INVALID_SIGNATURE until the
-	// operator runs add-node-onchain — holding them avoids burning gas and
+	// IsProviderActive reports whether our provider key may settle right
+	// now — for a node-signer provider, whether it is a registered node of
+	// the app in TappRegistry; for a KMS provider, whether its service is
+	// bound to the app's current instance. While false, the settler holds
+	// the queue instead of submitting: after a machine rebuild the new
+	// signer's vouchers would all settle INVALID_SIGNATURE until the operator
+	// runs add-node-onchain — holding them avoids burning gas and
 	// dead-lettering real revenue during that window.
-	IsLocalTEEActiveNode(ctx context.Context) (bool, error)
+	IsProviderActive(ctx context.Context) (bool, error)
 	// GetBalanceBatch is the read-only balance call the pre-settle sweep uses
 	// to split a backlog into an affordable aggregate + held debt (no gas).
 	GetBalanceBatch(ctx context.Context, users []common.Address, provider common.Address) ([]*big.Int, error)

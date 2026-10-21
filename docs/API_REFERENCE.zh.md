@@ -209,6 +209,11 @@ const resp = await fetch("http://<proxy>/api/sandbox", {
 {
   "contract_address":     "0x...",
   "provider_address":     "0x...",
+  "provider_key_source":  "kms",
+  "node_address":         "0x...",
+  "provider_endorsement": "0x...",
+  "provider_key_material":"70726f7669646572",
+  "provider_in_evidence": true,
   "owner_address":        "0x...",
   "app_id":               "0g-sandbox-provider",
   "chain_id":             16602,
@@ -227,9 +232,19 @@ const resp = await fetch("http://<proxy>/api/sandbox", {
 >
 > `sealed_only` 反映 provider 的 `SEALED_ONLY` 环境变量。为 `true` 时,任何未设
 > `"sealed": true` 的 create 请求都会被 HTTP 400 拒绝。
+>
+> `provider_address` 是充值、ack、请求签名绑定用的地址。它是什么,看 `provider_key_source`:
+> - **`local`:** 节点的 TEE signer,和 `node_address` 相同。tapp-server 每次重启都会变。
+> - **`kms`:** app 的 KMS key,每次启动、app 的每个节点都一样。这时 `node_address` 是节点的
+>   TEE signer,也就是 TappRegistry 里登记的那个。另外多三个字段:
+>   - `provider_endorsement`:该节点给 `addOrUpdateKmsService` 用的背书签名。
+>   - `provider_key_material`:KMS material,即 `provider` 的 hex。
+>   - `provider_in_evidence`:该节点的 tapp-server 是否把这把 key 列进了 attestation evidence。
+>     要把 provider 绑到被 attest 的 TEE 上,就在节点 `runtime_data.kms_keys` 里找这个
+>     material 的条目,核对地址等于 `provider_address`。
 
 #### `GET /api/providers`
-本 billing 实例所服务的那个 provider((节点 TEE signer 地址,运行时派生))的链上 service 数据。返回一个
+本 billing 实例所服务的那个 provider(provider key 的地址,运行时派生,见上面的 `provider_key_source`)的链上 service 数据。返回一个
 数组——目前只有一条——实时读自 `SandboxServing.services`。若该 provider 没有有效的
 service 注册(例如调用 `removeService` 之后),返回 `[]`。
 ```json

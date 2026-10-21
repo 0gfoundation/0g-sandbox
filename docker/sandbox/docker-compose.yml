@@ -24,7 +24,7 @@ services:
       # ADDITIVE comma-separated list of extra operator wallets allowed to
       # call admin-only endpoints. The appId owner (resolved on-chain from
       # BACKEND_APP_NAME) is always an admin on top of this list; the
-      # provider/settlement identity is derived from the TEE key at runtime.
+      # provider/settlement identity is derived at runtime (PROVIDER_KEY_SOURCE).
       ADMIN_ADDRESSES:         ${ADMIN_ADDRESSES:-}
       # Proxy domain — copied into sealed sandbox containers as
       # SANDBOX_PROXY_DOMAIN so bootstrap can compose its public URL.
@@ -43,9 +43,14 @@ services:
       BACKEND_TAPP_IP:         ${BACKEND_TAPP_IP:-127.0.0.1}
       BACKEND_TAPP_PORT:       ${BACKEND_TAPP_PORT:-50051}
       BACKEND_APP_NAME:        ${BACKEND_APP_NAME:-0g-sandbox}
+      # Provider identity: local = the TEE signer (new on every tapp-server
+      # restart); kms = the app's KMS key, the same on every boot (needs the
+      # node to consume a KMS; tapp-server >= 0.11.0 lists it in the evidence).
+      PROVIDER_KEY_SOURCE:     ${PROVIDER_KEY_SOURCE:-local}
       # Dev-only mock overrides (leave empty in production)
       MOCK_TEE:                ${MOCK_TEE:-}
       MOCK_APP_PRIVATE_KEY:    ${MOCK_APP_PRIVATE_KEY:-}
+      MOCK_PROVIDER_PRIVATE_KEY: ${MOCK_PROVIDER_PRIVATE_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

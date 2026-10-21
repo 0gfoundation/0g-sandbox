@@ -222,6 +222,11 @@ Server configuration and pricing.
 {
   "contract_address":     "0x...",
   "provider_address":     "0x...",
+  "provider_key_source":  "kms",
+  "node_address":         "0x...",
+  "provider_endorsement": "0x...",
+  "provider_key_material":"70726f7669646572",
+  "provider_in_evidence": true,
   "owner_address":        "0x...",
   "app_id":               "0g-sandbox-provider",
   "chain_id":             16602,
@@ -240,10 +245,23 @@ Server configuration and pricing.
 >
 > `sealed_only` reflects the provider's `SEALED_ONLY` env. When `true`, every create
 > request that doesn't set `"sealed": true` is rejected with HTTP 400.
+>
+> `provider_address` is the address to deposit to, acknowledge and bind requests to.
+> `provider_key_source` says what it is:
+> - **`local`:** the node's TEE signer, also `node_address`. It changes whenever
+>   tapp-server restarts.
+> - **`kms`:** the app's KMS key, the same on every boot and every node of the app.
+>   `node_address` is then the node's TEE signer, which TappRegistry lists. Three more
+>   fields appear:
+>   - `provider_endorsement`: that node's signature for `addOrUpdateKmsService`.
+>   - `provider_key_material`: the KMS material, hex of `provider`.
+>   - `provider_in_evidence`: whether this node's tapp-server lists the key in its
+>     attestation evidence. To pin the provider to an attested TEE, find
+>     `provider_address` in the node's `runtime_data.kms_keys` entry for that material.
 
 #### `GET /api/providers`
 On-chain service data for the provider this billing instance serves (the
-node's TEE signer address, derived at runtime). Returns an array — currently a
+provider key's address, derived at runtime — see `provider_key_source` above). Returns an array — currently a
 single entry — read live from `SandboxServing.services`. Returns `[]` if that
 provider has no active service registration (e.g. after `removeService`).
 ```json

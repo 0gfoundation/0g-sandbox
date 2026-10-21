@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -59,8 +60,10 @@ type Client struct {
 	tapp         *TappRegistry
 	tappAddr     common.Address
 	chainID      *big.Int
-	teeKey       *ecdsa.PrivateKey // signs vouchers (EIP-712, off-chain) and settlement txs
-	providerAddr common.Address    // = TEE key address: provider IS the TEE signer (v2)
+	nodeKey      *ecdsa.PrivateKey // the node's TEE signer: sealed attestations, KMS provider endorsement
+	providerKey  *ecdsa.PrivateKey // signs vouchers (EIP-712, off-chain) and settlement txs
+	providerAddr common.Address    // = providerKey's address
+	kmsProvider  bool              // providerKey is the app's KMS key, not the node signer
 
 	blockTimeMu  sync.Mutex
 	blockTimeSec float64   // cached avg block time in seconds
@@ -73,17 +76,27 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		return nil, fmt.Errorf("dial rpc: %w", err)
 	}
 
-	teeKey, err := crypto.HexToECDSA(cfg.Chain.TEEPrivateKey)
+	nodeKey, err := crypto.HexToECDSA(cfg.Chain.TEEPrivateKey)
 	if err != nil {
 		return nil, fmt.Errorf("parse tee private key: %w", err)
 	}
 
-	// Provider identity is DERIVED from the TEE key: the provider address —
-	// voucher payee (EIP-712), settler queue key, services key, balance
-	// bucket — is the TEE signer's own address. There is no separately
-	// configured provider wallet; the ledger identity rotates with the
-	// machine's TEE key and management belongs to the appId owner.
-	providerAddr := crypto.PubkeyToAddress(teeKey.PublicKey)
+	// Provider identity: the provider address — voucher payee (EIP-712),
+	// settler queue key, services key, balance bucket, settlement tx sender —
+	// is the address of the key that signs vouchers. That key is the app's
+	// KMS key when one was taken (PROVIDER_KEY_SOURCE=kms: the same on every
+	// boot), else the node's TEE signer, which rotates with tapp-server. There
+	// is no separately configured provider wallet either way; management
+	// belongs to the appId owner.
+	providerKey, kmsProvider := nodeKey, false
+	if cfg.Chain.ProviderPrivateKey != "" {
+		providerKey, err = crypto.HexToECDSA(cfg.Chain.ProviderPrivateKey)
+		if err != nil {
+			return nil, fmt.Errorf("parse provider private key: %w", err)
+		}
+		kmsProvider = true
+	}
+	providerAddr := crypto.PubkeyToAddress(providerKey.PublicKey)
 
 	addr := common.HexToAddress(cfg.Chain.ContractAddress)
 	contract, err := NewSandboxServing(addr, eth)
@@ -110,8 +123,10 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		tapp:         tapp,
 		tappAddr:     tappAddr,
 		chainID:      big.NewInt(cfg.Chain.ChainID),
-		teeKey:       teeKey,
+		nodeKey:      nodeKey,
+		providerKey:  providerKey,
 		providerAddr: providerAddr,
+		kmsProvider:  kmsProvider,
 	}, nil
 }
 
@@ -119,8 +134,22 @@ func NewClient(cfg *config.Config) (*Client, error) {
 // is bound to. Useful for dashboard / CLI to display the trust root location.
 func (c *Client) TappRegistryAddress() common.Address { return c.tappAddr }
 
-// PrivateKey returns the TEE private key (for voucher signing).
-func (c *Client) PrivateKey() *ecdsa.PrivateKey { return c.teeKey }
+// ProviderKey returns the key that signs vouchers and settlement txs, and
+// whose address is the provider.
+func (c *Client) ProviderKey() *ecdsa.PrivateKey { return c.providerKey }
+
+// NodeKey returns the node's TEE signer — the address TappRegistry lists as
+// a node of the app. It signs what must come from a node: sealed-container
+// attestations, and the endorsement of a KMS provider. Without a KMS
+// provider it is also the provider key.
+func (c *Client) NodeKey() *ecdsa.PrivateKey { return c.nodeKey }
+
+// NodeAddress returns the node's TEE signer address.
+func (c *Client) NodeAddress() common.Address { return crypto.PubkeyToAddress(c.nodeKey.PublicKey) }
+
+// KmsProvider reports whether the provider is the app's KMS key rather than
+// the node signer.
+func (c *Client) KmsProvider() bool { return c.kmsProvider }
 
 // ChainID returns the configured chain ID.
 func (c *Client) ChainID() *big.Int { return c.chainID }
@@ -128,16 +157,16 @@ func (c *Client) ChainID() *big.Int { return c.chainID }
 // ContractAddress returns the settlement contract address.
 func (c *Client) ContractAddress() common.Address { return c.contractAddr }
 
-// SettlerAddress is the EOA the settler uses to submit SettleFeesWithTEE txs.
-// In the current deployment this is the TEE key's address — the same key that
-// signs vouchers also pays for on-chain settlement.
+// SettlerAddress is the EOA the settler uses to submit SettleFeesWithTEE txs:
+// the provider key's address — the key that signs vouchers also pays for
+// on-chain settlement.
 func (c *Client) SettlerAddress() common.Address {
-	return crypto.PubkeyToAddress(c.teeKey.PublicKey)
+	return crypto.PubkeyToAddress(c.providerKey.PublicKey)
 }
 
 // ProviderAddress returns this deployment's on-chain provider identity: the
-// TEE signer's own address (provider IS the TEE signer). It keys the voucher
-// payee field, the settler queue, and all provider-bound chain lookups.
+// provider key's address (see NewClient). It keys the voucher payee field,
+// the settler queue, and all provider-bound chain lookups.
 func (c *Client) ProviderAddress() common.Address { return c.providerAddr }
 
 // BalanceAt returns the latest balance for addr. Wraps eth.BalanceAt(nil)
@@ -188,33 +217,74 @@ func (c *Client) IsActiveNode(ctx context.Context, appId string, signer common.A
 	return node.AddedAt.Sign() != 0, nil
 }
 
-// IsLocalTEEActiveNode returns true if the locally-derived TEE address is an
-// active node for the configured provider's app in TappRegistry. Returns
-// (false, nil) when the provider hasn't bound a service or the app has no
-// matching node — both legitimate "not yet ready" states.
-// Replaces the previous GetServiceTEESignerAddress accessor: trust identity
-// now lives in tapp (per-node cluster), not in a single SandboxServing field.
-func (c *Client) IsLocalTEEActiveNode(ctx context.Context) (bool, error) {
-	settler := c.SettlerAddress()
-	opts := &bind.CallOpts{Context: ctx}
-	svc, err := c.contract.Services(opts, c.providerAddr)
-	if err != nil {
-		return false, fmt.Errorf("Services: %w", err)
+// IsProviderActive reports whether this deployment's provider may settle
+// right now, by the rule settlement applies: a KMS provider must have a
+// service bound to its app's current instance (SandboxServing
+// isActiveProvider); a node-signer provider must be an active node of the
+// app its service is bound to. Returns (false, nil) when no service is bound
+// yet — a legitimate "not yet ready" state.
+func (c *Client) IsProviderActive(ctx context.Context) (bool, error) {
+	if c.kmsProvider {
+		return c.contract.IsActiveProvider(&bind.CallOpts{Context: ctx}, c.providerAddr)
 	}
-	if svc.AppId == "" {
+	// The node-signer rule, read from TappRegistry directly so it also holds
+	// against a SandboxServing that predates isActiveProvider.
+	appId, err := c.GetServiceAppId(ctx, c.providerAddr)
+	if err != nil {
+		return false, err
+	}
+	if appId == "" {
 		return false, nil
 	}
-	node, err := c.tapp.GetNode(opts, svc.AppId, settler)
-	if err != nil {
-		return false, fmt.Errorf("tapp.GetNode: %w", err)
-	}
-	return node.AddedAt.Sign() != 0, nil
+	return c.IsActiveNode(ctx, appId, c.providerAddr)
 }
 
-// transactOpts builds a *bind.TransactOpts signed by the TEE key.
+// IsActiveProvider reports whether `provider` has a service whose own key may
+// sign vouchers right now (SandboxServing isActiveProvider): the check the
+// broker applies to the providers it indexes and the requests they sign.
+// Against a SandboxServing that predates isActiveProvider (the call reverts)
+// it falls back to the node-signer rule — the only kind of provider such a
+// contract has.
+func (c *Client) IsActiveProvider(ctx context.Context, provider common.Address) (bool, error) {
+	ok, err := c.contract.IsActiveProvider(&bind.CallOpts{Context: ctx}, provider)
+	if err == nil {
+		return ok, nil
+	}
+	if !strings.Contains(err.Error(), "execution reverted") {
+		return false, fmt.Errorf("isActiveProvider: %w", err)
+	}
+	appId, aerr := c.GetServiceAppId(ctx, provider)
+	if aerr != nil {
+		return false, aerr
+	}
+	if appId == "" {
+		return false, nil
+	}
+	return c.IsActiveNode(ctx, appId, provider)
+}
+
+// KmsBinding returns the app instance a KMS provider is bound to — the
+// TappRegistry registeredAt it was pinned to (0 when `provider` is not a KMS
+// provider) and keccak256 of its appId.
+func (c *Client) KmsBinding(ctx context.Context, provider common.Address) (*big.Int, [32]byte, error) {
+	b, err := c.contract.KmsBindings(&bind.CallOpts{Context: ctx}, provider)
+	if err != nil {
+		return nil, [32]byte{}, fmt.Errorf("kmsBindings: %w", err)
+	}
+	return b.Epoch, b.AppIdHash, nil
+}
+
+// KmsProviderEndorsement is this node's endorsement of the provider key as a
+// KMS provider of `appId`: the signature addOrUpdateKmsService takes.
+// Deterministic (RFC 6979), so callers may compute it once.
+func (c *Client) KmsProviderEndorsement(appId string) ([]byte, error) {
+	return voucher.EndorseKmsProvider(c.nodeKey, c.chainID, c.contractAddr, c.providerAddr, appId)
+}
+
+// transactOpts builds a *bind.TransactOpts signed by the provider key.
 // The settlement contract no longer requires msg.sender == provider.
 func (c *Client) transactOpts(ctx context.Context) (*bind.TransactOpts, error) {
-	auth, err := bind.NewKeyedTransactorWithChainID(c.teeKey, c.chainID)
+	auth, err := bind.NewKeyedTransactorWithChainID(c.providerKey, c.chainID)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +358,7 @@ func (c *Client) ResolveTxFate(ctx context.Context, txHash common.Hash, accountN
 	if err == nil && receipt != nil {
 		return TxMined, receipt, nil
 	}
-	confirmed, nerr := c.eth.NonceAt(ctx, crypto.PubkeyToAddress(c.teeKey.PublicKey), nil)
+	confirmed, nerr := c.eth.NonceAt(ctx, c.SettlerAddress(), nil)
 	if nerr != nil {
 		return TxPending, nil, nerr
 	}

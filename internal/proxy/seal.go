@@ -31,6 +31,9 @@ const (
 //
 // The sealId is also written to label "0g-seal-id" so operators can correlate
 // a running sandbox with the attestation that was issued for it.
+//
+// teeKey is the node's TEE signer, never a KMS provider key: the attestor
+// accepts an attestation only from an active TappRegistry node of the app.
 func InjectSeal(body []byte, teeKey *ecdsa.PrivateKey, imageHash string) ([]byte, error) {
 	// Parse body once up front so we can both read a caller-provided seal_id
 	// and patch env/labels on the same map before re-marshalling.

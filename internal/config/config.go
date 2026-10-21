@@ -61,6 +61,14 @@ type ChainConfig struct {
 	ContractAddress string `mapstructure:"contract_address"`
 	TappRegistry    string `mapstructure:"tapp_registry"`
 	TEEPrivateKey   string `mapstructure:"tee_private_key"`
+	// ProviderKeySource picks the provider identity (PROVIDER_KEY_SOURCE):
+	// "local" (default) is the node's TEE signer, which tapp makes anew on
+	// every tapp-server restart; "kms" is the app's KMS key
+	// (tee.GetProviderKey), the same on every boot and node.
+	ProviderKeySource string `mapstructure:"provider_key_source"`
+	// ProviderPrivateKey is set at startup from tee.GetProviderKey when
+	// ProviderKeySource is "kms"; empty means the provider is the TEE signer.
+	ProviderPrivateKey string `mapstructure:"-"`
 	// AdminAddresses is an ADDITIVE comma-separated list of extra wallet
 	// addresses that may invoke operator-only endpoints (snapshot/registry
 	// management, archive-all, force-delete, sessions). The appId's
@@ -124,6 +132,7 @@ func Load() (*Config, error) {
 	v.SetDefault("billing.price_per_cpu_per_sec", "0")
 	v.SetDefault("billing.price_per_mem_gb_per_sec", "0")
 	v.SetDefault("billing.create_fee", "5000000")
+	v.SetDefault("chain.provider_key_source", "local")
 	v.SetDefault("redis.addr", "redis:6379")
 	v.SetDefault("daytona.registry_url", "http://registry:6000")
 	v.SetDefault("alert.dedup_window_sec", 3600)          // 1h between same-kind alerts
@@ -158,6 +167,7 @@ func Load() (*Config, error) {
 		"chain.tapp_registry":              "TAPP_REGISTRY",
 		"chain.admin_addresses":            "ADMIN_ADDRESSES",
 		"chain.chain_id":                   "CHAIN_ID",
+		"chain.provider_key_source":        "PROVIDER_KEY_SOURCE",
 		"server.port":                      "PORT",
 		"server.ssh_gateway_host":          "SSH_GATEWAY_HOST",
 		"server.broker_url":                "BROKER_URL",
@@ -266,6 +276,9 @@ func (c *Config) validate() error {
 	}
 	if c.Chain.ChainID == 0 {
 		return fmt.Errorf("required config missing: CHAIN_ID")
+	}
+	if c.Chain.ProviderKeySource != "local" && c.Chain.ProviderKeySource != "kms" {
+		return fmt.Errorf("PROVIDER_KEY_SOURCE must be \"local\" or \"kms\", got %q", c.Chain.ProviderKeySource)
 	}
 	return nil
 }

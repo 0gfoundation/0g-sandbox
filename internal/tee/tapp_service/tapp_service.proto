@@ -4,8 +4,10 @@ package tapp_service;
 
 option go_package = "github.com/0gfoundation/0g-sandbox-billing/internal/tee/tapp_service";
 
+// The subset of 0g-tapp's proto/tapp_service.proto the billing server calls.
 service TappService {
   rpc GetAppSecretKey(GetAppSecretKeyRequest) returns (GetAppSecretKeyResponse);
+  rpc GetSecretResource(GetSecretResourceRequest) returns (GetSecretResourceResponse);
 }
 
 message GetAppSecretKeyRequest {
@@ -21,4 +23,23 @@ message GetAppSecretKeyResponse {
   bytes  public_key       = 4;
   bytes  eth_address      = 5;
   bytes  x25519_public_key = 6;
+}
+
+message GetSecretResourceRequest {
+  string app_id   = 1;
+  // Hex-encoded derivation material, bound into the KMS-derived key
+  // alongside app_id. Empty derives the app's base key.
+  string material = 2;
+}
+
+message GetSecretResourceResponse {
+  bool   success     = 1;
+  string message     = 2;
+  bytes  secret      = 3;  // plaintext KMS-derived app key
+  // The secret read as a secp256k1 private key (tapp-server >= 0.11.0): its
+  // Ethereum address (20 bytes) and compressed public key (33 bytes). From
+  // this call on, the app's evidence lists the key in runtime_data.kms_keys.
+  // Empty from older servers, which do not list it.
+  bytes  eth_address = 4;
+  bytes  public_key  = 5;
 }

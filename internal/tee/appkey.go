@@ -13,9 +13,6 @@ import (
 	"strings"
 	"sync"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
 	"github.com/0gfoundation/0g-sandbox/internal/tee/tapp_service"
 )
 
@@ -88,11 +85,9 @@ func fetchMock() (*AppKey, error) {
 //	BACKEND_APP_NAME    application identifier
 func fetchGRPC(ctx context.Context) (*AppKey, error) {
 	appID := os.Getenv("BACKEND_APP_NAME")
-	target := tappTarget()
-
-	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := dialTapp()
 	if err != nil {
-		return nil, fmt.Errorf("tee: grpc dial %s: %w", target, err)
+		return nil, err
 	}
 	defer conn.Close()
 
