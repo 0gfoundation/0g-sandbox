@@ -96,7 +96,7 @@ contracts/
 
 ### KMS provider (`PROVIDER_KEY_SOURCE=kms`)
 - **Key:** the provider is the app's KMS key instead of the node signer:
-  `GetSecretResource(BACKEND_APP_NAME, material hex("provider"))`
+  `GetAppSigner(BACKEND_APP_NAME)` (fixed material hex("provider"))
   (`tee.GetProviderKey`, `tee.ProviderMaterial`). It is the same on every boot
   and every node of the app, so a reboot moves no balance, service or gas.
   Default is `local`, today's model above.
@@ -118,9 +118,13 @@ contracts/
     TappRegistry redeploy.
 - **Readiness:** `isActiveProvider(provider)` is the readiness check shared by
   the settler gate, the broker, `cmd/user acknowledge` and the SDK.
-- **Evidence:** tapp-server ≥ 0.11.0 lists the key in the node's evidence
-  (`runtime_data.kms_keys`). A tapp-server process lists only what it handed
-  out, so billing re-takes the key every 10 min.
+- **Evidence:** tapp-server ≥ 0.12.0 publishes a typed `app_signer` identity and
+  its KMS commitment in `runtime_data.identities` / `key_commitments`.
+  `GetAppSigner` reports whether measurement succeeded. tapp restores this
+  boot's metadata after process restarts; billing does not poll for secrets.
+- **AppId authorization / TLS:** see `docs/APP_IDENTITY.md`. `ATTESTOR_APP_ID`
+  discovers the stable attestor signer through the local pinned-Scan infra;
+  `TLS_ENABLED=true` serves the attested P-256 app TLS certificate directly.
 - **Prerequisites:** the KMS must run attested admission. Without it, the
   owner could register a plain key as a node and take the provider key
   outside any TEE.

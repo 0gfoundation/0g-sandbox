@@ -255,9 +255,10 @@ Server configuration and pricing.
 >   fields appear:
 >   - `provider_endorsement`: that node's signature for `addOrUpdateKmsService`.
 >   - `provider_key_material`: the KMS material, hex of `provider`.
->   - `provider_in_evidence`: whether this node's tapp-server lists the key in its
->     attestation evidence. To pin the provider to an attested TEE, find
->     `provider_address` in the node's `runtime_data.kms_keys` entry for that material.
+>   - `provider_in_evidence`: whether tapp explicitly confirmed the measured app
+>     signer. Verify the `app_signer` entry in `runtime_data.identities`, derive
+>     `provider_address` from its compressed secp256k1 public key, and check that
+>     its `key_ref` occurs in `runtime_data.key_commitments` and the replayed event log.
 
 #### `GET /api/providers`
 On-chain service data for the provider this billing instance serves (the

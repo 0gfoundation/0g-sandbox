@@ -1,45 +1,169 @@
 syntax = "proto3";
-
 package tapp_service;
+option go_package = "github.com/0gfoundation/0g-sandbox/internal/tee/tapp_service";
 
-option go_package = "github.com/0gfoundation/0g-sandbox-billing/internal/tee/tapp_service";
-
-// The subset of 0g-tapp's proto/tapp_service.proto the billing server calls.
+// Generated wire-compatible subset; see scripts/sync-tapp-proto.py.
 service TappService {
   rpc GetAppSecretKey(GetAppSecretKeyRequest) returns (GetAppSecretKeyResponse);
   rpc GetSecretResource(GetSecretResourceRequest) returns (GetSecretResourceResponse);
+  rpc GetAppSigner(GetAppSignerRequest) returns (GetAppSignerResponse);
+  rpc GetAppTlsCert(GetAppTlsCertRequest) returns (GetAppTlsCertResponse);
+  rpc ResolveAppIdentity(ResolveAppIdentityRequest) returns (ResolveAppIdentityResponse);
 }
 
 message GetAppSecretKeyRequest {
-  string app_id   = 1;
-  string key_type = 2;
-  bool   x25519   = 3;
+  string app_id = 1;    // Application identifier
+  reserved 2, 3;
+  reserved "key_type", "x25519";
 }
 
 message GetAppSecretKeyResponse {
-  bool   success          = 1;
-  string message          = 2;
-  bytes  private_key      = 3;
-  bytes  public_key       = 4;
-  bytes  eth_address      = 5;
-  bytes  x25519_public_key = 6;
+  bool success = 1;
+  string message = 2;
+
+  // Secret key material (SENSITIVE - only for local access)
+  bytes private_key = 3;        // Private key bytes (32 bytes for Ethereum)
+  bytes public_key = 4;         // Public key bytes (for verification)
+  bytes eth_address = 5;        // Ethereum address (if applicable)
+  reserved 6;
+  reserved "x25519_public_key";
 }
 
 message GetSecretResourceRequest {
-  string app_id   = 1;
-  // Hex-encoded derivation material, bound into the KMS-derived key
-  // alongside app_id. Empty derives the app's base key.
+  string app_id = 1;
+  // Optional hex-encoded derivation material, forwarded verbatim to KMS
+  // /app-key, which binds it into the derived key alongside app_id (e.g.
+  // AgenticID: chainId || contractAddress || sealId). Absent/empty derives
+  // purely from the app_id namespace, as before. From tapp-server 0.11.0 it is
+  // refused (INVALID_ARGUMENT) unless it is hex (digits in either case, with an
+  // optional 0x) of at most 256 bytes: it is written into the app's evidence.
   string material = 2;
 }
 
 message GetSecretResourceResponse {
-  bool   success     = 1;
-  string message     = 2;
-  bytes  secret      = 3;  // plaintext KMS-derived app key
-  // The secret read as a secp256k1 private key (tapp-server >= 0.11.0): its
-  // Ethereum address (20 bytes) and compressed public key (33 bytes). From
-  // this call on, the app's evidence lists the key in runtime_data.kms_keys.
-  // Empty from older servers, which do not list it.
-  bytes  eth_address = 4;
-  bytes  public_key  = 5;
+  bool success = 1;
+  string message = 2;
+  bytes secret = 3;  // plaintext KMS-derived app key
+
+  // Generic KMS bytes do not imply any signing algorithm.
+  reserved 4, 5;
+  reserved "eth_address", "compressed_public_key";
+  string commitment_scheme = 6;
+  bytes commitment = 7; // canonical 32-byte big-endian BN254 scalar field element
+  bool measured_in_evidence = 8; // true only after the measurement was written
+
+}
+
+message GetAppSignerRequest { string app_id = 1; }
+
+message GetAppSignerResponse {
+  bool success = 1;
+  string message = 2;
+  bytes secret = 3; // SENSITIVE: raw 32-byte secp256k1 scalar; socket only
+  bytes public_key = 4; // 33-byte SEC1 compressed
+  bytes eth_address = 5;
+  string key_source = 6;
+  string derivation = 7;
+  string commitment_scheme = 8;
+  bytes commitment = 9;
+  bool measured_in_evidence = 10;
+}
+
+message GetAppTlsCertRequest {
+  string app_id = 1;  // Application identifier
+}
+
+message GetAppTlsCertResponse {
+  bool success = 1;
+  string message = 2;
+
+  // The two files an ordinary TLS server wants. No crypto work left for the app.
+  string key_pem = 3;
+  string cert_pem = 4;
+
+  // "ca" when a CA signed it, "self-signed" when none is configured. Self-signed is
+  // not a lesser certificate here: what a verifier checks is the public key against
+  // the quote, not the issuer. The issuer matters only to clients that will not do
+  // that check — browsers, anything using a system trust store.
+  string issuer = 5;
+
+  // Always present, so the certificate can be reissued by whatever authority the
+  // deployer prefers (Let's Encrypt, their own CA) without asking for the key again.
+  string csr_pem = 6;
+
+  // sha256 of the SubjectPublicKeyInfo, hex. This is the value the quote's report_data
+  // commits to, so a verifier compares this against the key it was handed during the
+  // handshake. Returned here to save every caller re-deriving it.
+  string public_key_sha256 = 7;
+
+  // "local" or "kms" — where the private key came from. This decides whether the public
+  // key survives a restart, so a client choosing to pin it needs to know: "local" is
+  // bound to this instance and changes when it restarts, "kms" is stable and shared by
+  // every node of the app.
+  string key_source = 8;
+}
+
+message ResolveAppIdentityRequest {
+  uint64 chain_id = 1;
+  string registry_address = 2;
+  string app_id = 3;
+}
+
+message ResolveAppIdentityResponse {
+  bool success = 1;
+  string message = 2;
+  uint64 chain_id = 3;
+  string registry_address = 4;
+  string app_id = 5;
+  repeated ResolvedAppNodeIdentity nodes = 6;
+  // The single live trust-anchor snapshot used for this lookup.
+  string scan_url = 7;
+  string scan_public_key = 8;
+  uint64 scanned_to_block = 9;
+  int64 resolved_at = 10;
+  // Current TappRegistry registration instance, never an observation timestamp.
+  uint64 registered_at = 11;
+  // Future typed service identities / commitment binding proofs can be added
+  // as new fields. Nodes above must never be relabelled as service identities.
+}
+
+message ResolvedAppNodeIdentity {
+  // Registered, attested node signer. This is NOT a KMS-derived service signer
+  // (for example a SandboxServing provider); those require a separate binding.
+  string node_signer = 1;
+  // Management/evidence endpoint, not the app's business-service URL.
+  string tee_url = 2;
+  // SHA256 of the APP TLS SubjectPublicKeyInfo, 0x-prefixed hex. Do not use
+  // this pin for tee_url: the management listener has its own TLS identity.
+  string tls_spki_sha256 = 3;
+  int64 checked_at = 4;
+  // Acceptance deadline: min(Scan's expiry, checked_at + 300 seconds).
+  // The result is a cached observation, not proof of liveness after checked_at.
+  int64 expires_at = 5;
+  string tcb_status = 6;
+  repeated string advisories = 7;
+  string image_env = 8;
+  // Stable application signer, derived from an authenticated typed identity.
+  // Empty when the app has not acquired one; never substitute node_signer.
+  string app_signer = 9;
+  repeated ResolvedKeyIdentity identities = 10;
+  repeated ResolvedKeyCommitment key_commitments = 11;
+  // Number of commitments with no replayed event recording attested KMS transport.
+  uint64 kms_unchecked = 12;
+}
+
+message ResolvedKeyIdentity {
+  string algorithm = 1;
+  string derivation = 2;
+  ResolvedKeyCommitment key_ref = 3;
+  string key_source = 4;
+  string public_key = 5;
+  string public_key_encoding = 6;
+  string role = 7;
+}
+
+message ResolvedKeyCommitment {
+  string commitment = 1;
+  string material = 2;
+  string scheme = 3;
 }

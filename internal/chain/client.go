@@ -205,6 +205,18 @@ func (c *Client) GetAppOwner(ctx context.Context, appId string) (common.Address,
 	return info.Owner, nil
 }
 
+// GetAppInstance reads the registration epoch and owner from one registry call.
+func (c *Client) GetAppInstance(ctx context.Context, appId string) (uint64, common.Address, error) {
+	info, err := c.tapp.GetAppInfo(&bind.CallOpts{Context: ctx}, appId)
+	if err != nil {
+		return 0, common.Address{}, fmt.Errorf("tapp.GetAppInfo: %w", err)
+	}
+	if info.RegisteredAt == nil || !info.RegisteredAt.IsUint64() {
+		return 0, common.Address{}, fmt.Errorf("invalid app registration epoch")
+	}
+	return info.RegisteredAt.Uint64(), info.Owner, nil
+}
+
 // IsActiveNode returns true if `signer` is an active node for `appId` in
 // TappRegistry. Equivalent to `tapp.getNode(appId, signer).addedAt != 0`,
 // surfaced as a typed helper for downstream voucher/session verification.

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"google.golang.org/grpc"
 
 	"github.com/0gfoundation/0g-sandbox/internal/tee/tapp_service"
@@ -31,12 +32,23 @@ func TestProviderMaterialIsHexOfProvider(t *testing.T) {
 	}
 }
 
+func TestCanonicalCommitment(t *testing.T) {
+	modulus, _ := hex.DecodeString("30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001")
+	if canonicalCommitment(modulus) || canonicalCommitment(modulus[1:]) {
+		t.Fatal("noncanonical field element accepted")
+	}
+	modulus[31]--
+	if !canonicalCommitment(modulus) {
+		t.Fatal("largest canonical field element rejected")
+	}
+}
+
 func TestProviderKeyFromSecret(t *testing.T) {
 	pk, err := providerKeyFromSecret(secretOf(1), keyOneAddress.Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pk.Address != keyOneAddress || !pk.InEvidence {
+	if pk.Address != keyOneAddress || pk.InEvidence {
 		t.Fatalf("got %s in evidence=%v", pk.Address.Hex(), pk.InEvidence)
 	}
 	if pk.PrivateKeyHex != hex.EncodeToString(secretOf(1)) {
@@ -69,12 +81,16 @@ func TestProviderKeyFromSecret(t *testing.T) {
 
 type fakeTapp struct {
 	tapp_service.UnimplementedTappServiceServer
-	got *tapp_service.GetSecretResourceRequest
+	got      *tapp_service.GetAppSignerRequest
+	measured bool
 }
 
-func (f *fakeTapp) GetSecretResource(_ context.Context, req *tapp_service.GetSecretResourceRequest) (*tapp_service.GetSecretResourceResponse, error) {
+func (f *fakeTapp) GetAppSigner(_ context.Context, req *tapp_service.GetAppSignerRequest) (*tapp_service.GetAppSignerResponse, error) {
 	f.got = req
-	return &tapp_service.GetSecretResourceResponse{Success: true, Secret: secretOf(1), EthAddress: keyOneAddress.Bytes()}, nil
+	key, _ := crypto.ToECDSA(secretOf(1))
+	return &tapp_service.GetAppSignerResponse{Success: true, Secret: secretOf(1), EthAddress: keyOneAddress.Bytes(),
+		PublicKey: crypto.CompressPubkey(&key.PublicKey), KeySource: "kms", Derivation: "raw-scalar-v1",
+		Commitment: make([]byte, 32), CommitmentScheme: "poseidon-bn254-4-v1", MeasuredInEvidence: f.measured}, nil
 }
 
 func TestGetProviderKeyAsksTheKMSForTheProviderMaterial(t *testing.T) {
@@ -90,7 +106,7 @@ func TestGetProviderKeyAsksTheKMSForTheProviderMaterial(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := grpc.NewServer()
-	fake := &fakeTapp{}
+	fake := &fakeTapp{measured: true}
 	tapp_service.RegisterTappServiceServer(srv, fake)
 	go srv.Serve(lis) //nolint:errcheck
 	t.Cleanup(srv.Stop)
@@ -106,9 +122,14 @@ func TestGetProviderKeyAsksTheKMSForTheProviderMaterial(t *testing.T) {
 	if pk.Address != keyOneAddress || !pk.InEvidence {
 		t.Fatalf("got %+v", pk)
 	}
-	if fake.got.AppId != "sandbox-test" || fake.got.Material != ProviderMaterial {
-		t.Fatalf("asked for app %q material %q", fake.got.AppId, fake.got.Material)
+	if fake.got.AppId != "sandbox-test" {
+		t.Fatalf("asked for app %q", fake.got.AppId)
 	}
+	fake.measured = false
+	if _, err := GetProviderKey(context.Background()); err == nil {
+		t.Fatal("nonempty address incorrectly treated as measured evidence")
+	}
+
 }
 
 func TestGetProviderKeyMock(t *testing.T) {

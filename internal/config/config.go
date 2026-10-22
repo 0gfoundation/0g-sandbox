@@ -76,7 +76,10 @@ type ChainConfig struct {
 	// resolved from the chain at runtime (getAppInfo(BACKEND_APP_NAME).owner),
 	// never configured, so it can't drift from the on-chain truth.
 	AdminAddresses string `mapstructure:"admin_addresses"`
-	ChainID        int64  `mapstructure:"chain_id"`
+	// AttestorAppID authorizes the discovered stable app signer. Operator
+	// wallets in AdminAddresses remain separate from application identities.
+	AttestorAppID string `mapstructure:"attestor_app_id"`
+	ChainID       int64  `mapstructure:"chain_id"`
 }
 
 // AdminList returns the parsed extra admin wallet addresses (lowercased hex).
@@ -96,6 +99,7 @@ func (c *ChainConfig) AdminList() []string {
 }
 
 type ServerConfig struct {
+	TLSEnabled     bool   `mapstructure:"tls_enabled"`
 	Port           int    `mapstructure:"port"`
 	SSHGatewayHost string `mapstructure:"ssh_gateway_host"`
 	BrokerURL      string `mapstructure:"broker_url"`
@@ -166,9 +170,11 @@ func Load() (*Config, error) {
 		"chain.contract_address":           "SETTLEMENT_CONTRACT",
 		"chain.tapp_registry":              "TAPP_REGISTRY",
 		"chain.admin_addresses":            "ADMIN_ADDRESSES",
+		"chain.attestor_app_id":            "ATTESTOR_APP_ID",
 		"chain.chain_id":                   "CHAIN_ID",
 		"chain.provider_key_source":        "PROVIDER_KEY_SOURCE",
 		"server.port":                      "PORT",
+		"server.tls_enabled":               "TLS_ENABLED",
 		"server.ssh_gateway_host":          "SSH_GATEWAY_HOST",
 		"server.broker_url":                "BROKER_URL",
 		"server.sealed_only":               "SEALED_ONLY",
@@ -279,6 +285,9 @@ func (c *Config) validate() error {
 	}
 	if c.Chain.ProviderKeySource != "local" && c.Chain.ProviderKeySource != "kms" {
 		return fmt.Errorf("PROVIDER_KEY_SOURCE must be \"local\" or \"kms\", got %q", c.Chain.ProviderKeySource)
+	}
+	if c.Chain.AttestorAppID != "" && (!c.Server.TLSEnabled || c.Chain.ProviderKeySource != "kms") {
+		return fmt.Errorf("ATTESTOR_APP_ID requires TLS_ENABLED=true and PROVIDER_KEY_SOURCE=kms")
 	}
 	return nil
 }
