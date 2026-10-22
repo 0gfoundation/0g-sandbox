@@ -79,21 +79,32 @@ USER_KEY=0x<your-private-key> go run ./cmd/user/ exec \
 
 ```json
 {
-  "action":      "create",
+  "action":      "POST:/api/sandbox",
+  "body_sha256": "0x6f2a…",
   "expires_at":  1709500000,
   "nonce":       "a3f8c2d1e4b7069512345678abcdef01",
   "payload":     {},
+  "provider":    "0x47a8C0Ca5cCEC440b17fd859Dee6a72438aCc31e",
   "resource_id": ""
 }
 ```
 
 | 字段 | 类型 | 规则 |
 |------|------|------|
-| `action` | string | 操作名:`create`、`list`、`stop`、`delete`、`toolbox` 等 |
+| `action` | string | 请求的 `METHOD:path`:大写方法 + provider 收到的 API 路径(`/api/...`),有查询参数时带上 `?query`,例如 `POST:/api/sandbox/<id>/stop`。旧客户端签的是动词(`create`、`list` 等),这种写法只在不带 `body_sha256` 的消息里被接受。 |
+| `body_sha256` | string | 实际发送的请求体字节的 SHA-256(`0x` 开头的 hex);没有请求体时是空字节的哈希(`0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`)。它把签名绑定到这一个请求:`action` 或哈希与实际请求不符时,服务端返回 `401`。只有兼容旧客户端的消息可以省略。 |
 | `expires_at` | int64 | Unix 时间戳(秒)。必须 `> now` 且 `≤ now + 5 分钟`。 |
 | `nonce` | string | 32 字符 hex(16 随机字节)。每个 nonce 只接受一次(存在 Redis 直到过期)。 |
-| `payload` | JSON | 请求体 JSON 对象。无请求体时用 `{}`。 |
-| `resource_id` | string | 资源相关操作的沙箱 ID;`create` / `list` 用空字符串。 |
+| `payload` | JSON | 仅供参考,服务端不校验(请求体由 `body_sha256` 绑定)。填请求体 JSON 或 `{}`。 |
+| `provider` | string | 目标 provider 的链上地址(`GET /api/info` 的 `provider_address`),把签名绑定到这个 provider。兼容旧客户端时**整个省略该字段**(不要填 `""`)。 |
+| `resource_id` | string | 资源相关操作的沙箱 ID;`create` / `list` 用空字符串。填写时必须等于请求路径里的 `:id`。 |
+
+> **迁移 — `AUTH_STRICT` 与 `AUTH_REQUIRE_REQUEST_BINDING`。** provider 设置
+> `AUTH_STRICT=true` 后,不带 `provider`(以及 `:id` 路由上不带 `resource_id`)的消息
+> 会被拒绝。带 `body_sha256` 的消息无论服务端处于什么模式都会被校验;不带它的消息
+> 在 provider 设置 `AUTH_REQUIRE_REQUEST_BINDING=true` 之前仍被接受,之后返回
+> `401`。两个开关相互独立。所有官方客户端(cmd/user、cmd/provider、TS SDK、网页端)
+> 都已发送这三项绑定。
 
 ### 签名算法
 
@@ -115,6 +126,7 @@ USER_KEY=0x<your-private-key> go run ./cmd/user/ exec \
 ```go
 import (
     "crypto/rand"
+    "crypto/sha256"
     "encoding/base64"
     "encoding/hex"
     "encoding/json"
@@ -126,23 +138,29 @@ import (
 
 type signedRequest struct {
     Action     string          `json:"action"`
+    BodySHA256 string          `json:"body_sha256"`
     ExpiresAt  int64           `json:"expires_at"`
     Nonce      string          `json:"nonce"`
     Payload    json.RawMessage `json:"payload"`
+    Provider   string          `json:"provider,omitempty"`
     ResourceID string          `json:"resource_id"`
 }
 
-func signRequest(privKey *ecdsa.PrivateKey, action, resourceID string, payload json.RawMessage) (xSignedMessage, xSignature, xWalletAddr string) {
+// path 是 API 路径("/api/...",含查询参数);body 是实际发送的字节(无请求体传 nil)。
+func signRequest(privKey *ecdsa.PrivateKey, provider, method, path, resourceID string, body []byte) (xSignedMessage, xSignature, xWalletAddr string) {
     addr := crypto.PubkeyToAddress(privKey.PublicKey)
 
     nonceBuf := make([]byte, 16)
     rand.Read(nonceBuf)
+    bodySum := sha256.Sum256(body)
 
     req := signedRequest{
-        Action:     action,
+        Action:     method + ":" + path,
+        BodySHA256: "0x" + hex.EncodeToString(bodySum[:]),
         ExpiresAt:  time.Now().Add(3 * time.Minute).Unix(),
         Nonce:      hex.EncodeToString(nonceBuf),
-        Payload:    payload,
+        Payload:    json.RawMessage(`{}`),
+        Provider:   provider,
         ResourceID: resourceID,
     }
     msgBytes, _ := json.Marshal(req)
@@ -164,11 +182,20 @@ func signRequest(privKey *ecdsa.PrivateKey, action, resourceID string, payload j
 ```js
 import { ethers } from "ethers";
 
-async function signRequest(wallet, action, resourceId, payload = {}) {
+// path:API 路径("/api/...",含查询参数);bodyStr:实际发送的请求体(无则 "")。
+async function signRequest(wallet, provider, method, path, resourceId, bodyStr = "") {
   const nonce = ethers.hexlify(ethers.randomBytes(16)).slice(2); // 32 hex chars
   const expiresAt = Math.floor(Date.now() / 1000) + 180; // 3 min
 
-  const req = { action, expires_at: expiresAt, nonce, payload, resource_id: resourceId };
+  const req = {
+    action: `${method}:${path}`,
+    body_sha256: ethers.sha256(ethers.toUtf8Bytes(bodyStr)),
+    expires_at: expiresAt,
+    nonce,
+    payload: {},
+    provider,
+    resource_id: resourceId,
+  };
   const msgBytes = new TextEncoder().encode(JSON.stringify(req));
 
   // ethers.signMessage prepends the EIP-191 prefix automatically
@@ -183,11 +210,12 @@ async function signRequest(wallet, action, resourceId, payload = {}) {
 
 // Usage
 const wallet = new ethers.Wallet("0x<private-key>");
-const headers = await signRequest(wallet, "create", "", {});
+const body = JSON.stringify({ snapshot: "0g-ubuntu22" });
+const headers = await signRequest(wallet, "0x<provider_address>", "POST", "/api/sandbox", "", body);
 const resp = await fetch("http://<proxy>/api/sandbox", {
   method: "POST",
   headers: { ...headers, "Content-Type": "application/json" },
-  body: JSON.stringify({}),
+  body,
 });
 ```
 
@@ -260,7 +288,7 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 
 #### `POST /api/sandbox` — 创建沙箱
 
-**Headers:** 认证头(action = `"create"`,resource_id = `""`)
+**Headers:** 认证头(action = `"POST:/api/sandbox"`,resource_id = `""`)
 
 **Body:**
 ```json
@@ -305,7 +333,7 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 
 #### `GET /api/sandbox` — 列出沙箱
 
-**Headers:** 认证头(action = `"list"`,resource_id = `""`)
+**Headers:** 认证头(action = `"GET:/api/sandbox"`,resource_id = `""`)
 
 **响应 `200`:** 过滤到调用者自己的沙箱对象数组。
 
@@ -315,7 +343,7 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 
 #### `GET /api/sandbox/:id` — 获取沙箱
 
-**Headers:** 认证头(action = `"list"`,resource_id = `":id"`)
+**Headers:** 认证头(action = `"GET:/api/sandbox/:id"`,resource_id = `":id"`)
 
 **响应 `200`:** Sandbox 对象
 **响应 `403`:** 非 owner
@@ -324,7 +352,7 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 
 #### `POST /api/sandbox/:id/stop` — 停止沙箱
 
-**Headers:** 认证头(action = `"stop"`,resource_id = `":id"`)
+**Headers:** 认证头(action = `"POST:/api/sandbox/:id/stop"`,resource_id = `":id"`)
 
 **响应 `200`:** 来自 Daytona 的响应
 **计费:** 为上次 voucher 以来的时长出一张最终 compute voucher。
@@ -333,7 +361,7 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 
 #### `DELETE /api/sandbox/:id` — 删除沙箱
 
-**Headers:** 认证头(action = `"delete"`,resource_id = `":id"`)
+**Headers:** 认证头(action = `"DELETE:/api/sandbox/:id"`,resource_id = `":id"`)
 
 **响应 `200`:** 来自 Daytona 的响应
 **计费:** 删除前出一张最终 compute voucher。
@@ -342,7 +370,7 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 
 #### `POST /api/sandbox/:id/start` — 启动已停止的沙箱
 
-**Headers:** 认证头(action = `"start"`,resource_id = `":id"`)
+**Headers:** 认证头(action = `"POST:/api/sandbox/:id/start"`,resource_id = `":id"`)
 
 **响应 `200`:** 来自 Daytona 的响应
 **响应 `402`:** 未 acknowledge TEE signer
@@ -352,7 +380,7 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 
 #### `POST /api/sandbox/:id/archive` — 归档沙箱
 
-**Headers:** 认证头(action = `"archive"`,resource_id = `":id"`)
+**Headers:** 认证头(action = `"POST:/api/sandbox/:id/archive"`,resource_id = `":id"`)
 
 **响应 `200`:** 来自 Daytona 的响应
 **计费:** 出一张最终 compute voucher;关闭 compute session。
@@ -361,7 +389,7 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 
 #### `PUT /api/sandbox/:id/labels` — 更新标签
 
-**Headers:** 认证头(action = `"labels"`,resource_id = `":id"`)
+**Headers:** 认证头(action = `"PUT:/api/sandbox/:id/labels"`,resource_id = `":id"`)
 
 **Body:**
 ```json
@@ -373,7 +401,7 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 
 #### `POST /api/sandbox/:id/ssh-access` — 获取 SSH 访问令牌
 
-**Headers:** 认证头(action = `"ssh-access"`,resource_id = `":id"`)
+**Headers:** 认证头(action = `"POST:/api/sandbox/:id/ssh-access"`,resource_id = `":id"`)
 
 **响应 `200`:**
 ```json
@@ -388,7 +416,7 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 
 #### `POST /api/sandbox/:id/ensure-billing` — 确保计费 session 存在
 
-**Headers:** 认证头(action = `"ensure-billing"`,resource_id = `":id"`)
+**Headers:** 认证头(action = `"POST:/api/sandbox/:id/ensure-billing"`,resource_id = `":id"`)
 
 幂等。为那些 `OnCreate` 钩子可能没触发的沙箱(例如客户端在 2xx 响应到达前断开)确保存在计费 session。
 
@@ -407,7 +435,7 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 
 #### `GET /api/events` — 查询结算事件
 
-**Headers:** 认证头(action = `"list"`,resource_id = `""`)
+**Headers:** 认证头(action = `"GET:/api/events"`,resource_id = `""`)
 
 **Query 参数:** `?lookback=<blocks>`(默认 ≈ 43200,按 2s/块约 24h;`0` = 全部历史)
 
@@ -435,7 +463,7 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 
 #### `GET /api/sessions` — 活跃计费 session(仅管理员)
 
-**Headers:** 认证头(action = `"list"`,resource_id = `""`)
+**Headers:** 认证头(action = `"GET:/api/sessions"`,resource_id = `""`)
 
 调用者钱包必须在 `ADMIN_ADDRESSES` 中。
 
@@ -514,7 +542,7 @@ toolbox 代理把请求转发给沙箱内的 Daytona toolbox,并做 owner 校验
 
 **注意:** 对 sealed 沙箱(`0g-sealed: "true"`)返回 `403 Forbidden`。
 
-**认证头:** action = `"toolbox"`,resource_id = `"{sandboxId}"`
+**认证头:** action = `"<METHOD>:/api/toolbox/{sandboxId}/toolbox/<path>"`,resource_id = `"{sandboxId}"`
 
 支持所有 HTTP 方法(GET、POST、PUT、DELETE)。
 

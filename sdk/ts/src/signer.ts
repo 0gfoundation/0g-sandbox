@@ -90,13 +90,21 @@ export interface SignOptions {
    * while the server runs with AUTH_STRICT off).
    */
   provider?: string;
+  /**
+   * 0x-hex SHA-256 of the exact HTTP body bytes (of zero bytes when there is
+   * no body). With it, `action` must be `METHOD:path[?query]` and the server
+   * rejects the signature for any other request. Omitted → legacy message
+   * (accepted only while the server runs with AUTH_REQUIRE_REQUEST_BINDING off).
+   */
+  bodySha256?: string;
 }
 
 /**
  * Build the three auth headers the billing proxy expects. The signed message
- * is `{action, expires_at, nonce, payload, resource_id}` (alphabetical key
- * order, compact JSON — byte-compatible with cmd/user). The server verifies
- * the signature over the exact bytes sent in X-Signed-Message.
+ * is `{action, body_sha256, expires_at, nonce, payload, provider, resource_id}`
+ * (alphabetical key order, compact JSON; body_sha256 and provider only when
+ * given). The server verifies the signature over the exact bytes sent in
+ * X-Signed-Message.
  */
 export async function buildAuthHeaders(
   signer: Signer,
@@ -113,6 +121,7 @@ export async function buildAuthHeaders(
   // server, which signs/verifies the exact bytes. Keep it alphabetical.
   const message = JSON.stringify({
     action,
+    ...(opts.bodySha256 ? { body_sha256: opts.bodySha256 } : {}),
     expires_at: expiresAt,
     nonce,
     payload: payload ?? {},

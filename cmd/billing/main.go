@@ -480,8 +480,9 @@ func main() {
 	// Anything mounted here should be derivable from public chain RPC.
 	apiPublic := r.Group("/api")
 	api := r.Group("/api", auth.MiddlewareWithOptions(rdb, auth.Options{
-		ProviderAddress: providerHex,
-		Strict:          cfg.Server.AuthStrict,
+		ProviderAddress:       providerHex,
+		Strict:                cfg.Server.AuthStrict,
+		RequireRequestBinding: cfg.Server.AuthRequireRequestBinding,
 	}))
 	proxyHandler := proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec, providerHex, cfg.Chain.AdminList(), cfg.Server.SSHGatewayHost, rdb, log, cfg.Server.BrokerURL, onchain.PrivateKey(), cfg.Billing.VoucherIntervalSec)
 	proxyHandler.SealedOnly = cfg.Server.SealedOnly

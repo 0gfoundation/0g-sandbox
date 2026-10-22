@@ -102,7 +102,6 @@ export class SandboxApi {
     if (opts.publicPorts?.length) body.publicPorts = opts.publicPorts;
 
     const info = await this.httpClient.signed<SandboxInfo>('POST', '/api/sandbox', {
-      action: 'create',
       payload: body,
       body,
     });
@@ -110,14 +109,11 @@ export class SandboxApi {
   }
 
   async list(): Promise<SandboxInfo[]> {
-    return this.httpClient.signed<SandboxInfo[]>('GET', '/api/sandbox', { action: 'list' });
+    return this.httpClient.signed<SandboxInfo[]>('GET', '/api/sandbox');
   }
 
   async get(id: string): Promise<Sandbox> {
-    const info = await this.httpClient.signed<SandboxInfo>('GET', `/api/sandbox/${id}`, {
-      action: 'get',
-      resourceId: id,
-    });
+    const info = await this.httpClient.signed<SandboxInfo>('GET', `/api/sandbox/${id}`, { resourceId: id });
     return new Sandbox(this.httpClient, info, this.preview, this.providerAddress);
   }
 }
@@ -183,7 +179,6 @@ export class Sandbox {
   async toolbox<T = unknown>(method: string, path: string, body?: unknown, opts?: { timeoutMs?: number }): Promise<T> {
     const rel = path.startsWith('/') ? path : '/' + path;
     return this.httpClient.signed<T>(method, `/api/toolbox/${this.id}/toolbox${rel}`, {
-      action: 'toolbox',
       resourceId: this.id,
       body,
       timeoutMs: opts?.timeoutMs,
@@ -191,20 +186,20 @@ export class Sandbox {
   }
 
   async start(): Promise<void> {
-    await this.lifecycle('POST', `/api/sandbox/${this.id}/start`, 'start');
+    await this.lifecycle('POST', `/api/sandbox/${this.id}/start`);
   }
 
   /** Stop the sandbox. Filesystem is preserved (auto-backup); billing session closes. */
   async stop(): Promise<void> {
-    await this.lifecycle('POST', `/api/sandbox/${this.id}/stop`, 'stop');
+    await this.lifecycle('POST', `/api/sandbox/${this.id}/stop`);
   }
 
   async delete(): Promise<void> {
-    await this.lifecycle('DELETE', `/api/sandbox/${this.id}`, 'delete');
+    await this.lifecycle('DELETE', `/api/sandbox/${this.id}`);
   }
 
   async archive(): Promise<void> {
-    await this.lifecycle('POST', `/api/sandbox/${this.id}/archive`, 'archive');
+    await this.lifecycle('POST', `/api/sandbox/${this.id}/archive`);
   }
 
   /**
@@ -212,11 +207,11 @@ export class Sandbox {
    * a transition while the previous one is still settling, e.g. delete right
    * after stop.
    */
-  private async lifecycle(method: string, path: string, action: string): Promise<void> {
+  private async lifecycle(method: string, path: string): Promise<void> {
     const deadline = Date.now() + 60_000;
     for (;;) {
       try {
-        await this.httpClient.signed(method, path, { action, resourceId: this.id });
+        await this.httpClient.signed(method, path, { resourceId: this.id });
         return;
       } catch (err) {
         if (err instanceof SandboxSDKError && err.httpStatus === 409 && Date.now() < deadline) {
@@ -230,17 +225,11 @@ export class Sandbox {
 
   /** SSH access token. Rejects SEALED_FORBIDDEN on sealed sandboxes. */
   async sshAccess(): Promise<Record<string, unknown>> {
-    return this.httpClient.signed('POST', `/api/sandbox/${this.id}/ssh-access`, {
-      action: 'ssh-access',
-      resourceId: this.id,
-    });
+    return this.httpClient.signed('POST', `/api/sandbox/${this.id}/ssh-access`, { resourceId: this.id });
   }
 
   async refresh(): Promise<SandboxInfo> {
-    this.info = await this.httpClient.signed<SandboxInfo>('GET', `/api/sandbox/${this.id}`, {
-      action: 'get',
-      resourceId: this.id,
-    });
+    this.info = await this.httpClient.signed<SandboxInfo>('GET', `/api/sandbox/${this.id}`, { resourceId: this.id });
     return this.info;
   }
 }
