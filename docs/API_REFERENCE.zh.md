@@ -239,9 +239,10 @@ const resp = await fetch("http://<proxy>/api/sandbox", {
 >   TEE signer,也就是 TappRegistry 里登记的那个。另外多三个字段:
 >   - `provider_endorsement`:该节点给 `addOrUpdateKmsService` 用的背书签名。
 >   - `provider_key_material`:KMS material,即 `provider` 的 hex。
->   - `provider_in_evidence`:该节点的 tapp-server 是否把这把 key 列进了 attestation evidence。
->     要把 provider 绑到被 attest 的 TEE 上,就在节点 `runtime_data.kms_keys` 里找这个
->     material 的条目,核对地址等于 `provider_address`。
+>   - `provider_in_evidence`:tapp 是否明确确认 app signer 已被度量。验证
+>     `runtime_data.identities` 中的 `app_signer` 条目，从其压缩 secp256k1 公钥派生
+>     `provider_address`，并核对 `key_ref` 同时出现在 `runtime_data.key_commitments`
+>     和重放通过的 event log 中。
 
 #### `GET /api/providers`
 本 billing 实例所服务的那个 provider(provider key 的地址,运行时派生,见上面的 `provider_key_source`)的链上 service 数据。返回一个

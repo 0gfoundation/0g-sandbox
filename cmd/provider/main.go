@@ -292,7 +292,7 @@ func registerKms(infoBase, rpc string, chainID int64, contractHex, keyHex, appId
 	fmt.Printf("Mem price/min:      %s neuron/GB\n", pricePerMemGBBig.String())
 	fmt.Printf("Create fee:         %s neuron\n", createFeeBig.String())
 	if !info.ProviderInEvidence {
-		fmt.Println("\nwarn: the node's tapp-server does not list the provider key in its evidence (needs tapp-server >= 0.11.0);")
+		fmt.Println("\nwarn: the node's tapp-server has not confirmed a measured app signer (needs tapp-server >= 0.12.0);")
 		fmt.Println("      until it does, nothing but this endorsement ties the provider to the TEE.")
 	}
 
@@ -313,7 +313,7 @@ func registerKms(infoBase, rpc string, chainID int64, contractHex, keyHex, appId
 	}
 	fmt.Println("      confirmed ✓")
 	fmt.Printf("\nDone. Provider (KMS key) address: %s — fund it for settlement gas.\n", provider.Hex())
-	fmt.Printf("Clients pin it through the node's evidence: runtime_data.kms_keys, material %s.\n", info.ProviderKeyMaterial)
+	fmt.Printf("Clients verify runtime_data.identities (role app_signer) and key_commitments, material %s.\n", info.ProviderKeyMaterial)
 }
 
 // ── remove-service ────────────────────────────────────────────────────────────

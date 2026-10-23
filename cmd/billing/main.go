@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -133,7 +134,6 @@ func main() {
 			log.Fatal("failed to endorse the KMS provider key", zap.Error(err))
 		}
 		providerEndorsement = "0x" + hex.EncodeToString(sig)
-		go keepProviderKeyListed(ctx, providerAddr, tee.GetProviderKey, providerKeyRefreshInterval, &providerKeyInEvidence, log)
 	}
 	// Drift check: the service this signer is registered under must be bound
 	// to the same appId we fetch our TEE key for. A mismatch means the key
@@ -549,6 +549,10 @@ func main() {
 	proxyHandler := proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec, providerHex, cfg.Chain.AdminList(), cfg.Server.SSHGatewayHost, rdb, log, cfg.Server.BrokerURL, onchain.ProviderKey(), onchain.NodeKey(), cfg.Billing.VoucherIntervalSec)
 	proxyHandler.SealedOnly = cfg.Server.SealedOnly
 	proxyHandler.AppOwner = appOwnerFn
+	if cfg.Chain.AttestorAppID != "" {
+		proxyHandler.AppAdmin = newAttestorAuthorizer(uint64(cfg.Chain.ChainID), cfg.Chain.TappRegistry,
+			cfg.Chain.AttestorAppID, rdb, onchain, tee.ResolveAppIdentity)
+	}
 	proxyHandler.RegisterPublic(apiPublic)
 	proxyHandler.Register(api)
 	go runStopHandler(ctx, stopCh, dtona, rdb, alerter, log, proxyHandler.BrokerDeregister)
@@ -819,10 +823,21 @@ func main() {
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler: r,
 	}
+	if cfg.Server.TLSEnabled {
+		cert, err := tee.AppTLSCertificate(ctx, backendAppName)
+		if err != nil {
+			log.Fatal("app TLS initialization failed", zap.Error(err))
+		}
+		srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}
+	}
 
 	go func() {
-		log.Info("HTTP server starting", zap.Int("port", cfg.Server.Port))
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Info("HTTP server starting", zap.Int("port", cfg.Server.Port), zap.Bool("tls", cfg.Server.TLSEnabled))
+		serve := srv.ListenAndServe
+		if cfg.Server.TLSEnabled {
+			serve = func() error { return srv.ListenAndServeTLS("", "") }
+		}
+		if err := serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal("HTTP server error", zap.Error(err))
 		}
 	}()

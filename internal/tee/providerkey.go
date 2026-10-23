@@ -1,6 +1,7 @@
 package tee
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -28,20 +29,18 @@ type ProviderKey struct {
 	// PrivateKeyHex is the secp256k1 private key, lowercase hex without "0x".
 	PrivateKeyHex string
 	Address       common.Address
-	// InEvidence reports whether tapp-server lists the key in the app's
-	// attestation evidence (runtime_data.kms_keys). Servers ≥0.11.0 do, and
-	// say so by returning the key's address; with an older one, nothing ties
-	// the address to the TEE but the node's on-chain endorsement.
+	// InEvidence is true only when GetAppSigner explicitly confirms that the
+	// typed identity and commitment were recorded. A returned address alone
+	// never establishes that a key appears in evidence.
 	InEvidence bool
 }
 
 // GetProviderKey takes the provider key from the KMS through the tapp-daemon
-// (GetSecretResource under ProviderMaterial), or from
+// (GetAppSigner under ProviderMaterial), or from
 // MOCK_PROVIDER_PRIVATE_KEY when MOCK_TEE is set.
 //
-// Not cached: a tapp-server process lists in the evidence only the keys it
-// has itself handed out, so after a tapp-server restart the key is listed
-// again only once the app asks again — callers repeat the call periodically.
+// tapp restores this boot's measured identities after process restarts; no
+// periodic secret fetch is required to keep the identity in evidence.
 func GetProviderKey(ctx context.Context) (*ProviderKey, error) {
 	if os.Getenv("MOCK_TEE") != "" {
 		return providerKeyMock()
@@ -72,21 +71,41 @@ func providerKeyGRPC(ctx context.Context) (*ProviderKey, error) {
 	}
 	defer conn.Close()
 
-	resp, err := tapp_service.NewTappServiceClient(conn).GetSecretResource(ctx, &tapp_service.GetSecretResourceRequest{
-		AppId:    appID,
-		Material: ProviderMaterial,
+	resp, err := tapp_service.NewTappServiceClient(conn).GetAppSigner(ctx, &tapp_service.GetAppSignerRequest{
+		AppId: appID,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("tee: GetSecretResource: %w", err)
+		return nil, fmt.Errorf("tee: GetAppSigner: %w", err)
 	}
 	if !resp.Success {
-		return nil, fmt.Errorf("tee: GetSecretResource failed: %s", resp.Message)
+		return nil, fmt.Errorf("tee: GetAppSigner failed: %s", resp.Message)
 	}
-	return providerKeyFromSecret(resp.Secret, resp.EthAddress)
+	if resp.KeySource != "kms" || resp.Derivation != "raw-scalar-v1" || len(resp.EthAddress) != common.AddressLength {
+		return nil, fmt.Errorf("tee: unexpected app signer source or derivation")
+	}
+	pk, err := providerKeyFromSecret(resp.Secret, resp.EthAddress)
+	if err != nil {
+		return nil, err
+	}
+	publicKey, err := crypto.DecompressPubkey(resp.PublicKey)
+	if err != nil || crypto.PubkeyToAddress(*publicKey) != pk.Address {
+		return nil, fmt.Errorf("tee: app signer public key does not match the secret/address")
+	}
+	if !resp.MeasuredInEvidence || !canonicalCommitment(resp.Commitment) || resp.CommitmentScheme != "poseidon-bn254-4-v1" {
+		return nil, fmt.Errorf("tee: app signer was not recorded in attestation evidence")
+	}
+	pk.InEvidence = true
+	return pk, nil
+}
+
+func canonicalCommitment(commitment []byte) bool {
+	// Poseidon output is a canonical BN254 scalar, encoded as 32-byte big endian.
+	modulus, _ := hex.DecodeString("30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001")
+	return len(commitment) == 32 && bytes.Compare(commitment, modulus) < 0
 }
 
 // providerKeyFromSecret reads a KMS secret as a secp256k1 private key — the
-// convention tapp's evidence relies on — and checks it against the address
+// dedicated application-signer convention — and checks it against the address
 // tapp-server computed from the same secret, when it sent one.
 func providerKeyFromSecret(secret, ethAddress []byte) (*ProviderKey, error) {
 	if len(secret) != 32 {
@@ -105,7 +124,6 @@ func providerKeyFromSecret(secret, ethAddress []byte) (*ProviderKey, error) {
 			return nil, fmt.Errorf("tee: tapp-server lists the KMS key as 0x%x, but the secret is %s's",
 				ethAddress, pk.Address.Hex())
 		}
-		pk.InEvidence = true
 	}
 	return pk, nil
 }

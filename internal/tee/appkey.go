@@ -93,9 +93,7 @@ func fetchGRPC(ctx context.Context) (*AppKey, error) {
 
 	client := tapp_service.NewTappServiceClient(conn)
 	resp, err := client.GetAppSecretKey(ctx, &tapp_service.GetAppSecretKeyRequest{
-		AppId:   appID,
-		KeyType: "ethereum",
-		X25519:  true,
+		AppId: appID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("tee: GetAppSecretKey: %w", err)

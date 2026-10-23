@@ -126,6 +126,10 @@ type Handler struct {
 	// top of adminAddresses — resolved live so it can never drift from the
 	// on-chain truth. nil (tests, mock setups) = static admin list only.
 	AppOwner func(ctx context.Context) (string, error)
+	// AppAdmin authenticates the stable app signer of a configured attestor
+	// appId, with current registration-instance checks. It does not authorize
+	// arbitrary node signers or change the owner-only workload routes.
+	AppAdmin func(ctx context.Context, wallet string) (bool, error)
 }
 
 func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec *big.Int, providerAddress string, adminAddresses []string, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, providerKey, sealKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
@@ -230,9 +234,21 @@ func (h *Handler) isAdmin(wallet string) bool {
 		if owner, err := h.AppOwner(ctx); err == nil && owner == target {
 			return true
 		} else if err != nil {
-			h.log.Warn("isAdmin: app owner lookup failed; falling back to static admin list", zap.Error(err))
+			h.log.Warn("isAdmin: app owner lookup failed", zap.Error(err))
 		}
 	}
+	if h.AppAdmin != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 125*time.Second)
+		allowed, err := h.AppAdmin(ctx, target)
+		cancel()
+		if err == nil && allowed {
+			return true
+		}
+		if err != nil {
+			h.log.Warn("isAdmin: attestor identity lookup failed", zap.Error(err))
+		}
+	}
+
 	return false
 }
 

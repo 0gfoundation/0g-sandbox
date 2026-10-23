@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v6.32.0
-// source: internal/tee/tapp_service/tapp_service.proto
+// source: tapp_service.proto
 
 package tapp_service
 
@@ -23,16 +23,14 @@ const (
 
 type GetAppSecretKeyRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	AppId         string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
-	KeyType       string                 `protobuf:"bytes,2,opt,name=key_type,json=keyType,proto3" json:"key_type,omitempty"`
-	X25519        bool                   `protobuf:"varint,3,opt,name=x25519,proto3" json:"x25519,omitempty"`
+	AppId         string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"` // Application identifier
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetAppSecretKeyRequest) Reset() {
 	*x = GetAppSecretKeyRequest{}
-	mi := &file_internal_tee_tapp_service_tapp_service_proto_msgTypes[0]
+	mi := &file_tapp_service_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -44,7 +42,7 @@ func (x *GetAppSecretKeyRequest) String() string {
 func (*GetAppSecretKeyRequest) ProtoMessage() {}
 
 func (x *GetAppSecretKeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_tee_tapp_service_tapp_service_proto_msgTypes[0]
+	mi := &file_tapp_service_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -57,7 +55,7 @@ func (x *GetAppSecretKeyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAppSecretKeyRequest.ProtoReflect.Descriptor instead.
 func (*GetAppSecretKeyRequest) Descriptor() ([]byte, []int) {
-	return file_internal_tee_tapp_service_tapp_service_proto_rawDescGZIP(), []int{0}
+	return file_tapp_service_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *GetAppSecretKeyRequest) GetAppId() string {
@@ -67,35 +65,21 @@ func (x *GetAppSecretKeyRequest) GetAppId() string {
 	return ""
 }
 
-func (x *GetAppSecretKeyRequest) GetKeyType() string {
-	if x != nil {
-		return x.KeyType
-	}
-	return ""
-}
-
-func (x *GetAppSecretKeyRequest) GetX25519() bool {
-	if x != nil {
-		return x.X25519
-	}
-	return false
-}
-
 type GetAppSecretKeyResponse struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Success         bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Message         string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	PrivateKey      []byte                 `protobuf:"bytes,3,opt,name=private_key,json=privateKey,proto3" json:"private_key,omitempty"`
-	PublicKey       []byte                 `protobuf:"bytes,4,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
-	EthAddress      []byte                 `protobuf:"bytes,5,opt,name=eth_address,json=ethAddress,proto3" json:"eth_address,omitempty"`
-	X25519PublicKey []byte                 `protobuf:"bytes,6,opt,name=x25519_public_key,json=x25519PublicKey,proto3" json:"x25519_public_key,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Success bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	// Secret key material (SENSITIVE - only for local access)
+	PrivateKey    []byte `protobuf:"bytes,3,opt,name=private_key,json=privateKey,proto3" json:"private_key,omitempty"` // Private key bytes (32 bytes for Ethereum)
+	PublicKey     []byte `protobuf:"bytes,4,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`    // Public key bytes (for verification)
+	EthAddress    []byte `protobuf:"bytes,5,opt,name=eth_address,json=ethAddress,proto3" json:"eth_address,omitempty"` // Ethereum address (if applicable)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetAppSecretKeyResponse) Reset() {
 	*x = GetAppSecretKeyResponse{}
-	mi := &file_internal_tee_tapp_service_tapp_service_proto_msgTypes[1]
+	mi := &file_tapp_service_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -107,7 +91,7 @@ func (x *GetAppSecretKeyResponse) String() string {
 func (*GetAppSecretKeyResponse) ProtoMessage() {}
 
 func (x *GetAppSecretKeyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_tee_tapp_service_tapp_service_proto_msgTypes[1]
+	mi := &file_tapp_service_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -120,7 +104,7 @@ func (x *GetAppSecretKeyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAppSecretKeyResponse.ProtoReflect.Descriptor instead.
 func (*GetAppSecretKeyResponse) Descriptor() ([]byte, []int) {
-	return file_internal_tee_tapp_service_tapp_service_proto_rawDescGZIP(), []int{1}
+	return file_tapp_service_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *GetAppSecretKeyResponse) GetSuccess() bool {
@@ -158,18 +142,15 @@ func (x *GetAppSecretKeyResponse) GetEthAddress() []byte {
 	return nil
 }
 
-func (x *GetAppSecretKeyResponse) GetX25519PublicKey() []byte {
-	if x != nil {
-		return x.X25519PublicKey
-	}
-	return nil
-}
-
 type GetSecretResourceRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	AppId string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
-	// Hex-encoded derivation material, bound into the KMS-derived key
-	// alongside app_id. Empty derives the app's base key.
+	// Optional hex-encoded derivation material, forwarded verbatim to KMS
+	// /app-key, which binds it into the derived key alongside app_id (e.g.
+	// AgenticID: chainId || contractAddress || sealId). Absent/empty derives
+	// purely from the app_id namespace, as before. From tapp-server 0.11.0 it is
+	// refused (INVALID_ARGUMENT) unless it is hex (digits in either case, with an
+	// optional 0x) of at most 256 bytes: it is written into the app's evidence.
 	Material      string `protobuf:"bytes,2,opt,name=material,proto3" json:"material,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -177,7 +158,7 @@ type GetSecretResourceRequest struct {
 
 func (x *GetSecretResourceRequest) Reset() {
 	*x = GetSecretResourceRequest{}
-	mi := &file_internal_tee_tapp_service_tapp_service_proto_msgTypes[2]
+	mi := &file_tapp_service_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -189,7 +170,7 @@ func (x *GetSecretResourceRequest) String() string {
 func (*GetSecretResourceRequest) ProtoMessage() {}
 
 func (x *GetSecretResourceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_tee_tapp_service_tapp_service_proto_msgTypes[2]
+	mi := &file_tapp_service_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -202,7 +183,7 @@ func (x *GetSecretResourceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSecretResourceRequest.ProtoReflect.Descriptor instead.
 func (*GetSecretResourceRequest) Descriptor() ([]byte, []int) {
-	return file_internal_tee_tapp_service_tapp_service_proto_rawDescGZIP(), []int{2}
+	return file_tapp_service_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *GetSecretResourceRequest) GetAppId() string {
@@ -220,23 +201,20 @@ func (x *GetSecretResourceRequest) GetMaterial() string {
 }
 
 type GetSecretResourceResponse struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	Success bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Message string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	Secret  []byte                 `protobuf:"bytes,3,opt,name=secret,proto3" json:"secret,omitempty"` // plaintext KMS-derived app key
-	// The secret read as a secp256k1 private key (tapp-server >= 0.11.0): its
-	// Ethereum address (20 bytes) and compressed public key (33 bytes). From
-	// this call on, the app's evidence lists the key in runtime_data.kms_keys.
-	// Empty from older servers, which do not list it.
-	EthAddress    []byte `protobuf:"bytes,4,opt,name=eth_address,json=ethAddress,proto3" json:"eth_address,omitempty"`
-	PublicKey     []byte `protobuf:"bytes,5,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Success            bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message            string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Secret             []byte                 `protobuf:"bytes,3,opt,name=secret,proto3" json:"secret,omitempty"` // plaintext KMS-derived app key
+	CommitmentScheme   string                 `protobuf:"bytes,6,opt,name=commitment_scheme,json=commitmentScheme,proto3" json:"commitment_scheme,omitempty"`
+	Commitment         []byte                 `protobuf:"bytes,7,opt,name=commitment,proto3" json:"commitment,omitempty"`                                              // canonical 32-byte big-endian BN254 scalar field element
+	MeasuredInEvidence bool                   `protobuf:"varint,8,opt,name=measured_in_evidence,json=measuredInEvidence,proto3" json:"measured_in_evidence,omitempty"` // true only after the measurement was written
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *GetSecretResourceResponse) Reset() {
 	*x = GetSecretResourceResponse{}
-	mi := &file_internal_tee_tapp_service_tapp_service_proto_msgTypes[3]
+	mi := &file_tapp_service_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -248,7 +226,7 @@ func (x *GetSecretResourceResponse) String() string {
 func (*GetSecretResourceResponse) ProtoMessage() {}
 
 func (x *GetSecretResourceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_tee_tapp_service_tapp_service_proto_msgTypes[3]
+	mi := &file_tapp_service_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -261,7 +239,7 @@ func (x *GetSecretResourceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSecretResourceResponse.ProtoReflect.Descriptor instead.
 func (*GetSecretResourceResponse) Descriptor() ([]byte, []int) {
-	return file_internal_tee_tapp_service_tapp_service_proto_rawDescGZIP(), []int{3}
+	return file_tapp_service_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *GetSecretResourceResponse) GetSuccess() bool {
@@ -285,29 +263,832 @@ func (x *GetSecretResourceResponse) GetSecret() []byte {
 	return nil
 }
 
-func (x *GetSecretResourceResponse) GetEthAddress() []byte {
+func (x *GetSecretResourceResponse) GetCommitmentScheme() string {
 	if x != nil {
-		return x.EthAddress
+		return x.CommitmentScheme
+	}
+	return ""
+}
+
+func (x *GetSecretResourceResponse) GetCommitment() []byte {
+	if x != nil {
+		return x.Commitment
 	}
 	return nil
 }
 
-func (x *GetSecretResourceResponse) GetPublicKey() []byte {
+func (x *GetSecretResourceResponse) GetMeasuredInEvidence() bool {
+	if x != nil {
+		return x.MeasuredInEvidence
+	}
+	return false
+}
+
+type GetAppSignerRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AppId         string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAppSignerRequest) Reset() {
+	*x = GetAppSignerRequest{}
+	mi := &file_tapp_service_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAppSignerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAppSignerRequest) ProtoMessage() {}
+
+func (x *GetAppSignerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tapp_service_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAppSignerRequest.ProtoReflect.Descriptor instead.
+func (*GetAppSignerRequest) Descriptor() ([]byte, []int) {
+	return file_tapp_service_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *GetAppSignerRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+type GetAppSignerResponse struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Success            bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message            string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Secret             []byte                 `protobuf:"bytes,3,opt,name=secret,proto3" json:"secret,omitempty"`                        // SENSITIVE: raw 32-byte secp256k1 scalar; socket only
+	PublicKey          []byte                 `protobuf:"bytes,4,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"` // 33-byte SEC1 compressed
+	EthAddress         []byte                 `protobuf:"bytes,5,opt,name=eth_address,json=ethAddress,proto3" json:"eth_address,omitempty"`
+	KeySource          string                 `protobuf:"bytes,6,opt,name=key_source,json=keySource,proto3" json:"key_source,omitempty"`
+	Derivation         string                 `protobuf:"bytes,7,opt,name=derivation,proto3" json:"derivation,omitempty"`
+	CommitmentScheme   string                 `protobuf:"bytes,8,opt,name=commitment_scheme,json=commitmentScheme,proto3" json:"commitment_scheme,omitempty"`
+	Commitment         []byte                 `protobuf:"bytes,9,opt,name=commitment,proto3" json:"commitment,omitempty"`
+	MeasuredInEvidence bool                   `protobuf:"varint,10,opt,name=measured_in_evidence,json=measuredInEvidence,proto3" json:"measured_in_evidence,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *GetAppSignerResponse) Reset() {
+	*x = GetAppSignerResponse{}
+	mi := &file_tapp_service_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAppSignerResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAppSignerResponse) ProtoMessage() {}
+
+func (x *GetAppSignerResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tapp_service_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAppSignerResponse.ProtoReflect.Descriptor instead.
+func (*GetAppSignerResponse) Descriptor() ([]byte, []int) {
+	return file_tapp_service_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *GetAppSignerResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *GetAppSignerResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *GetAppSignerResponse) GetSecret() []byte {
+	if x != nil {
+		return x.Secret
+	}
+	return nil
+}
+
+func (x *GetAppSignerResponse) GetPublicKey() []byte {
 	if x != nil {
 		return x.PublicKey
 	}
 	return nil
 }
 
-var File_internal_tee_tapp_service_tapp_service_proto protoreflect.FileDescriptor
+func (x *GetAppSignerResponse) GetEthAddress() []byte {
+	if x != nil {
+		return x.EthAddress
+	}
+	return nil
+}
 
-const file_internal_tee_tapp_service_tapp_service_proto_rawDesc = "" +
+func (x *GetAppSignerResponse) GetKeySource() string {
+	if x != nil {
+		return x.KeySource
+	}
+	return ""
+}
+
+func (x *GetAppSignerResponse) GetDerivation() string {
+	if x != nil {
+		return x.Derivation
+	}
+	return ""
+}
+
+func (x *GetAppSignerResponse) GetCommitmentScheme() string {
+	if x != nil {
+		return x.CommitmentScheme
+	}
+	return ""
+}
+
+func (x *GetAppSignerResponse) GetCommitment() []byte {
+	if x != nil {
+		return x.Commitment
+	}
+	return nil
+}
+
+func (x *GetAppSignerResponse) GetMeasuredInEvidence() bool {
+	if x != nil {
+		return x.MeasuredInEvidence
+	}
+	return false
+}
+
+type GetAppTlsCertRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AppId         string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"` // Application identifier
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAppTlsCertRequest) Reset() {
+	*x = GetAppTlsCertRequest{}
+	mi := &file_tapp_service_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAppTlsCertRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAppTlsCertRequest) ProtoMessage() {}
+
+func (x *GetAppTlsCertRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tapp_service_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAppTlsCertRequest.ProtoReflect.Descriptor instead.
+func (*GetAppTlsCertRequest) Descriptor() ([]byte, []int) {
+	return file_tapp_service_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *GetAppTlsCertRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+type GetAppTlsCertResponse struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Success bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	// The two files an ordinary TLS server wants. No crypto work left for the app.
+	KeyPem  string `protobuf:"bytes,3,opt,name=key_pem,json=keyPem,proto3" json:"key_pem,omitempty"`
+	CertPem string `protobuf:"bytes,4,opt,name=cert_pem,json=certPem,proto3" json:"cert_pem,omitempty"`
+	// "ca" when a CA signed it, "self-signed" when none is configured. Self-signed is
+	// not a lesser certificate here: what a verifier checks is the public key against
+	// the quote, not the issuer. The issuer matters only to clients that will not do
+	// that check — browsers, anything using a system trust store.
+	Issuer string `protobuf:"bytes,5,opt,name=issuer,proto3" json:"issuer,omitempty"`
+	// Always present, so the certificate can be reissued by whatever authority the
+	// deployer prefers (Let's Encrypt, their own CA) without asking for the key again.
+	CsrPem string `protobuf:"bytes,6,opt,name=csr_pem,json=csrPem,proto3" json:"csr_pem,omitempty"`
+	// sha256 of the SubjectPublicKeyInfo, hex. This is the value the quote's report_data
+	// commits to, so a verifier compares this against the key it was handed during the
+	// handshake. Returned here to save every caller re-deriving it.
+	PublicKeySha256 string `protobuf:"bytes,7,opt,name=public_key_sha256,json=publicKeySha256,proto3" json:"public_key_sha256,omitempty"`
+	// "local" or "kms" — where the private key came from. This decides whether the public
+	// key survives a restart, so a client choosing to pin it needs to know: "local" is
+	// bound to this instance and changes when it restarts, "kms" is stable and shared by
+	// every node of the app.
+	KeySource     string `protobuf:"bytes,8,opt,name=key_source,json=keySource,proto3" json:"key_source,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAppTlsCertResponse) Reset() {
+	*x = GetAppTlsCertResponse{}
+	mi := &file_tapp_service_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAppTlsCertResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAppTlsCertResponse) ProtoMessage() {}
+
+func (x *GetAppTlsCertResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tapp_service_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAppTlsCertResponse.ProtoReflect.Descriptor instead.
+func (*GetAppTlsCertResponse) Descriptor() ([]byte, []int) {
+	return file_tapp_service_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *GetAppTlsCertResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *GetAppTlsCertResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *GetAppTlsCertResponse) GetKeyPem() string {
+	if x != nil {
+		return x.KeyPem
+	}
+	return ""
+}
+
+func (x *GetAppTlsCertResponse) GetCertPem() string {
+	if x != nil {
+		return x.CertPem
+	}
+	return ""
+}
+
+func (x *GetAppTlsCertResponse) GetIssuer() string {
+	if x != nil {
+		return x.Issuer
+	}
+	return ""
+}
+
+func (x *GetAppTlsCertResponse) GetCsrPem() string {
+	if x != nil {
+		return x.CsrPem
+	}
+	return ""
+}
+
+func (x *GetAppTlsCertResponse) GetPublicKeySha256() string {
+	if x != nil {
+		return x.PublicKeySha256
+	}
+	return ""
+}
+
+func (x *GetAppTlsCertResponse) GetKeySource() string {
+	if x != nil {
+		return x.KeySource
+	}
+	return ""
+}
+
+type ResolveAppIdentityRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ChainId         uint64                 `protobuf:"varint,1,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	RegistryAddress string                 `protobuf:"bytes,2,opt,name=registry_address,json=registryAddress,proto3" json:"registry_address,omitempty"`
+	AppId           string                 `protobuf:"bytes,3,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ResolveAppIdentityRequest) Reset() {
+	*x = ResolveAppIdentityRequest{}
+	mi := &file_tapp_service_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveAppIdentityRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveAppIdentityRequest) ProtoMessage() {}
+
+func (x *ResolveAppIdentityRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tapp_service_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveAppIdentityRequest.ProtoReflect.Descriptor instead.
+func (*ResolveAppIdentityRequest) Descriptor() ([]byte, []int) {
+	return file_tapp_service_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ResolveAppIdentityRequest) GetChainId() uint64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
+}
+
+func (x *ResolveAppIdentityRequest) GetRegistryAddress() string {
+	if x != nil {
+		return x.RegistryAddress
+	}
+	return ""
+}
+
+func (x *ResolveAppIdentityRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+type ResolveAppIdentityResponse struct {
+	state           protoimpl.MessageState     `protogen:"open.v1"`
+	Success         bool                       `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message         string                     `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	ChainId         uint64                     `protobuf:"varint,3,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	RegistryAddress string                     `protobuf:"bytes,4,opt,name=registry_address,json=registryAddress,proto3" json:"registry_address,omitempty"`
+	AppId           string                     `protobuf:"bytes,5,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	Nodes           []*ResolvedAppNodeIdentity `protobuf:"bytes,6,rep,name=nodes,proto3" json:"nodes,omitempty"`
+	// The single live trust-anchor snapshot used for this lookup.
+	ScanUrl        string `protobuf:"bytes,7,opt,name=scan_url,json=scanUrl,proto3" json:"scan_url,omitempty"`
+	ScanPublicKey  string `protobuf:"bytes,8,opt,name=scan_public_key,json=scanPublicKey,proto3" json:"scan_public_key,omitempty"`
+	ScannedToBlock uint64 `protobuf:"varint,9,opt,name=scanned_to_block,json=scannedToBlock,proto3" json:"scanned_to_block,omitempty"`
+	ResolvedAt     int64  `protobuf:"varint,10,opt,name=resolved_at,json=resolvedAt,proto3" json:"resolved_at,omitempty"`
+	// Current TappRegistry registration instance, never an observation timestamp.
+	RegisteredAt  uint64 `protobuf:"varint,11,opt,name=registered_at,json=registeredAt,proto3" json:"registered_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResolveAppIdentityResponse) Reset() {
+	*x = ResolveAppIdentityResponse{}
+	mi := &file_tapp_service_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveAppIdentityResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveAppIdentityResponse) ProtoMessage() {}
+
+func (x *ResolveAppIdentityResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tapp_service_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveAppIdentityResponse.ProtoReflect.Descriptor instead.
+func (*ResolveAppIdentityResponse) Descriptor() ([]byte, []int) {
+	return file_tapp_service_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ResolveAppIdentityResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ResolveAppIdentityResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *ResolveAppIdentityResponse) GetChainId() uint64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
+}
+
+func (x *ResolveAppIdentityResponse) GetRegistryAddress() string {
+	if x != nil {
+		return x.RegistryAddress
+	}
+	return ""
+}
+
+func (x *ResolveAppIdentityResponse) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *ResolveAppIdentityResponse) GetNodes() []*ResolvedAppNodeIdentity {
+	if x != nil {
+		return x.Nodes
+	}
+	return nil
+}
+
+func (x *ResolveAppIdentityResponse) GetScanUrl() string {
+	if x != nil {
+		return x.ScanUrl
+	}
+	return ""
+}
+
+func (x *ResolveAppIdentityResponse) GetScanPublicKey() string {
+	if x != nil {
+		return x.ScanPublicKey
+	}
+	return ""
+}
+
+func (x *ResolveAppIdentityResponse) GetScannedToBlock() uint64 {
+	if x != nil {
+		return x.ScannedToBlock
+	}
+	return 0
+}
+
+func (x *ResolveAppIdentityResponse) GetResolvedAt() int64 {
+	if x != nil {
+		return x.ResolvedAt
+	}
+	return 0
+}
+
+func (x *ResolveAppIdentityResponse) GetRegisteredAt() uint64 {
+	if x != nil {
+		return x.RegisteredAt
+	}
+	return 0
+}
+
+type ResolvedAppNodeIdentity struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Registered, attested node signer. This is NOT a KMS-derived service signer
+	// (for example a SandboxServing provider); those require a separate binding.
+	NodeSigner string `protobuf:"bytes,1,opt,name=node_signer,json=nodeSigner,proto3" json:"node_signer,omitempty"`
+	// Management/evidence endpoint, not the app's business-service URL.
+	TeeUrl string `protobuf:"bytes,2,opt,name=tee_url,json=teeUrl,proto3" json:"tee_url,omitempty"`
+	// SHA256 of the APP TLS SubjectPublicKeyInfo, 0x-prefixed hex. Do not use
+	// this pin for tee_url: the management listener has its own TLS identity.
+	TlsSpkiSha256 string `protobuf:"bytes,3,opt,name=tls_spki_sha256,json=tlsSpkiSha256,proto3" json:"tls_spki_sha256,omitempty"`
+	CheckedAt     int64  `protobuf:"varint,4,opt,name=checked_at,json=checkedAt,proto3" json:"checked_at,omitempty"`
+	// Acceptance deadline: min(Scan's expiry, checked_at + 300 seconds).
+	// The result is a cached observation, not proof of liveness after checked_at.
+	ExpiresAt  int64    `protobuf:"varint,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	TcbStatus  string   `protobuf:"bytes,6,opt,name=tcb_status,json=tcbStatus,proto3" json:"tcb_status,omitempty"`
+	Advisories []string `protobuf:"bytes,7,rep,name=advisories,proto3" json:"advisories,omitempty"`
+	ImageEnv   string   `protobuf:"bytes,8,opt,name=image_env,json=imageEnv,proto3" json:"image_env,omitempty"`
+	// Stable application signer, derived from an authenticated typed identity.
+	// Empty when the app has not acquired one; never substitute node_signer.
+	AppSigner      string                   `protobuf:"bytes,9,opt,name=app_signer,json=appSigner,proto3" json:"app_signer,omitempty"`
+	Identities     []*ResolvedKeyIdentity   `protobuf:"bytes,10,rep,name=identities,proto3" json:"identities,omitempty"`
+	KeyCommitments []*ResolvedKeyCommitment `protobuf:"bytes,11,rep,name=key_commitments,json=keyCommitments,proto3" json:"key_commitments,omitempty"`
+	// Number of commitments with no replayed event recording attested KMS transport.
+	KmsUnchecked  uint64 `protobuf:"varint,12,opt,name=kms_unchecked,json=kmsUnchecked,proto3" json:"kms_unchecked,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResolvedAppNodeIdentity) Reset() {
+	*x = ResolvedAppNodeIdentity{}
+	mi := &file_tapp_service_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolvedAppNodeIdentity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolvedAppNodeIdentity) ProtoMessage() {}
+
+func (x *ResolvedAppNodeIdentity) ProtoReflect() protoreflect.Message {
+	mi := &file_tapp_service_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolvedAppNodeIdentity.ProtoReflect.Descriptor instead.
+func (*ResolvedAppNodeIdentity) Descriptor() ([]byte, []int) {
+	return file_tapp_service_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ResolvedAppNodeIdentity) GetNodeSigner() string {
+	if x != nil {
+		return x.NodeSigner
+	}
+	return ""
+}
+
+func (x *ResolvedAppNodeIdentity) GetTeeUrl() string {
+	if x != nil {
+		return x.TeeUrl
+	}
+	return ""
+}
+
+func (x *ResolvedAppNodeIdentity) GetTlsSpkiSha256() string {
+	if x != nil {
+		return x.TlsSpkiSha256
+	}
+	return ""
+}
+
+func (x *ResolvedAppNodeIdentity) GetCheckedAt() int64 {
+	if x != nil {
+		return x.CheckedAt
+	}
+	return 0
+}
+
+func (x *ResolvedAppNodeIdentity) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+func (x *ResolvedAppNodeIdentity) GetTcbStatus() string {
+	if x != nil {
+		return x.TcbStatus
+	}
+	return ""
+}
+
+func (x *ResolvedAppNodeIdentity) GetAdvisories() []string {
+	if x != nil {
+		return x.Advisories
+	}
+	return nil
+}
+
+func (x *ResolvedAppNodeIdentity) GetImageEnv() string {
+	if x != nil {
+		return x.ImageEnv
+	}
+	return ""
+}
+
+func (x *ResolvedAppNodeIdentity) GetAppSigner() string {
+	if x != nil {
+		return x.AppSigner
+	}
+	return ""
+}
+
+func (x *ResolvedAppNodeIdentity) GetIdentities() []*ResolvedKeyIdentity {
+	if x != nil {
+		return x.Identities
+	}
+	return nil
+}
+
+func (x *ResolvedAppNodeIdentity) GetKeyCommitments() []*ResolvedKeyCommitment {
+	if x != nil {
+		return x.KeyCommitments
+	}
+	return nil
+}
+
+func (x *ResolvedAppNodeIdentity) GetKmsUnchecked() uint64 {
+	if x != nil {
+		return x.KmsUnchecked
+	}
+	return 0
+}
+
+type ResolvedKeyIdentity struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Algorithm         string                 `protobuf:"bytes,1,opt,name=algorithm,proto3" json:"algorithm,omitempty"`
+	Derivation        string                 `protobuf:"bytes,2,opt,name=derivation,proto3" json:"derivation,omitempty"`
+	KeyRef            *ResolvedKeyCommitment `protobuf:"bytes,3,opt,name=key_ref,json=keyRef,proto3" json:"key_ref,omitempty"`
+	KeySource         string                 `protobuf:"bytes,4,opt,name=key_source,json=keySource,proto3" json:"key_source,omitempty"`
+	PublicKey         string                 `protobuf:"bytes,5,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	PublicKeyEncoding string                 `protobuf:"bytes,6,opt,name=public_key_encoding,json=publicKeyEncoding,proto3" json:"public_key_encoding,omitempty"`
+	Role              string                 `protobuf:"bytes,7,opt,name=role,proto3" json:"role,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *ResolvedKeyIdentity) Reset() {
+	*x = ResolvedKeyIdentity{}
+	mi := &file_tapp_service_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolvedKeyIdentity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolvedKeyIdentity) ProtoMessage() {}
+
+func (x *ResolvedKeyIdentity) ProtoReflect() protoreflect.Message {
+	mi := &file_tapp_service_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolvedKeyIdentity.ProtoReflect.Descriptor instead.
+func (*ResolvedKeyIdentity) Descriptor() ([]byte, []int) {
+	return file_tapp_service_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ResolvedKeyIdentity) GetAlgorithm() string {
+	if x != nil {
+		return x.Algorithm
+	}
+	return ""
+}
+
+func (x *ResolvedKeyIdentity) GetDerivation() string {
+	if x != nil {
+		return x.Derivation
+	}
+	return ""
+}
+
+func (x *ResolvedKeyIdentity) GetKeyRef() *ResolvedKeyCommitment {
+	if x != nil {
+		return x.KeyRef
+	}
+	return nil
+}
+
+func (x *ResolvedKeyIdentity) GetKeySource() string {
+	if x != nil {
+		return x.KeySource
+	}
+	return ""
+}
+
+func (x *ResolvedKeyIdentity) GetPublicKey() string {
+	if x != nil {
+		return x.PublicKey
+	}
+	return ""
+}
+
+func (x *ResolvedKeyIdentity) GetPublicKeyEncoding() string {
+	if x != nil {
+		return x.PublicKeyEncoding
+	}
+	return ""
+}
+
+func (x *ResolvedKeyIdentity) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+type ResolvedKeyCommitment struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Commitment    string                 `protobuf:"bytes,1,opt,name=commitment,proto3" json:"commitment,omitempty"`
+	Material      string                 `protobuf:"bytes,2,opt,name=material,proto3" json:"material,omitempty"`
+	Scheme        string                 `protobuf:"bytes,3,opt,name=scheme,proto3" json:"scheme,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResolvedKeyCommitment) Reset() {
+	*x = ResolvedKeyCommitment{}
+	mi := &file_tapp_service_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolvedKeyCommitment) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolvedKeyCommitment) ProtoMessage() {}
+
+func (x *ResolvedKeyCommitment) ProtoReflect() protoreflect.Message {
+	mi := &file_tapp_service_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolvedKeyCommitment.ProtoReflect.Descriptor instead.
+func (*ResolvedKeyCommitment) Descriptor() ([]byte, []int) {
+	return file_tapp_service_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ResolvedKeyCommitment) GetCommitment() string {
+	if x != nil {
+		return x.Commitment
+	}
+	return ""
+}
+
+func (x *ResolvedKeyCommitment) GetMaterial() string {
+	if x != nil {
+		return x.Material
+	}
+	return ""
+}
+
+func (x *ResolvedKeyCommitment) GetScheme() string {
+	if x != nil {
+		return x.Scheme
+	}
+	return ""
+}
+
+var File_tapp_service_proto protoreflect.FileDescriptor
+
+const file_tapp_service_proto_rawDesc = "" +
 	"\n" +
-	",internal/tee/tapp_service/tapp_service.proto\x12\ftapp_service\"b\n" +
+	"\x12tapp_service.proto\x12\ftapp_service\"M\n" +
 	"\x16GetAppSecretKeyRequest\x12\x15\n" +
-	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x19\n" +
-	"\bkey_type\x18\x02 \x01(\tR\akeyType\x12\x16\n" +
-	"\x06x25519\x18\x03 \x01(\bR\x06x25519\"\xda\x01\n" +
+	"\x06app_id\x18\x01 \x01(\tR\x05appIdJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04R\bkey_typeR\x06x25519\"\xc7\x01\n" +
 	"\x17GetAppSecretKeyResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1f\n" +
@@ -316,74 +1097,188 @@ const file_internal_tee_tapp_service_tapp_service_proto_rawDesc = "" +
 	"\n" +
 	"public_key\x18\x04 \x01(\fR\tpublicKey\x12\x1f\n" +
 	"\veth_address\x18\x05 \x01(\fR\n" +
-	"ethAddress\x12*\n" +
-	"\x11x25519_public_key\x18\x06 \x01(\fR\x0fx25519PublicKey\"M\n" +
+	"ethAddressJ\x04\b\x06\x10\aR\x11x25519_public_key\"M\n" +
 	"\x18GetSecretResourceRequest\x12\x15\n" +
 	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x1a\n" +
-	"\bmaterial\x18\x02 \x01(\tR\bmaterial\"\xa7\x01\n" +
+	"\bmaterial\x18\x02 \x01(\tR\bmaterial\"\x96\x02\n" +
 	"\x19GetSecretResourceResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
-	"\x06secret\x18\x03 \x01(\fR\x06secret\x12\x1f\n" +
-	"\veth_address\x18\x04 \x01(\fR\n" +
+	"\x06secret\x18\x03 \x01(\fR\x06secret\x12+\n" +
+	"\x11commitment_scheme\x18\x06 \x01(\tR\x10commitmentScheme\x12\x1e\n" +
+	"\n" +
+	"commitment\x18\a \x01(\fR\n" +
+	"commitment\x120\n" +
+	"\x14measured_in_evidence\x18\b \x01(\bR\x12measuredInEvidenceJ\x04\b\x04\x10\x05J\x04\b\x05\x10\x06R\veth_addressR\x15compressed_public_key\",\n" +
+	"\x13GetAppSignerRequest\x12\x15\n" +
+	"\x06app_id\x18\x01 \x01(\tR\x05appId\"\xe0\x02\n" +
+	"\x14GetAppSignerResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
+	"\x06secret\x18\x03 \x01(\fR\x06secret\x12\x1d\n" +
+	"\n" +
+	"public_key\x18\x04 \x01(\fR\tpublicKey\x12\x1f\n" +
+	"\veth_address\x18\x05 \x01(\fR\n" +
 	"ethAddress\x12\x1d\n" +
 	"\n" +
-	"public_key\x18\x05 \x01(\fR\tpublicKey2\xd3\x01\n" +
+	"key_source\x18\x06 \x01(\tR\tkeySource\x12\x1e\n" +
+	"\n" +
+	"derivation\x18\a \x01(\tR\n" +
+	"derivation\x12+\n" +
+	"\x11commitment_scheme\x18\b \x01(\tR\x10commitmentScheme\x12\x1e\n" +
+	"\n" +
+	"commitment\x18\t \x01(\fR\n" +
+	"commitment\x120\n" +
+	"\x14measured_in_evidence\x18\n" +
+	" \x01(\bR\x12measuredInEvidence\"-\n" +
+	"\x14GetAppTlsCertRequest\x12\x15\n" +
+	"\x06app_id\x18\x01 \x01(\tR\x05appId\"\xfb\x01\n" +
+	"\x15GetAppTlsCertResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x17\n" +
+	"\akey_pem\x18\x03 \x01(\tR\x06keyPem\x12\x19\n" +
+	"\bcert_pem\x18\x04 \x01(\tR\acertPem\x12\x16\n" +
+	"\x06issuer\x18\x05 \x01(\tR\x06issuer\x12\x17\n" +
+	"\acsr_pem\x18\x06 \x01(\tR\x06csrPem\x12*\n" +
+	"\x11public_key_sha256\x18\a \x01(\tR\x0fpublicKeySha256\x12\x1d\n" +
+	"\n" +
+	"key_source\x18\b \x01(\tR\tkeySource\"x\n" +
+	"\x19ResolveAppIdentityRequest\x12\x19\n" +
+	"\bchain_id\x18\x01 \x01(\x04R\achainId\x12)\n" +
+	"\x10registry_address\x18\x02 \x01(\tR\x0fregistryAddress\x12\x15\n" +
+	"\x06app_id\x18\x03 \x01(\tR\x05appId\"\x9d\x03\n" +
+	"\x1aResolveAppIdentityResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x19\n" +
+	"\bchain_id\x18\x03 \x01(\x04R\achainId\x12)\n" +
+	"\x10registry_address\x18\x04 \x01(\tR\x0fregistryAddress\x12\x15\n" +
+	"\x06app_id\x18\x05 \x01(\tR\x05appId\x12;\n" +
+	"\x05nodes\x18\x06 \x03(\v2%.tapp_service.ResolvedAppNodeIdentityR\x05nodes\x12\x19\n" +
+	"\bscan_url\x18\a \x01(\tR\ascanUrl\x12&\n" +
+	"\x0fscan_public_key\x18\b \x01(\tR\rscanPublicKey\x12(\n" +
+	"\x10scanned_to_block\x18\t \x01(\x04R\x0escannedToBlock\x12\x1f\n" +
+	"\vresolved_at\x18\n" +
+	" \x01(\x03R\n" +
+	"resolvedAt\x12#\n" +
+	"\rregistered_at\x18\v \x01(\x04R\fregisteredAt\"\xea\x03\n" +
+	"\x17ResolvedAppNodeIdentity\x12\x1f\n" +
+	"\vnode_signer\x18\x01 \x01(\tR\n" +
+	"nodeSigner\x12\x17\n" +
+	"\atee_url\x18\x02 \x01(\tR\x06teeUrl\x12&\n" +
+	"\x0ftls_spki_sha256\x18\x03 \x01(\tR\rtlsSpkiSha256\x12\x1d\n" +
+	"\n" +
+	"checked_at\x18\x04 \x01(\x03R\tcheckedAt\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x05 \x01(\x03R\texpiresAt\x12\x1d\n" +
+	"\n" +
+	"tcb_status\x18\x06 \x01(\tR\ttcbStatus\x12\x1e\n" +
+	"\n" +
+	"advisories\x18\a \x03(\tR\n" +
+	"advisories\x12\x1b\n" +
+	"\timage_env\x18\b \x01(\tR\bimageEnv\x12\x1d\n" +
+	"\n" +
+	"app_signer\x18\t \x01(\tR\tappSigner\x12A\n" +
+	"\n" +
+	"identities\x18\n" +
+	" \x03(\v2!.tapp_service.ResolvedKeyIdentityR\n" +
+	"identities\x12L\n" +
+	"\x0fkey_commitments\x18\v \x03(\v2#.tapp_service.ResolvedKeyCommitmentR\x0ekeyCommitments\x12#\n" +
+	"\rkms_unchecked\x18\f \x01(\x04R\fkmsUnchecked\"\x93\x02\n" +
+	"\x13ResolvedKeyIdentity\x12\x1c\n" +
+	"\talgorithm\x18\x01 \x01(\tR\talgorithm\x12\x1e\n" +
+	"\n" +
+	"derivation\x18\x02 \x01(\tR\n" +
+	"derivation\x12<\n" +
+	"\akey_ref\x18\x03 \x01(\v2#.tapp_service.ResolvedKeyCommitmentR\x06keyRef\x12\x1d\n" +
+	"\n" +
+	"key_source\x18\x04 \x01(\tR\tkeySource\x12\x1d\n" +
+	"\n" +
+	"public_key\x18\x05 \x01(\tR\tpublicKey\x12.\n" +
+	"\x13public_key_encoding\x18\x06 \x01(\tR\x11publicKeyEncoding\x12\x12\n" +
+	"\x04role\x18\a \x01(\tR\x04role\"k\n" +
+	"\x15ResolvedKeyCommitment\x12\x1e\n" +
+	"\n" +
+	"commitment\x18\x01 \x01(\tR\n" +
+	"commitment\x12\x1a\n" +
+	"\bmaterial\x18\x02 \x01(\tR\bmaterial\x12\x16\n" +
+	"\x06scheme\x18\x03 \x01(\tR\x06scheme2\xed\x03\n" +
 	"\vTappService\x12^\n" +
 	"\x0fGetAppSecretKey\x12$.tapp_service.GetAppSecretKeyRequest\x1a%.tapp_service.GetAppSecretKeyResponse\x12d\n" +
-	"\x11GetSecretResource\x12&.tapp_service.GetSecretResourceRequest\x1a'.tapp_service.GetSecretResourceResponseBFZDgithub.com/0gfoundation/0g-sandbox-billing/internal/tee/tapp_serviceb\x06proto3"
+	"\x11GetSecretResource\x12&.tapp_service.GetSecretResourceRequest\x1a'.tapp_service.GetSecretResourceResponse\x12U\n" +
+	"\fGetAppSigner\x12!.tapp_service.GetAppSignerRequest\x1a\".tapp_service.GetAppSignerResponse\x12X\n" +
+	"\rGetAppTlsCert\x12\".tapp_service.GetAppTlsCertRequest\x1a#.tapp_service.GetAppTlsCertResponse\x12g\n" +
+	"\x12ResolveAppIdentity\x12'.tapp_service.ResolveAppIdentityRequest\x1a(.tapp_service.ResolveAppIdentityResponseB>Z<github.com/0gfoundation/0g-sandbox/internal/tee/tapp_serviceb\x06proto3"
 
 var (
-	file_internal_tee_tapp_service_tapp_service_proto_rawDescOnce sync.Once
-	file_internal_tee_tapp_service_tapp_service_proto_rawDescData []byte
+	file_tapp_service_proto_rawDescOnce sync.Once
+	file_tapp_service_proto_rawDescData []byte
 )
 
-func file_internal_tee_tapp_service_tapp_service_proto_rawDescGZIP() []byte {
-	file_internal_tee_tapp_service_tapp_service_proto_rawDescOnce.Do(func() {
-		file_internal_tee_tapp_service_tapp_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_tee_tapp_service_tapp_service_proto_rawDesc), len(file_internal_tee_tapp_service_tapp_service_proto_rawDesc)))
+func file_tapp_service_proto_rawDescGZIP() []byte {
+	file_tapp_service_proto_rawDescOnce.Do(func() {
+		file_tapp_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_tapp_service_proto_rawDesc), len(file_tapp_service_proto_rawDesc)))
 	})
-	return file_internal_tee_tapp_service_tapp_service_proto_rawDescData
+	return file_tapp_service_proto_rawDescData
 }
 
-var file_internal_tee_tapp_service_tapp_service_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
-var file_internal_tee_tapp_service_tapp_service_proto_goTypes = []any{
-	(*GetAppSecretKeyRequest)(nil),    // 0: tapp_service.GetAppSecretKeyRequest
-	(*GetAppSecretKeyResponse)(nil),   // 1: tapp_service.GetAppSecretKeyResponse
-	(*GetSecretResourceRequest)(nil),  // 2: tapp_service.GetSecretResourceRequest
-	(*GetSecretResourceResponse)(nil), // 3: tapp_service.GetSecretResourceResponse
+var file_tapp_service_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_tapp_service_proto_goTypes = []any{
+	(*GetAppSecretKeyRequest)(nil),     // 0: tapp_service.GetAppSecretKeyRequest
+	(*GetAppSecretKeyResponse)(nil),    // 1: tapp_service.GetAppSecretKeyResponse
+	(*GetSecretResourceRequest)(nil),   // 2: tapp_service.GetSecretResourceRequest
+	(*GetSecretResourceResponse)(nil),  // 3: tapp_service.GetSecretResourceResponse
+	(*GetAppSignerRequest)(nil),        // 4: tapp_service.GetAppSignerRequest
+	(*GetAppSignerResponse)(nil),       // 5: tapp_service.GetAppSignerResponse
+	(*GetAppTlsCertRequest)(nil),       // 6: tapp_service.GetAppTlsCertRequest
+	(*GetAppTlsCertResponse)(nil),      // 7: tapp_service.GetAppTlsCertResponse
+	(*ResolveAppIdentityRequest)(nil),  // 8: tapp_service.ResolveAppIdentityRequest
+	(*ResolveAppIdentityResponse)(nil), // 9: tapp_service.ResolveAppIdentityResponse
+	(*ResolvedAppNodeIdentity)(nil),    // 10: tapp_service.ResolvedAppNodeIdentity
+	(*ResolvedKeyIdentity)(nil),        // 11: tapp_service.ResolvedKeyIdentity
+	(*ResolvedKeyCommitment)(nil),      // 12: tapp_service.ResolvedKeyCommitment
 }
-var file_internal_tee_tapp_service_tapp_service_proto_depIdxs = []int32{
-	0, // 0: tapp_service.TappService.GetAppSecretKey:input_type -> tapp_service.GetAppSecretKeyRequest
-	2, // 1: tapp_service.TappService.GetSecretResource:input_type -> tapp_service.GetSecretResourceRequest
-	1, // 2: tapp_service.TappService.GetAppSecretKey:output_type -> tapp_service.GetAppSecretKeyResponse
-	3, // 3: tapp_service.TappService.GetSecretResource:output_type -> tapp_service.GetSecretResourceResponse
-	2, // [2:4] is the sub-list for method output_type
-	0, // [0:2] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+var file_tapp_service_proto_depIdxs = []int32{
+	10, // 0: tapp_service.ResolveAppIdentityResponse.nodes:type_name -> tapp_service.ResolvedAppNodeIdentity
+	11, // 1: tapp_service.ResolvedAppNodeIdentity.identities:type_name -> tapp_service.ResolvedKeyIdentity
+	12, // 2: tapp_service.ResolvedAppNodeIdentity.key_commitments:type_name -> tapp_service.ResolvedKeyCommitment
+	12, // 3: tapp_service.ResolvedKeyIdentity.key_ref:type_name -> tapp_service.ResolvedKeyCommitment
+	0,  // 4: tapp_service.TappService.GetAppSecretKey:input_type -> tapp_service.GetAppSecretKeyRequest
+	2,  // 5: tapp_service.TappService.GetSecretResource:input_type -> tapp_service.GetSecretResourceRequest
+	4,  // 6: tapp_service.TappService.GetAppSigner:input_type -> tapp_service.GetAppSignerRequest
+	6,  // 7: tapp_service.TappService.GetAppTlsCert:input_type -> tapp_service.GetAppTlsCertRequest
+	8,  // 8: tapp_service.TappService.ResolveAppIdentity:input_type -> tapp_service.ResolveAppIdentityRequest
+	1,  // 9: tapp_service.TappService.GetAppSecretKey:output_type -> tapp_service.GetAppSecretKeyResponse
+	3,  // 10: tapp_service.TappService.GetSecretResource:output_type -> tapp_service.GetSecretResourceResponse
+	5,  // 11: tapp_service.TappService.GetAppSigner:output_type -> tapp_service.GetAppSignerResponse
+	7,  // 12: tapp_service.TappService.GetAppTlsCert:output_type -> tapp_service.GetAppTlsCertResponse
+	9,  // 13: tapp_service.TappService.ResolveAppIdentity:output_type -> tapp_service.ResolveAppIdentityResponse
+	9,  // [9:14] is the sub-list for method output_type
+	4,  // [4:9] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
-func init() { file_internal_tee_tapp_service_tapp_service_proto_init() }
-func file_internal_tee_tapp_service_tapp_service_proto_init() {
-	if File_internal_tee_tapp_service_tapp_service_proto != nil {
+func init() { file_tapp_service_proto_init() }
+func file_tapp_service_proto_init() {
+	if File_tapp_service_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_tee_tapp_service_tapp_service_proto_rawDesc), len(file_internal_tee_tapp_service_tapp_service_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tapp_service_proto_rawDesc), len(file_tapp_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_internal_tee_tapp_service_tapp_service_proto_goTypes,
-		DependencyIndexes: file_internal_tee_tapp_service_tapp_service_proto_depIdxs,
-		MessageInfos:      file_internal_tee_tapp_service_tapp_service_proto_msgTypes,
+		GoTypes:           file_tapp_service_proto_goTypes,
+		DependencyIndexes: file_tapp_service_proto_depIdxs,
+		MessageInfos:      file_tapp_service_proto_msgTypes,
 	}.Build()
-	File_internal_tee_tapp_service_tapp_service_proto = out.File
-	file_internal_tee_tapp_service_tapp_service_proto_goTypes = nil
-	file_internal_tee_tapp_service_tapp_service_proto_depIdxs = nil
+	File_tapp_service_proto = out.File
+	file_tapp_service_proto_goTypes = nil
+	file_tapp_service_proto_depIdxs = nil
 }

@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v6.32.0
-// source: internal/tee/tapp_service/tapp_service.proto
+// source: tapp_service.proto
 
 package tapp_service
 
@@ -19,18 +19,24 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	TappService_GetAppSecretKey_FullMethodName   = "/tapp_service.TappService/GetAppSecretKey"
-	TappService_GetSecretResource_FullMethodName = "/tapp_service.TappService/GetSecretResource"
+	TappService_GetAppSecretKey_FullMethodName    = "/tapp_service.TappService/GetAppSecretKey"
+	TappService_GetSecretResource_FullMethodName  = "/tapp_service.TappService/GetSecretResource"
+	TappService_GetAppSigner_FullMethodName       = "/tapp_service.TappService/GetAppSigner"
+	TappService_GetAppTlsCert_FullMethodName      = "/tapp_service.TappService/GetAppTlsCert"
+	TappService_ResolveAppIdentity_FullMethodName = "/tapp_service.TappService/ResolveAppIdentity"
 )
 
 // TappServiceClient is the client API for TappService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// The subset of 0g-tapp's proto/tapp_service.proto the billing server calls.
+// Generated wire-compatible subset; see scripts/sync-tapp-proto.py.
 type TappServiceClient interface {
 	GetAppSecretKey(ctx context.Context, in *GetAppSecretKeyRequest, opts ...grpc.CallOption) (*GetAppSecretKeyResponse, error)
 	GetSecretResource(ctx context.Context, in *GetSecretResourceRequest, opts ...grpc.CallOption) (*GetSecretResourceResponse, error)
+	GetAppSigner(ctx context.Context, in *GetAppSignerRequest, opts ...grpc.CallOption) (*GetAppSignerResponse, error)
+	GetAppTlsCert(ctx context.Context, in *GetAppTlsCertRequest, opts ...grpc.CallOption) (*GetAppTlsCertResponse, error)
+	ResolveAppIdentity(ctx context.Context, in *ResolveAppIdentityRequest, opts ...grpc.CallOption) (*ResolveAppIdentityResponse, error)
 }
 
 type tappServiceClient struct {
@@ -61,14 +67,47 @@ func (c *tappServiceClient) GetSecretResource(ctx context.Context, in *GetSecret
 	return out, nil
 }
 
+func (c *tappServiceClient) GetAppSigner(ctx context.Context, in *GetAppSignerRequest, opts ...grpc.CallOption) (*GetAppSignerResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAppSignerResponse)
+	err := c.cc.Invoke(ctx, TappService_GetAppSigner_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tappServiceClient) GetAppTlsCert(ctx context.Context, in *GetAppTlsCertRequest, opts ...grpc.CallOption) (*GetAppTlsCertResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAppTlsCertResponse)
+	err := c.cc.Invoke(ctx, TappService_GetAppTlsCert_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tappServiceClient) ResolveAppIdentity(ctx context.Context, in *ResolveAppIdentityRequest, opts ...grpc.CallOption) (*ResolveAppIdentityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResolveAppIdentityResponse)
+	err := c.cc.Invoke(ctx, TappService_ResolveAppIdentity_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TappServiceServer is the server API for TappService service.
 // All implementations must embed UnimplementedTappServiceServer
 // for forward compatibility.
 //
-// The subset of 0g-tapp's proto/tapp_service.proto the billing server calls.
+// Generated wire-compatible subset; see scripts/sync-tapp-proto.py.
 type TappServiceServer interface {
 	GetAppSecretKey(context.Context, *GetAppSecretKeyRequest) (*GetAppSecretKeyResponse, error)
 	GetSecretResource(context.Context, *GetSecretResourceRequest) (*GetSecretResourceResponse, error)
+	GetAppSigner(context.Context, *GetAppSignerRequest) (*GetAppSignerResponse, error)
+	GetAppTlsCert(context.Context, *GetAppTlsCertRequest) (*GetAppTlsCertResponse, error)
+	ResolveAppIdentity(context.Context, *ResolveAppIdentityRequest) (*ResolveAppIdentityResponse, error)
 	mustEmbedUnimplementedTappServiceServer()
 }
 
@@ -84,6 +123,15 @@ func (UnimplementedTappServiceServer) GetAppSecretKey(context.Context, *GetAppSe
 }
 func (UnimplementedTappServiceServer) GetSecretResource(context.Context, *GetSecretResourceRequest) (*GetSecretResourceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSecretResource not implemented")
+}
+func (UnimplementedTappServiceServer) GetAppSigner(context.Context, *GetAppSignerRequest) (*GetAppSignerResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAppSigner not implemented")
+}
+func (UnimplementedTappServiceServer) GetAppTlsCert(context.Context, *GetAppTlsCertRequest) (*GetAppTlsCertResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAppTlsCert not implemented")
+}
+func (UnimplementedTappServiceServer) ResolveAppIdentity(context.Context, *ResolveAppIdentityRequest) (*ResolveAppIdentityResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResolveAppIdentity not implemented")
 }
 func (UnimplementedTappServiceServer) mustEmbedUnimplementedTappServiceServer() {}
 func (UnimplementedTappServiceServer) testEmbeddedByValue()                     {}
@@ -142,6 +190,60 @@ func _TappService_GetSecretResource_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TappService_GetAppSigner_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAppSignerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TappServiceServer).GetAppSigner(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TappService_GetAppSigner_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TappServiceServer).GetAppSigner(ctx, req.(*GetAppSignerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TappService_GetAppTlsCert_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAppTlsCertRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TappServiceServer).GetAppTlsCert(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TappService_GetAppTlsCert_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TappServiceServer).GetAppTlsCert(ctx, req.(*GetAppTlsCertRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TappService_ResolveAppIdentity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResolveAppIdentityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TappServiceServer).ResolveAppIdentity(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TappService_ResolveAppIdentity_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TappServiceServer).ResolveAppIdentity(ctx, req.(*ResolveAppIdentityRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TappService_ServiceDesc is the grpc.ServiceDesc for TappService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -157,7 +259,19 @@ var TappService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "GetSecretResource",
 			Handler:    _TappService_GetSecretResource_Handler,
 		},
+		{
+			MethodName: "GetAppSigner",
+			Handler:    _TappService_GetAppSigner_Handler,
+		},
+		{
+			MethodName: "GetAppTlsCert",
+			Handler:    _TappService_GetAppTlsCert_Handler,
+		},
+		{
+			MethodName: "ResolveAppIdentity",
+			Handler:    _TappService_ResolveAppIdentity_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "internal/tee/tapp_service/tapp_service.proto",
+	Metadata: "tapp_service.proto",
 }
