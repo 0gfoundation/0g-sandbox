@@ -34,6 +34,12 @@ its existing administration rights. An attestor's rotating node signer is not
 automatically an admin. Discovery errors, expired results, or a failed current
 registry-instance check do not grant application-admin permissions.
 
+A verified current node with only its node identity, or TLS but no `app_signer`, may be a standby. Discovery
+validates its metadata but excludes its TLS pin and lease from service identity.
+At least one current node must declare a valid stable app signer; all nonempty
+signer declarations must agree. Invalid, expired or non-production observations
+still fail discovery, including those from a standby.
+
 The first successful lookup stores the authorized attestor registration epoch
 and owner in Redis under `identity:attestor:<chain>:<registry-lowercase>:<appId>:instance`.
 Both are checked against one live registry read on every application-admin check.

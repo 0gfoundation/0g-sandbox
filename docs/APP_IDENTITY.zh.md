@@ -29,6 +29,11 @@ tapp 的明确返回结果为准，不能根据非空地址推断。tapp 从本�
 attestor 的 node signer 不会自动获得管理权限。查询失败、身份过期或注册实例
 检查失败时，不授予应用管理权限。
 
+已验证的 current 节点可以仅有 node identity，或先有 TLS、尚无 `app_signer`，作为 standby 保留。
+发现时仍验证其 metadata，但不将其 TLS pin 或 lease 纳入服务身份。至少一个 current
+节点必须声明合法稳定 app signer，所有非空 signer 声明必须一致。即使来自 standby，
+非法、过期或非生产环境的观测仍会导致发现失败。
+
 第一次成功查询后，授权的 attestor 注册 epoch 和 owner 会保存到 Redis：
 `identity:attestor:<chain>:<registry-lowercase>:<appId>:instance`。
 每次应用管理权限检查都会在一次链上调用中核对 epoch 和 owner。同名 app 注销重注册后，即使

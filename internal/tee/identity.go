@@ -51,21 +51,28 @@ func appIdentityFromResponse(resp *tapp_service.ResolveAppIdentityResponse, chai
 	out := &AppIdentity{AppID: appID, RegisteredAt: resp.RegisteredAt}
 	seen := make(map[string]bool)
 	for _, node := range resp.Nodes {
-		if node == nil || !common.IsHexAddress(node.AppSigner) || common.HexToAddress(node.AppSigner) == (common.Address{}) ||
-			node.CheckedAt <= 0 || node.CheckedAt > now.Unix()+30 || node.ExpiresAt <= now.Unix() ||
-			node.ExpiresAt > node.CheckedAt+300 {
-			return nil, fmt.Errorf("tee: missing stable app signer or expired identity")
+		if node == nil || node.CheckedAt <= 0 || node.CheckedAt > now.Unix()+30 || node.ExpiresAt <= now.Unix() ||
+			node.ExpiresAt > node.CheckedAt+300 || node.ImageEnv != "prod" {
+			return nil, fmt.Errorf("tee: expired or non-production identity")
+		}
+		pin := strings.ToLower(strings.TrimPrefix(node.TlsSpkiSha256, "0x"))
+		decoded, err := hex.DecodeString(pin)
+		if err != nil || len(decoded) != 32 {
+			return nil, fmt.Errorf("tee: invalid app TLS pin")
+		}
+		// TLS can be initialized before the service signer on a current standby.
+		// Its observation must still be valid, but it contributes no service pin.
+		if node.AppSigner == "" {
+			continue
+		}
+		if !common.IsHexAddress(node.AppSigner) || common.HexToAddress(node.AppSigner) == (common.Address{}) {
+			return nil, fmt.Errorf("tee: invalid stable app signer")
 		}
 		signer := common.HexToAddress(node.AppSigner)
 		if out.Signer != (common.Address{}) && out.Signer != signer {
 			return nil, fmt.Errorf("tee: current nodes disagree about the stable app signer")
 		}
 		out.Signer = signer
-		pin := strings.ToLower(strings.TrimPrefix(node.TlsSpkiSha256, "0x"))
-		decoded, err := hex.DecodeString(pin)
-		if err != nil || len(decoded) != 32 {
-			return nil, fmt.Errorf("tee: invalid app TLS pin")
-		}
 		if !seen[pin] {
 			seen[pin] = true
 			out.TLSPins = append(out.TLSPins, pin)
@@ -74,6 +81,9 @@ func appIdentityFromResponse(resp *tapp_service.ResolveAppIdentityResponse, chai
 		if out.ExpiresAt.IsZero() || expires.Before(out.ExpiresAt) {
 			out.ExpiresAt = expires
 		}
+	}
+	if out.Signer == (common.Address{}) {
+		return nil, fmt.Errorf("tee: no current node has a ready stable app signer")
 	}
 	return out, nil
 }
