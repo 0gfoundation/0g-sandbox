@@ -2,7 +2,7 @@
 
 Networks: **0G Mainnet** (chain ID 16661) · **0G Galileo Testnet** (chain ID 16602, used by dev + testnet). Each section below states its network, explorer, and RPC.
 
-Owner: mainnet contract/beacon = `0x73443d8C05c74F8C2F5D499Da2597a1EE49E431b` (deployer); dev + testnet contract/beacon = `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`.
+Owner: mainnet contract/beacon = `0x87605Ec8E10Eb373C1d070e15E5d78FAC4D7621d` (since 2026-10-04; deployed by `0x73443d…`); dev + testnet contract/beacon = `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`.
 
 
 > Chinese version: [CONTRACTS.zh.md](README.zh.md)
@@ -25,6 +25,7 @@ Owner: mainnet contract/beacon = `0x73443d8C05c74F8C2F5D499Da2597a1EE49E431b` (d
 | Date | Impl | Notes |
 |------|------|-------|
 | 2026-09-09 | `0x90a0f1BcaCE1A516CF4D1918178EB99E08c16f24` | Initial mainnet deploy (v2): provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement. Bound to TappRegistry `0x5487…e612`. Owner = deployer `0x7344…431b`. |
+| 2026-10-04 | (no impl change) | **Ownership transferred** — contract `owner` + beacon owner set to `0x87605Ec8E10Eb373C1d070e15E5d78FAC4D7621d` (previously `0x7344…431b`). No implementation change. |
 
 ```env
 SETTLEMENT_CONTRACT=0x650C16a491ad52dB6b7f3053bCaD650cb43d2206
@@ -140,6 +141,10 @@ Trust identity — the active TEE signer set and user acknowledgements — lives
 | Function | Notes |
 |---|---|
 | `addOrUpdateService(signer, url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin)` | App owner registers/updates a node's service; `signer` (= the provider address) must be an active TappRegistry node of the appId; `appId` set-once per signer |
+| `addOrUpdateKmsService(provider, url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin, endorsement)` | App owner registers/updates a **KMS provider**: `provider` is the app's KMS key (the node runs `PROVIDER_KEY_SOURCE=kms`), `endorsement` an active node's EIP-712 signature over `KmsProvider(provider, appId)`. The first call binds the provider to the app's current TappRegistry instance (`registeredAt`); every later call must find that same instance |
+| `kmsProviderDigest(provider, appId)` → bytes32 | view — the digest a node signs to endorse a KMS provider |
+| `kmsBindings(provider)` → (epoch, appIdHash) | view — the app instance a KMS provider is bound to; `epoch == 0` for a node-signer provider |
+| `isActiveProvider(provider)` → bool | view — whether the provider's own key may sign vouchers now (the settlement rule) |
 | `removeService(signer)` | App owner removes a node's service (e.g. after a machine rebuild); sweeps pending earnings to the owner in the same tx; user balances stay refundable, nonce watermarks stay put |
 | `withdrawEarnings(signer)` | App owner withdraws a node's accrued earnings to the owner's wallet |
 | `services(provider)` / `serviceExists(provider)` | view — commercial terms (provider = the node's TEE signer address) |
@@ -149,7 +154,7 @@ Trust identity — the active TEE signer set and user acknowledgements — lives
 
 | Function | Notes |
 |---|---|
-| `settleFeesWithTEE(vouchers[])` → statuses[] | Permissionless; a voucher is valid only if signed BY its own payee (`recovered == v.provider`) and that address is an active TappRegistry node of the appId — one node can never settle vouchers naming another node |
+| `settleFeesWithTEE(vouchers[])` → statuses[] | Permissionless; a voucher is valid only if signed BY its own payee (`recovered == v.provider`) and that payee's key is valid for the appId: an active TappRegistry node for a node-signer provider, the app instance it was bound to for a KMS provider. One provider can never settle vouchers naming another |
 | `previewSettlementResults(vouchers[])` → statuses[] | view — dry-run statuses |
 
 **Admin / setup**
@@ -159,9 +164,10 @@ Trust identity — the active TEE signer set and user acknowledgements — lives
 | `initialize(tappRegistry_)` | One-time, on the proxy |
 | `owner()` / `transferOwnership(newOwner)` | Contract admin |
 | `setTappRegistry(newRegistry)` | Repoint TappRegistry; ack state then reads from the new registry |
+| `repinKmsProvider(provider)` | After a TappRegistry redeploy only: re-bind a KMS provider to its app's instance in the new registry. Contract owner only |
 | `tappRegistry()` / `domainSeparator()` / `LOCK_TIME()` | view |
 
-**Events:** `Deposited`, `RefundRequested`, `RefundWithdrawn`, `VoucherSettled`, `EarningsWithdrawn(provider, to, amount)`, `ServiceUpdated`, `ServiceRemoved(provider, appOwner)`, `OwnershipTransferred`, `TappRegistryUpdated`.
+**Events:** `Deposited`, `RefundRequested`, `RefundWithdrawn`, `VoucherSettled`, `EarningsWithdrawn(provider, to, amount)`, `ServiceUpdated`, `ServiceRemoved(provider, appOwner)`, `KmsProviderBound(provider, appId, endorsingNode, epoch)`, `KmsProviderRepinned(provider, previousEpoch, epoch)`, `OwnershipTransferred`, `TappRegistryUpdated`.
 
 ---
 
@@ -268,6 +274,21 @@ PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ register \
 Then set `PROVIDER_ADDRESS` and `TAPP_REGISTRY` in `.env`, and ensure the provider
 wallet holds enough 0G to pay gas for settlement.
 
+**KMS provider** (node runs `PROVIDER_KEY_SOURCE=kms`): step 3 reads the provider address
+and the node's endorsement from the node's `/api/info` instead of `--signer`:
+
+```bash
+OWNER_KEY=0x<owner-key> go run ./cmd/provider/ register --kms \
+  --contract       0x<sandbox-serving-proxy> \
+  --app-id         0g-sandbox-provider \
+  --url            https://<sandbox-host> \
+  --price-per-cpu  <neuron/cpu/min> \
+  --price-per-mem  <neuron/memGB/min> \
+  --fee            <neuron>
+```
+
+Fund the printed provider address once; it pays settlement gas from then on, across reboots.
+
 ---
 
 ## Design Notes
@@ -276,5 +297,10 @@ wallet holds enough 0G to pay gas for settlement.
 - **Open settlement** — `settleFeesWithTEE` can be called by anyone; the provider is identified by `v.provider` in the voucher, not `msg.sender`
 - **Trust root delegation** — SandboxServing holds only commercial terms; TEE signer identity and user acknowledgement live in TappRegistry and are queried on every voucher verification
 - **Provider IS the TEE signer (v2)** — every provider address (services key, voucher payee, balance bucket, earnings ledger) is the TEE signer address of one TappRegistry node. The signer key never leaves the enclave and dies with the machine, so all management (register/remove/withdraw) belongs to the appId's TappRegistry owner. One appId, many nodes: each signer has a fully isolated ledger — balances are deliberately NOT shared across nodes (independently-deployed billing proxies each run their own Redis reservation admission control and can't see each other's in-flight reservations; a shared balance would overcommit).
+- **KMS provider** — the alternative to rotation: the provider is a key the app takes from the KMS (`GetSecretResource`, material hex(`provider`)), the same on every boot, so balances, nonces, the service and its gas survive reboots and rebuilds.
+  - **Verification:** tapp-server ≥ 0.11.0 lists the key in each node's evidence (`runtime_data.kms_keys`), and an active node's endorsement registers it on chain.
+  - **Settlement:** a KMS provider's vouchers settle while the app is still the TappRegistry instance it was bound to. The KMS gives the same key to whoever registers the appId after its last node is removed. The pin, kept even across `removeService`, keeps that registrant from the balances and earnings already held, including when users ack the new app.
+  - **Prerequisite:** the KMS must run attested admission. Without it, the app owner could register a plain key as a node and take the provider key outside any TEE.
+  - **One billing instance per appId:** every node of the app derives the same provider. Its balance bucket and voucher nonces would be shared by billing instances that cannot see each other's reservations or nonce counters, the same reason node-signer ledgers are isolated. When replacing a machine, stop the old billing before the new one starts.
 - **Rotation** — a machine rebuild produces a new signer. Runbook: add the new node in TappRegistry (old + new coexist), drain the old signer's voucher queue, `rotate` the service entry (cmd/provider), remove the old node. Users move balances off the dead signer via the normal refund flow; `removeService` sweeps its earnings to the owner.
 - **`appId` is set-once per signer** — once `addOrUpdateService` has bound a non-empty `appId` to a signer, subsequent calls must pass the same value. To bind a *different* `appId`, `removeService` first (user balances, pending refunds, and settled nonces are preserved — nonces stay put so old vouchers can't be replayed after a re-register).

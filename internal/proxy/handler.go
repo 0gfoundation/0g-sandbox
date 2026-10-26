@@ -110,7 +110,7 @@ type Handler struct {
 	sshGatewayHost      string   // if set, replaces localhost in SSH commands
 	computePricePerSec  *big.Int
 	rdb                 *redis.Client
-	teeKey              *ecdsa.PrivateKey // TEE signing key; nil = sealed containers disabled
+	sealKey             *ecdsa.PrivateKey // stable KMS app signer; nil = sealed containers disabled
 	broker              *brokerClient     // nil = broker integration disabled
 	log                 *zap.Logger
 
@@ -126,9 +126,16 @@ type Handler struct {
 	// top of adminAddresses — resolved live so it can never drift from the
 	// on-chain truth. nil (tests, mock setups) = static admin list only.
 	AppOwner func(ctx context.Context) (string, error)
+	// AppAdmin authenticates the stable app signer of a configured attestor
+	// appId, with current registration-instance checks. It does not authorize
+	// arbitrary node signers or change the owner-only workload routes.
+	AppAdmin func(ctx context.Context, wallet string) (bool, error)
+	// SealIssuer authenticates this provider's current app instance on each
+	// sealed create. No issuer scope is accepted from the create request.
+	SealIssuer func(ctx context.Context) (SealIssuer, error)
 }
 
-func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec *big.Int, providerAddress string, adminAddresses []string, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, teeKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
+func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec *big.Int, providerAddress string, adminAddresses []string, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, providerKey, sealKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
 	target, _ := url.Parse(dtona.BaseURL())
 	rp := httputil.NewSingleHostReverseProxy(target)
 
@@ -193,8 +200,8 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 	}
 
 	var broker *brokerClient
-	if brokerURL != "" && teeKey != nil {
-		broker = newBrokerClient(brokerURL, teeKey, providerAddress, voucherIntervalSec, log)
+	if brokerURL != "" && providerKey != nil {
+		broker = newBrokerClient(brokerURL, providerKey, providerAddress, voucherIntervalSec, log)
 	}
 	admins := make([]string, 0, len(adminAddresses))
 	for _, a := range adminAddresses {
@@ -203,7 +210,7 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 			admins = append(admins, strings.ToLower(a))
 		}
 	}
-	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, ackCheck: ackCheck, eventFetcher: eventFetcher, createFee: createFee, pricePerCPUPerSec: pricePerCPUPerSec, pricePerMemGBPerSec: pricePerMemGBPerSec, voucherIntervalSec: voucherIntervalSec, computePricePerSec: computePricePerSec, providerAddress: providerAddress, adminAddresses: admins, sshGatewayHost: sshGatewayHost, rdb: rdb, teeKey: teeKey, broker: broker, log: log}
+	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, ackCheck: ackCheck, eventFetcher: eventFetcher, createFee: createFee, pricePerCPUPerSec: pricePerCPUPerSec, pricePerMemGBPerSec: pricePerMemGBPerSec, voucherIntervalSec: voucherIntervalSec, computePricePerSec: computePricePerSec, providerAddress: providerAddress, adminAddresses: admins, sshGatewayHost: sshGatewayHost, rdb: rdb, sealKey: sealKey, broker: broker, log: log}
 }
 
 // IsAdmin is the exported admin check for routes registered outside this
@@ -230,9 +237,21 @@ func (h *Handler) isAdmin(wallet string) bool {
 		if owner, err := h.AppOwner(ctx); err == nil && owner == target {
 			return true
 		} else if err != nil {
-			h.log.Warn("isAdmin: app owner lookup failed; falling back to static admin list", zap.Error(err))
+			h.log.Warn("isAdmin: app owner lookup failed", zap.Error(err))
 		}
 	}
+	if h.AppAdmin != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 125*time.Second)
+		allowed, err := h.AppAdmin(ctx, target)
+		cancel()
+		if err == nil && allowed {
+			return true
+		}
+		if err != nil {
+			h.log.Warn("isAdmin: attestor identity lookup failed", zap.Error(err))
+		}
+	}
+
 	return false
 }
 
@@ -447,7 +466,20 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		}
 	}
 
-	// Sealed containers: resolve image hash and inject TEE attestation + keypair
+	// A v2 issuer refusal must release only this request's reservation. The
+	// caller may already be cancelled; cleanup has its own bounded context and
+	// Redis I/O timeout. Clearing the flag first makes this cleanup idempotent.
+	releaseRejectedSeal := func() {
+		if !createReserved {
+			return
+		}
+		createReserved = false
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 2*time.Second)
+		defer cancel()
+		billing.Release(ctx, h.rdb.WithTimeout(2*time.Second), wallet, h.providerAddress, createRequired)
+	}
+
+	// Sealed containers: resolve image hash and inject app attestation + keypair
 	// before forwarding to Daytona.
 	sealed := extractSealed(body)
 	if err := ValidatePublicPorts(body, sealed); err != nil {
@@ -460,8 +492,13 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		})
 		return
 	}
-	if sealed && h.teeKey == nil {
-		c.JSON(http.StatusNotImplemented, gin.H{"error": "sealed containers not available: TEE key not configured"})
+	if sealed && h.sealKey == nil {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "sealed containers not available: KMS app signer not configured"})
+		return
+	}
+	if sealed && h.SealIssuer == nil {
+		releaseRejectedSeal()
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sealed issuer authentication not configured"})
 		return
 	}
 	var imageHash string
@@ -513,8 +550,21 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	}
 
 	if sealed {
-		modified, err = InjectSeal(modified, h.teeKey, imageHash)
+		// Resolve immediately before signing, after potentially slow image
+		// resolution. A failed lookup never creates a new sealed workload.
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		issuer, issuerErr := h.SealIssuer(ctx)
+		ctxErr := ctx.Err()
+		cancel()
+		if issuerErr != nil || ctxErr != nil {
+			releaseRejectedSeal()
+			h.log.Warn("sealed issuer authentication failed", zap.Error(issuerErr), zap.Error(ctxErr))
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sealed issuer authentication unavailable"})
+			return
+		}
+		modified, err = InjectSeal(modified, h.sealKey, imageHash, issuer)
 		if err != nil {
+			releaseRejectedSeal()
 			if strings.HasPrefix(err.Error(), "seal_id must be") {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
@@ -1365,9 +1415,18 @@ func (h *Handler) handleCatchAll(c *gin.Context) {
 	case method == http.MethodPut && action == "/labels":
 		h.withOwner(h.handleLabels)(c)
 
-	// ── Transparent proxy (owner check) ───────────────────────────────────
+	// ── Transparent proxy (owner check, sealed denied) ─────────────────────
+	// Everything not named above is forwarded to Daytona as admin, so this
+	// branch is only as safe as the least-guarded Daytona endpoint it reaches.
+	// On a sealed sandbox that includes port preview URLs/tokens (a path to
+	// any port, not just the attested :8080) and the public toggle (exposes
+	// every port). Sealing promises the owner no channel into the workload
+	// beyond :8080; SSH and toolbox were blocked by name, which left this
+	// catch-all open to whatever Daytona adds. Deny by default instead: the
+	// lifecycle operations a sealed owner legitimately needs all have their
+	// own cases above and are unaffected.
 	default:
-		h.withOwner(h.stripVolumesThenForward)(c)
+		h.withOwnerNotSealed(h.stripVolumesThenForward)(c)
 	}
 }
 
@@ -1440,7 +1499,8 @@ func (h *Handler) withOwnerOrAdmin(next gin.HandlerFunc) gin.HandlerFunc {
 }
 
 // withOwnerNotSealed wraps a handler with ownership + sealed checks.
-// Used for toolbox routes: sealed sandboxes block all remote access channels.
+// Used for toolbox routes and the transparent sandbox catch-all: sealed
+// sandboxes block every remote access channel into the workload.
 func (h *Handler) withOwnerNotSealed(next gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")

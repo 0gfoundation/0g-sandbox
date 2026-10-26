@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -12,11 +13,12 @@ import (
 )
 
 type fakeSignerClient struct {
-	settler   common.Address
-	appId     string
-	isNode    bool
-	appIdErr  error
-	nodeErr   error
+	settler  common.Address
+	appId    string
+	isNode   bool
+	appIdErr error
+	nodeErr  error
+	kms      bool
 }
 
 func (f *fakeSignerClient) SettlerAddress() common.Address { return f.settler }
@@ -26,7 +28,8 @@ func (f *fakeSignerClient) GetServiceAppId(context.Context, common.Address) (str
 	}
 	return f.appId, nil
 }
-func (f *fakeSignerClient) IsLocalTEEActiveNode(context.Context) (bool, error) {
+func (f *fakeSignerClient) KmsProvider() bool { return f.kms }
+func (f *fakeSignerClient) IsProviderActive(context.Context) (bool, error) {
 	if f.nodeErr != nil {
 		return false, f.nodeErr
 	}
@@ -54,6 +57,24 @@ func TestCheckSigner_AlertsWhenNotANode(t *testing.T) {
 	}
 	if got.details["app_id"] != "sandbox-prod" {
 		t.Errorf("app_id missing: %+v", got.details)
+	}
+}
+
+func TestCheckSigner_KmsProviderAlertNamesTheRebinding(t *testing.T) {
+	r := &recordingAlerter{}
+	c := &fakeSignerClient{
+		settler: common.HexToAddress("0x8401"),
+		appId:   "sandbox-prod",
+		kms:     true,
+	}
+	checkSigner(context.Background(), c, common.HexToAddress("0x8401"), r, zap.NewNop())
+
+	got, ok := r.last()
+	if !ok {
+		t.Fatal("no alert fired")
+	}
+	if fix, _ := got.details["fix"].(string); !strings.Contains(fix, "re-registered") || !strings.Contains(fix, "repinKmsProvider") {
+		t.Errorf("fix should name the app re-registration and the repin: %q", fix)
 	}
 }
 

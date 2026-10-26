@@ -13,20 +13,21 @@ import (
 // SignerClient is the slice of chain.Client needed by RunSignerMismatchMonitor.
 // Surfaced as an interface for unit tests.
 //
-// IsLocalTEEActiveNode returns true when the locally-derived TEE address is
-// an active node for the provider's configured app in TappRegistry. It
-// internally reads sandbox.services[provider].appId and queries
-// tapp.getNode(appId, settler).addedAt.
+// IsProviderActive returns true when the provider key may settle by the
+// contract's rule: a node-signer provider is an active node of its service's
+// app in TappRegistry; a KMS provider's service is bound to the app's current
+// instance.
 type SignerClient interface {
 	SettlerAddress() common.Address
 	GetServiceAppId(ctx context.Context, provider common.Address) (string, error)
-	IsLocalTEEActiveNode(ctx context.Context) (bool, error)
+	IsProviderActive(ctx context.Context) (bool, error)
+	KmsProvider() bool
 }
 
-// RunSignerMismatchMonitor checks whether the local TEE key is recognised
-// as an active node for the provider's app in TappRegistry. If not — typically
-// because the provider hasn't run `cmd/provider register` with the current
-// TEE address, or because the node was removed — every voucher silently fails
+// RunSignerMismatchMonitor checks whether the provider key may sign vouchers
+// for the provider's app. If not — typically because a node-signer provider's
+// current TEE address was never added as a node (or was removed), or a KMS
+// provider's app was re-registered — every voucher silently fails
 // INVALID_SIGNATURE and no on-chain event is emitted, so this alert is often
 // the only signal until backlog explodes.
 //
@@ -67,22 +68,27 @@ func checkSigner(ctx context.Context, client SignerClient, provider common.Addre
 		// mismatch. Silent.
 		return
 	}
-	isNode, err := client.IsLocalTEEActiveNode(ctx)
+	active, err := client.IsProviderActive(ctx)
 	if err != nil {
-		log.Warn("tapp node lookup failed", zap.Error(err))
+		log.Warn("provider readiness lookup failed", zap.Error(err))
 		return
 	}
-	if isNode {
+	if active {
 		return
 	}
 	settler := client.SettlerAddress()
-	alerter.Notify(ctx, alert.KindSettlerSignerMismatch, alert.SeverityCritical,
-		"Local TEE key is not an active node in TappRegistry for the configured app — every voucher will fail INVALID_SIGNATURE",
+	msg := "Local TEE key is not an active node in TappRegistry for the configured app — every voucher will fail INVALID_SIGNATURE"
+	fix := "register the TEE address as a tapp node, then call sandbox.addOrUpdateService with appId " + appId
+	if client.KmsProvider() {
+		msg = "KMS provider is no longer bound to its app's current TappRegistry instance — every voucher will fail INVALID_SIGNATURE"
+		fix = "the appId " + appId + " was re-registered since the provider was bound (or TappRegistry was redeployed: the contract owner runs repinKmsProvider)"
+	}
+	alerter.Notify(ctx, alert.KindSettlerSignerMismatch, alert.SeverityCritical, msg,
 		map[string]any{
 			"settler_addr": settler.Hex(),
 			"provider":     provider.Hex(),
 			"app_id":       appId,
-			"fix":          "register the TEE address as a tapp node, then call sandbox.addOrUpdateService with appId " + appId,
+			"fix":          fix,
 		},
 	)
 }

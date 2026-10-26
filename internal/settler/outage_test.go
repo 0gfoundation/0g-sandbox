@@ -62,7 +62,7 @@ func (o *outageChain) GetLastNonce(context.Context, common.Address, common.Addre
 
 func (o *outageChain) ProviderAddress() common.Address { return o.provider }
 
-func (o *outageChain) IsLocalTEEActiveNode(context.Context) (bool, error) { return true, nil }
+func (o *outageChain) IsProviderActive(context.Context) (bool, error) { return true, nil }
 
 func (o *outageChain) GetBalanceBatch(_ context.Context, users []common.Address, _ common.Address) ([]*big.Int, error) {
 	o.mu.Lock()
@@ -298,7 +298,7 @@ func (r *rotationChain) SubmitSettleFees(context.Context, []voucher.SandboxVouch
 
 func (r *rotationChain) ProviderAddress() common.Address { return r.provider }
 
-func (r *rotationChain) IsLocalTEEActiveNode(context.Context) (bool, error) { return false, nil }
+func (r *rotationChain) IsProviderActive(context.Context) (bool, error) { return false, nil }
 
 func (r *rotationChain) GetBalanceBatch(_ context.Context, users []common.Address, _ common.Address) ([]*big.Int, error) {
 	out := make([]*big.Int, len(users))

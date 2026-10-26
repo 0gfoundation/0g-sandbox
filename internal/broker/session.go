@@ -34,7 +34,11 @@ type providerLookup interface {
 type sessionChainClient interface {
 	GetServicePricing(ctx context.Context, provider common.Address) (*big.Int, *big.Int, *big.Int, error)
 	GetProviderBalance(ctx context.Context, user, provider common.Address) (*big.Int, *big.Int, *big.Int, error)
-	IsActiveNode(ctx context.Context, appId string, signer common.Address) (bool, error)
+	// IsActiveProvider reports whether `provider` has a service whose own
+	// key may sign vouchers now (SandboxServing isActiveProvider): an active
+	// node of its app for a node-signer provider, bound to the app's current
+	// instance for a KMS provider.
+	IsActiveProvider(ctx context.Context, provider common.Address) (bool, error)
 }
 
 // SessionHandler handles POST and DELETE /api/session on the Broker.
@@ -138,17 +142,18 @@ func (h *SessionHandler) HandlePost(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "provider has no app bound"})
 		return
 	}
-	// v2 identity: the provider IS its TEE signer. A sibling node of the same
-	// app passes IsActiveNode but must not act on ANOTHER provider's
+	// The request must be signed by the provider key itself (the TEE signer,
+	// or the app's KMS key). A sibling node of the same app is an active node
+	// too, but must not act on ANOTHER provider's
 	// (user, provider) bucket — without this binding it could trigger Payment
 	// Layer deposits into arbitrary buckets or overwrite monitoring sessions.
 	if signer != provider {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "signer is not the provider it acts for"})
 		return
 	}
-	isNode, err := h.chain.IsActiveNode(ctx, rec.AppId, signer)
-	if err != nil || !isNode {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "signature does not match an active TEE node"})
+	active, err := h.chain.IsActiveProvider(ctx, signer)
+	if err != nil || !active {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "signature does not match an active provider"})
 		return
 	}
 
@@ -306,9 +311,9 @@ func (h *SessionHandler) HandleDelete(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "signer is not the provider it acts for"})
 		return
 	}
-	isNode, err := h.chain.IsActiveNode(ctx, rec.AppId, signer)
-	if err != nil || !isNode {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "signature does not match an active TEE node"})
+	active, err := h.chain.IsActiveProvider(ctx, signer)
+	if err != nil || !active {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "signature does not match an active provider"})
 		return
 	}
 
