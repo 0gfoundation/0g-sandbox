@@ -466,6 +466,19 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		}
 	}
 
+	// A v2 issuer refusal must release only this request's reservation. The
+	// caller may already be cancelled; cleanup has its own bounded context and
+	// Redis I/O timeout. Clearing the flag first makes this cleanup idempotent.
+	releaseRejectedSeal := func() {
+		if !createReserved {
+			return
+		}
+		createReserved = false
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 2*time.Second)
+		defer cancel()
+		billing.Release(ctx, h.rdb.WithTimeout(2*time.Second), wallet, h.providerAddress, createRequired)
+	}
+
 	// Sealed containers: resolve image hash and inject app attestation + keypair
 	// before forwarding to Daytona.
 	sealed := extractSealed(body)
@@ -484,6 +497,7 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		return
 	}
 	if sealed && h.SealIssuer == nil {
+		releaseRejectedSeal()
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sealed issuer authentication not configured"})
 		return
 	}
@@ -543,12 +557,14 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		ctxErr := ctx.Err()
 		cancel()
 		if issuerErr != nil || ctxErr != nil {
+			releaseRejectedSeal()
 			h.log.Warn("sealed issuer authentication failed", zap.Error(issuerErr), zap.Error(ctxErr))
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sealed issuer authentication unavailable"})
 			return
 		}
 		modified, err = InjectSeal(modified, h.sealKey, imageHash, issuer)
 		if err != nil {
+			releaseRejectedSeal()
 			if strings.HasPrefix(err.Error(), "seal_id must be") {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return

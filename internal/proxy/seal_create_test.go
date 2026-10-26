@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,9 +13,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/0gfoundation/0g-sandbox/internal/billing"
 	"github.com/0gfoundation/0g-sandbox/internal/daytona"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -99,6 +104,61 @@ func TestSealedCreateIssuerFailureNeverCreates(t *testing.T) {
 				t.Fatal("created workload after issuer authentication failed")
 			}
 		})
+	}
+}
+
+func TestSealedCreateIssuerRejectionReleasesOnlyThisReservation(t *testing.T) {
+	for _, name := range []string{"missing_callback", "chain_error", "invalid_scope", "request_cancelled", "deadline"} {
+		for _, held := range []int64{0, 42} {
+			t.Run(fmt.Sprintf("%s/existing_%d", name, held), func(t *testing.T) {
+				h, r, _, created := newSealedCreateFixture(t)
+				mr := miniredis.RunT(t)
+				rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+				t.Cleanup(func() { _ = rdb.Close() })
+				h.rdb = rdb
+				h.balCheck = &mockBalChecker{bal: big.NewInt(1000)}
+				h.createFee = big.NewInt(11)
+				h.computePricePerSec = new(big.Int)
+				const wallet = "0xOWNER"
+				if held > 0 {
+					if _, err := billing.Reserve(context.Background(), rdb, wallet, h.providerAddress, big.NewInt(held), time.Minute); err != nil {
+						t.Fatal(err)
+					}
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				if name != "missing_callback" {
+					h.SealIssuer = func(ctx context.Context) (SealIssuer, error) {
+						if got := billing.GetReserved(context.Background(), rdb, wallet, h.providerAddress); got.Int64() != held+11 {
+							t.Fatalf("create did not actually reserve: %s", got)
+						}
+						switch name {
+						case "invalid_scope":
+							return SealIssuer{}, nil
+						case "request_cancelled":
+							cancel()
+							return SealIssuer{}, context.Canceled
+						case "deadline":
+							<-ctx.Done()
+							return SealIssuer{}, ctx.Err()
+						default:
+							return SealIssuer{}, errors.New("chain unavailable")
+						}
+					}
+				}
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"sealed","sealed":true}`)).WithContext(ctx))
+				if w.Code < 500 {
+					t.Fatalf("expected refusal, got %d: %s", w.Code, w.Body.String())
+				}
+				if created.Load() != 0 {
+					t.Fatal("created sandbox after issuer refusal")
+				}
+				if got := billing.GetReserved(context.Background(), rdb, wallet, h.providerAddress); got.Int64() != held {
+					t.Fatalf("reservation after refusal %s; want existing %d only", got, held)
+				}
+			})
+		}
 	}
 }
 
