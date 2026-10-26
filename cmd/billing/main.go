@@ -74,7 +74,8 @@ func main() {
 	// every boot, so balances, nonces and the service outlive a reboot.
 	// Otherwise the provider is the TEE signer above, new with every
 	// tapp-server restart. The TEE signer stays the node identity either way:
-	// it signs sealed attestations and endorses the KMS provider on chain.
+	// it endorses the KMS provider on chain; the stable provider signs v2
+	// sealed attestations.
 	var providerKeyInEvidence atomic.Bool
 	if cfg.Chain.ProviderKeySource == "kms" {
 		pk, err := tee.GetProviderKey(ctx)
@@ -546,7 +547,14 @@ func main() {
 		ProviderAddress: providerHex,
 		Strict:          cfg.Server.AuthStrict,
 	}))
-	proxyHandler := proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec, providerHex, cfg.Chain.AdminList(), cfg.Server.SSHGatewayHost, rdb, log, cfg.Server.BrokerURL, onchain.ProviderKey(), onchain.NodeKey(), cfg.Billing.VoucherIntervalSec)
+	proxyHandler := proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec, providerHex, cfg.Chain.AdminList(), cfg.Server.SSHGatewayHost, rdb, log, cfg.Server.BrokerURL, onchain.ProviderKey(), onchain.ProviderKey(), cfg.Billing.VoucherIntervalSec)
+	proxyHandler.SealIssuer = func(ctx context.Context) (proxy.SealIssuer, error) {
+		epoch, err := onchain.GetSealedAppInstance(ctx, backendAppName)
+		if err != nil {
+			return proxy.SealIssuer{}, err
+		}
+		return proxy.SealIssuer{ChainID: onchain.ChainID().Uint64(), RegistryAddress: onchain.TappRegistryAddress(), AppID: backendAppName, RegisteredAt: epoch}, nil
+	}
 	proxyHandler.SealedOnly = cfg.Server.SealedOnly
 	proxyHandler.AppOwner = appOwnerFn
 	if cfg.Chain.AttestorAppID != "" {

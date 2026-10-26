@@ -101,10 +101,10 @@ contracts/
   and every node of the app, so a reboot moves no balance, service or gas.
   Default is `local`, today's model above.
 - **Two keys at runtime:**
-  - `chain.Client.ProviderKey()` signs vouchers, settlement txs and broker
-    requests.
-  - `NodeKey()`, the TEE signer, signs sealed attestations (the attestor
-    requires an active node) and the provider's endorsement.
+  - `chain.Client.ProviderKey()` signs vouchers, settlement txs, broker
+    requests and v2 sealed-workload attestations.
+  - `NodeKey()`, the rotating TEE signer, signs the provider's endorsement
+    and remains the node-registration identity; it does not sign sealed proofs.
 - **Registration:** `addOrUpdateKmsService` (`cmd/provider register --kms`)
   needs an active node's EIP-712 endorsement of `(provider, appId)`. That
   endorsement is served by `/api/info`.
@@ -182,21 +182,27 @@ When a sandbox create request includes `"sealed": true`, the proxy:
 1. Resolves the image/snapshot reference to its content digest via `registry.GetDigest`
    (uses `crane.Digest`; insecure mode for `registry:` or `localhost:` hosts)
 2. Generates an ephemeral secp256k1 keypair for the container's signing identity
-3. Builds a TEE-signed attestation over `{sealId, pubkey, imageHash, ts}`:
+3. Authenticates its KMS provider and current registration instance with bounded,
+   block-pinned chain reads. Builds a v2 app-signed attestation using nine ABI words:
    ```
-   message = keccak256("ImageAttestation:" + sealId + ":" + pubkey + ":" + imageHash + ":" + ts)
+   digest = keccak256(abi.encode(domainHash, chainId, registry, appIdHash,
+     registeredAt, sealId, keccak256(compressedPubkey), imageHash, issuedAt))
    ```
-   Signature V is normalised to 27/28 (Ethereum `ecrecover` convention)
+   `domainHash = keccak256("0g.sandbox.ImageAttestation.v2")`; appIdHash uses exact
+   UTF-8 bytes. `ProviderKey()` signs the raw digest. Signature V is normalised to27/28.
 4. Injects two env vars into the container:
    - `SANDBOX_SEAL_KEY` — hex private key; the container's signing identity.
      Never returned through the API; stripped from the create response.
-   - `SANDBOX_SEAL_ATTESTATION` — JSON: `{seal_id, pubkey, image_hash, signature, ts}`
+   - `SANDBOX_SEAL_ATTESTATION` — JSON: `{version, chain_id, registry_address, app_id, registered_at, seal_id, pubkey, image_hash, signature, ts}`
 5. Sets label `0g-sealed: "true"` → blocks SSH, toolbox, and the transparent `/api/sandbox/:id/<other>`
    passthrough for the sandbox lifetime (the passthrough reaches Daytona's port-preview and public-toggle
    endpoints, either of which would open ports beyond :8080; lifecycle routes keep working)
-6. Sets label `0g-seal-id: <32-char hex>` → operators can correlate sandbox ↔ attestation
+6. Sets label `0g-seal-id: <64-char hex>` → operators can correlate sandbox ↔ attestation
 
-Sealing requires the image to be present in the internal registry (needed to resolve the
+Sealing requires `PROVIDER_KEY_SOURCE=kms` and a valid current KMS service binding.
+The v2 attestor authenticates the app signer and signed issuer scope through discovery;
+legacy node-signed workloads need an owner reset. See `docs/APP_IDENTITY.md`.
+Sealing also requires the image to be present in the internal registry (needed to resolve the
 content digest). A non-resolvable image reference is a hard failure; the create request is
 rejected.
 

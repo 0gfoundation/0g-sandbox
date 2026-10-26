@@ -110,7 +110,7 @@ type Handler struct {
 	sshGatewayHost      string   // if set, replaces localhost in SSH commands
 	computePricePerSec  *big.Int
 	rdb                 *redis.Client
-	sealKey             *ecdsa.PrivateKey // node's TEE signer, signs seal attestations; nil = sealed containers disabled
+	sealKey             *ecdsa.PrivateKey // stable KMS app signer; nil = sealed containers disabled
 	broker              *brokerClient     // nil = broker integration disabled
 	log                 *zap.Logger
 
@@ -130,6 +130,9 @@ type Handler struct {
 	// appId, with current registration-instance checks. It does not authorize
 	// arbitrary node signers or change the owner-only workload routes.
 	AppAdmin func(ctx context.Context, wallet string) (bool, error)
+	// SealIssuer authenticates this provider's current app instance on each
+	// sealed create. No issuer scope is accepted from the create request.
+	SealIssuer func(ctx context.Context) (SealIssuer, error)
 }
 
 func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec *big.Int, providerAddress string, adminAddresses []string, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, providerKey, sealKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
@@ -463,7 +466,7 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		}
 	}
 
-	// Sealed containers: resolve image hash and inject TEE attestation + keypair
+	// Sealed containers: resolve image hash and inject app attestation + keypair
 	// before forwarding to Daytona.
 	sealed := extractSealed(body)
 	if err := ValidatePublicPorts(body, sealed); err != nil {
@@ -477,7 +480,11 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		return
 	}
 	if sealed && h.sealKey == nil {
-		c.JSON(http.StatusNotImplemented, gin.H{"error": "sealed containers not available: TEE key not configured"})
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "sealed containers not available: KMS app signer not configured"})
+		return
+	}
+	if sealed && h.SealIssuer == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sealed issuer authentication not configured"})
 		return
 	}
 	var imageHash string
@@ -529,7 +536,18 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	}
 
 	if sealed {
-		modified, err = InjectSeal(modified, h.sealKey, imageHash)
+		// Resolve immediately before signing, after potentially slow image
+		// resolution. A failed lookup never creates a new sealed workload.
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		issuer, issuerErr := h.SealIssuer(ctx)
+		ctxErr := ctx.Err()
+		cancel()
+		if issuerErr != nil || ctxErr != nil {
+			h.log.Warn("sealed issuer authentication failed", zap.Error(issuerErr), zap.Error(ctxErr))
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sealed issuer authentication unavailable"})
+			return
+		}
+		modified, err = InjectSeal(modified, h.sealKey, imageHash, issuer)
 		if err != nil {
 			if strings.HasPrefix(err.Error(), "seal_id must be") {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

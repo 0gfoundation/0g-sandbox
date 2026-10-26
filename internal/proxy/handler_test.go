@@ -464,7 +464,7 @@ func TestSealedOnly_RejectsUnsealedCreate(t *testing.T) {
 
 // TestSealedOnly_AcceptsSealedCreate confirms the gate doesn't accidentally
 // block sealed creates when sealed_only=true. Sealed: true must pass the
-// gate (and then hit the existing "TEE key not configured" path because the
+// gate (and then hit the "KMS app signer not configured" path because the
 // test handler has sealKey=nil).
 func TestSealedOnly_AcceptsSealedCreate(t *testing.T) {
 	srv, _ := mockDaytona(t, nil)
@@ -488,7 +488,7 @@ func TestSealedOnly_AcceptsSealedCreate(t *testing.T) {
 	// sealKey is nil in the test setup, so we expect 501 (not 400 from the
 	// SealedOnly gate). That confirms the gate let the request through.
 	if w.Code != http.StatusNotImplemented {
-		t.Fatalf("expected 501 (TEE key not configured) after passing sealed gate, got %d: %s",
+		t.Fatalf("expected 501 (KMS app signer not configured) after passing sealed gate, got %d: %s",
 			w.Code, w.Body.String())
 	}
 }

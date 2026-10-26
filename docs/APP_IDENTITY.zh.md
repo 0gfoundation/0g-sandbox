@@ -46,3 +46,29 @@ Registry 的 epoch 是时间戳；同一 owner 在同一区块内注销重注册
 当前 sandbox 自身不主动向 attestor 发起 HTTP 请求。需要发起请求的组件保留
 现有 attestor 业务 URL 作为连接地址，并使用发现的 TLS pin 认证身份；本次不新增
 业务 URL 注册合约。
+
+## Sealed workload 证明（v2）
+
+创建 sealed workload 必须使用 `PROVIDER_KEY_SOURCE=kms`。`SANDBOX_SEAL_ATTESTATION`
+由稳定 app signer 签署；节点 signer 继续用于节点注册与 KMS provider 背书。每个容器
+仍有独立随机生成的 secp256k1 key。
+
+v2 envelope 签入 `chain_id`、`registry_address`、按原始 UTF-8 字节解释的 `app_id`、
+`registered_at`、`seal_id`、压缩容器公钥、镜像 hash 与签发时间。创建时从链上取得自身
+注册实例；注册实例或 KMS service binding 不可用、无效时拒绝创建。调用者提供的字段
+不能替换签发者 scope。
+
+签名 digest 为以下九个 32 字节 ABI word 编码后的 Keccak-256：
+`domainHash, chainId, registry, appIdHash, registeredAt, sealId, containerPubkeyHash,
+imageHash, issuedAt`。其中 `domainHash = keccak256("0g.sandbox.ImageAttestation.v2")`；
+字符串取精确 UTF-8 字节，公钥 hash 取原始 33 字节压缩公钥。整数使用无符号大端 ABI
+word，registry 地址左侧补零。不添加 `personal_sign` 包装。
+
+配套 attestor 和 sealed runtime 都需要支持 v2。attestor 通过 Scan 与 SandboxServing
+认证 signer 和注册实例，同时保留 framework 镜像白名单校验。正常重启只改变节点
+signer，app signer 和注册实例不变，已保存的 v2 证明因此可以继续使用。同 appId
+注销重注册后，即使 KMS key 未变，也按新实例处理，不能继承旧容器证明。
+
+不提供 v1/node 签名回退。已有 v1 容器需要 owner 明确执行 reset 才能取得新证明。
+应先保存运行时状态；reset 保留 agent 身份与已提交的 iData/settings，不保留原容器
+文件系统。更新时应同时部署新版 sandbox、attestor 与 sealed 镜像。

@@ -60,8 +60,8 @@ type Client struct {
 	tapp         *TappRegistry
 	tappAddr     common.Address
 	chainID      *big.Int
-	nodeKey      *ecdsa.PrivateKey // the node's TEE signer: sealed attestations, KMS provider endorsement
-	providerKey  *ecdsa.PrivateKey // signs vouchers (EIP-712, off-chain) and settlement txs
+	nodeKey      *ecdsa.PrivateKey // the node's TEE signer: registration and KMS provider endorsement
+	providerKey  *ecdsa.PrivateKey // signs vouchers, settlement txs and v2 sealed attestations
 	providerAddr common.Address    // = providerKey's address
 	kmsProvider  bool              // providerKey is the app's KMS key, not the node signer
 
@@ -139,8 +139,7 @@ func (c *Client) TappRegistryAddress() common.Address { return c.tappAddr }
 func (c *Client) ProviderKey() *ecdsa.PrivateKey { return c.providerKey }
 
 // NodeKey returns the node's TEE signer — the address TappRegistry lists as
-// a node of the app. It signs what must come from a node: sealed-container
-// attestations, and the endorsement of a KMS provider. Without a KMS
+// a node of the app. It signs the endorsement of a KMS provider. Without a KMS
 // provider it is also the provider key.
 func (c *Client) NodeKey() *ecdsa.PrivateKey { return c.nodeKey }
 

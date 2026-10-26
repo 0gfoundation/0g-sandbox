@@ -56,3 +56,35 @@ registration counter. A different owner is rejected even with the same timestamp
 The current sandbox does not initiate HTTP calls to attestor. Components that
 do call it retain their configured business URL as a locator and authenticate
 TLS using the discovered app pin. No new business-URL registry is introduced.
+
+## Sealed workload attestations (v2)
+
+Creating a sealed workload requires `PROVIDER_KEY_SOURCE=kms`. The stable app signer,
+not the rotating node signer, signs `SANDBOX_SEAL_ATTESTATION`. Each container still
+receives its own random secp256k1 key. Node keys remain node-registration and KMS
+provider-endorsement identities.
+
+The version-2 envelope signs `chain_id`, `registry_address`, exact UTF-8 `app_id`,
+`registered_at`, `seal_id`, compressed container public key, image hash and issue time.
+The provider obtains its registration instance from the chain when creating the
+container and rejects creation if that instance or KMS service binding is unavailable
+or invalid. Caller-supplied issuer fields cannot replace this scope.
+
+The raw signing digest is Keccak-256 of nine ABI-encoded 32-byte words:
+`domainHash, chainId, registry, appIdHash, registeredAt, sealId, containerPubkeyHash,
+imageHash, issuedAt`, where `domainHash = keccak256("0g.sandbox.ImageAttestation.v2")`.
+The two string hashes use exact UTF-8 bytes and the public-key hash uses the raw
+33-byte compressed key. Integers are unsigned big-endian ABI words; the registry
+address is left-padded to one word. No `personal_sign` wrapper is added.
+
+The matching attestor and sealed runtime must support v2. The attestor authenticates
+the signer and issuer instance through Scan plus SandboxServing, preserving the
+framework-image allowlist. A normal reboot changes the node signer but retains the
+app signer and registration instance, so the stored v2 proof remains usable.
+Re-registering the same appId creates a different instance even if KMS returns the
+same key; its epoch must not inherit an earlier container proof.
+
+There is no v1/node-signature fallback. Existing v1 containers require an explicit
+owner-authorized reset to receive a new proof. Save runtime state first; reset retains
+the agent identity and committed iData/settings, rather than retaining the original
+container filesystem. Deploy the updated sandbox, attestor and sealed image together.
