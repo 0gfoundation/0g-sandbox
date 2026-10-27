@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -66,15 +69,36 @@ func main() {
 	}
 	cfg.Chain.TEEPrivateKey = appKey.PrivateKeyHex
 
+	// ── Provider key ──────────────────────────────────────────────────────────
+	// PROVIDER_KEY_SOURCE=kms: the provider is the app's KMS key — the same on
+	// every boot, so balances, nonces and the service outlive a reboot.
+	// Otherwise the provider is the TEE signer above, new with every
+	// tapp-server restart. The TEE signer stays the node identity either way:
+	// it endorses the KMS provider on chain; the stable provider signs v2
+	// sealed attestations.
+	var providerKeyInEvidence atomic.Bool
+	if cfg.Chain.ProviderKeySource == "kms" {
+		pk, err := tee.GetProviderKey(ctx)
+		if err != nil {
+			log.Fatal("failed to take the provider key from the KMS", zap.Error(err))
+		}
+		if !pk.InEvidence {
+			log.Warn("tapp-server does not list the KMS provider key in the attestation evidence (tapp-server >= 0.11.0 does); only the on-chain endorsement ties it to this TEE",
+				zap.String("provider", pk.Address.Hex()))
+		}
+		providerKeyInEvidence.Store(pk.InEvidence)
+		cfg.Chain.ProviderPrivateKey = pk.PrivateKeyHex
+	}
+
 	// ── Chain client (TEE private key + ABI binding) ──────────────────────────
 	onchain, err := chain.NewClient(cfg)
 	if err != nil {
 		log.Fatal("chain client init failed", zap.Error(err))
 	}
 
-	// Provider identity = the TEE signer's own address (v2: provider IS the
-	// TEE signer). It keys the voucher payee, the settler queue, and every
-	// provider-bound lookup below.
+	// Provider identity = the provider key's address: the KMS key under
+	// PROVIDER_KEY_SOURCE=kms, else the TEE signer (v2). It keys the voucher
+	// payee, the settler queue, and every provider-bound lookup below.
 	providerAddr := onchain.ProviderAddress()
 	providerHex := providerAddr.Hex()
 
@@ -91,10 +115,26 @@ func main() {
 	if owner, err := appOwnerFn(ctx); err != nil {
 		log.Warn("app owner not resolvable yet", zap.String("app_id", backendAppName), zap.Error(err))
 	} else {
-		log.Info("provider identity derived from TEE key",
+		log.Info("provider identity",
 			zap.String("provider", providerHex),
+			zap.String("key_source", cfg.Chain.ProviderKeySource),
+			zap.String("node", onchain.NodeAddress().Hex()),
 			zap.String("app_id", backendAppName),
 			zap.String("owner", owner))
+	}
+	// A KMS provider is registered with this node's endorsement
+	// (addOrUpdateKmsService); /api/info serves it to `cmd/provider register
+	// --kms`. Deterministic, so computed once.
+	var providerEndorsement string
+	if onchain.KmsProvider() {
+		if backendAppName == "" {
+			log.Fatal("PROVIDER_KEY_SOURCE=kms requires BACKEND_APP_NAME: the provider is endorsed for that appId")
+		}
+		sig, err := onchain.KmsProviderEndorsement(backendAppName)
+		if err != nil {
+			log.Fatal("failed to endorse the KMS provider key", zap.Error(err))
+		}
+		providerEndorsement = "0x" + hex.EncodeToString(sig)
 	}
 	// Drift check: the service this signer is registered under must be bound
 	// to the same appId we fetch our TEE key for. A mismatch means the key
@@ -166,7 +206,7 @@ func main() {
 	}
 
 	signer := billing.NewSigner(
-		onchain.PrivateKey(),
+		onchain.ProviderKey(),
 		onchain.ChainID(),
 		onchain.ContractAddress(),
 		providerAddr,
@@ -332,9 +372,13 @@ func main() {
 		settlerAddr := onchain.SettlerAddress()
 
 		// Signer health — derived from sandbox.services[provider].appId and
-		// tap.getNode(appId, settler).addedAt. All on-chain readable; no admin
-		// wallet required.
-		signer := gin.H{"local": settlerAddr.Hex(), "status": "unknown"}
+		// whether the provider key may settle (IsProviderActive: a node-signer
+		// provider is an active node; a KMS provider is bound to the app's
+		// current instance). All on-chain readable; no admin wallet required.
+		// `local` is the node's TEE signer — the node identity, and with a
+		// node-signer provider the provider itself.
+		nodeAddr := onchain.NodeAddress()
+		signer := gin.H{"local": nodeAddr.Hex(), "status": "unknown"}
 		appId, appErr := onchain.GetServiceAppId(ctx, providerAddr)
 		if appErr != nil {
 			signer["error"] = appErr.Error()
@@ -342,13 +386,21 @@ func main() {
 			signer["status"] = "unregistered"
 		} else {
 			signer["app_id"] = appId
-			isNode, nodeErr := onchain.IsActiveNode(ctx, appId, settlerAddr)
-			if nodeErr != nil {
-				signer["error"] = nodeErr.Error()
-			} else if isNode {
+			active, activeErr := onchain.IsProviderActive(ctx)
+			if activeErr != nil {
+				signer["error"] = activeErr.Error()
+			} else if active {
 				signer["status"] = "aligned"
 			} else {
 				signer["status"] = "mismatch"
+			}
+			if onchain.KmsProvider() {
+				// The node itself must be an active node too: the KMS serves
+				// the provider key, and the attestor accepts sealed
+				// attestations, only from one.
+				if isNode, nodeErr := onchain.IsActiveNode(ctx, appId, nodeAddr); nodeErr == nil {
+					signer["node_active"] = isNode
+				}
 			}
 		}
 
@@ -373,9 +425,11 @@ func main() {
 			}
 		}
 
-		c.JSON(http.StatusOK, gin.H{
+		info := gin.H{
 			"contract_address":      cfg.Chain.ContractAddress,
 			"provider_address":      providerHex,
+			"provider_key_source":   cfg.Chain.ProviderKeySource,
+			"node_address":          nodeAddr.Hex(),
 			"owner_address":         ownerForInfo(c.Request.Context()),
 			"app_id":                backendAppName,
 			"chain_id":              cfg.Chain.ChainID,
@@ -387,7 +441,17 @@ func main() {
 			"sealed_only":           cfg.Server.SealedOnly,
 			"signer":                signer,
 			"settler":               settler,
-		})
+		}
+		if onchain.KmsProvider() {
+			// The node's endorsement for addOrUpdateKmsService, and whether
+			// tapp-server lists the provider key in this node's evidence
+			// (runtime_data.kms_keys, material tee.ProviderMaterial) — what
+			// a client checks to pin the provider to an attested TEE.
+			info["provider_endorsement"] = providerEndorsement
+			info["provider_key_material"] = tee.ProviderMaterial
+			info["provider_in_evidence"] = providerKeyInEvidence.Load()
+		}
+		c.JSON(http.StatusOK, info)
 	})
 
 	// Public snapshots list — no signing required; snapshots are provider-managed
@@ -483,9 +547,20 @@ func main() {
 		ProviderAddress: providerHex,
 		Strict:          cfg.Server.AuthStrict,
 	}))
-	proxyHandler := proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec, providerHex, cfg.Chain.AdminList(), cfg.Server.SSHGatewayHost, rdb, log, cfg.Server.BrokerURL, onchain.PrivateKey(), cfg.Billing.VoucherIntervalSec)
+	proxyHandler := proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec, providerHex, cfg.Chain.AdminList(), cfg.Server.SSHGatewayHost, rdb, log, cfg.Server.BrokerURL, onchain.ProviderKey(), onchain.ProviderKey(), cfg.Billing.VoucherIntervalSec)
+	proxyHandler.SealIssuer = func(ctx context.Context) (proxy.SealIssuer, error) {
+		epoch, err := onchain.GetSealedAppInstance(ctx, backendAppName)
+		if err != nil {
+			return proxy.SealIssuer{}, err
+		}
+		return proxy.SealIssuer{ChainID: onchain.ChainID().Uint64(), RegistryAddress: onchain.TappRegistryAddress(), AppID: backendAppName, RegisteredAt: epoch}, nil
+	}
 	proxyHandler.SealedOnly = cfg.Server.SealedOnly
 	proxyHandler.AppOwner = appOwnerFn
+	if cfg.Chain.AttestorAppID != "" {
+		proxyHandler.AppAdmin = newAttestorAuthorizer(uint64(cfg.Chain.ChainID), cfg.Chain.TappRegistry,
+			cfg.Chain.AttestorAppID, rdb, onchain, tee.ResolveAppIdentity)
+	}
 	proxyHandler.RegisterPublic(apiPublic)
 	proxyHandler.Register(api)
 	go runStopHandler(ctx, stopCh, dtona, rdb, alerter, log, proxyHandler.BrokerDeregister)
@@ -756,10 +831,21 @@ func main() {
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler: r,
 	}
+	if cfg.Server.TLSEnabled {
+		cert, err := tee.AppTLSCertificate(ctx, backendAppName)
+		if err != nil {
+			log.Fatal("app TLS initialization failed", zap.Error(err))
+		}
+		srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}
+	}
 
 	go func() {
-		log.Info("HTTP server starting", zap.Int("port", cfg.Server.Port))
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Info("HTTP server starting", zap.Int("port", cfg.Server.Port), zap.Bool("tls", cfg.Server.TLSEnabled))
+		serve := srv.ListenAndServe
+		if cfg.Server.TLSEnabled {
+			serve = func() error { return srv.ListenAndServeTLS("", "") }
+		}
+		if err := serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal("HTTP server error", zap.Error(err))
 		}
 	}()

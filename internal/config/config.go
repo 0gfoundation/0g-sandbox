@@ -61,6 +61,14 @@ type ChainConfig struct {
 	ContractAddress string `mapstructure:"contract_address"`
 	TappRegistry    string `mapstructure:"tapp_registry"`
 	TEEPrivateKey   string `mapstructure:"tee_private_key"`
+	// ProviderKeySource picks the provider identity (PROVIDER_KEY_SOURCE):
+	// "local" (default) is the node's TEE signer, which tapp makes anew on
+	// every tapp-server restart; "kms" is the app's KMS key
+	// (tee.GetProviderKey), the same on every boot and node.
+	ProviderKeySource string `mapstructure:"provider_key_source"`
+	// ProviderPrivateKey is set at startup from tee.GetProviderKey when
+	// ProviderKeySource is "kms"; empty means the provider is the TEE signer.
+	ProviderPrivateKey string `mapstructure:"-"`
 	// AdminAddresses is an ADDITIVE comma-separated list of extra wallet
 	// addresses that may invoke operator-only endpoints (snapshot/registry
 	// management, archive-all, force-delete, sessions). The appId's
@@ -68,7 +76,10 @@ type ChainConfig struct {
 	// resolved from the chain at runtime (getAppInfo(BACKEND_APP_NAME).owner),
 	// never configured, so it can't drift from the on-chain truth.
 	AdminAddresses string `mapstructure:"admin_addresses"`
-	ChainID        int64  `mapstructure:"chain_id"`
+	// AttestorAppID authorizes the discovered stable app signer. Operator
+	// wallets in AdminAddresses remain separate from application identities.
+	AttestorAppID string `mapstructure:"attestor_app_id"`
+	ChainID       int64  `mapstructure:"chain_id"`
 }
 
 // AdminList returns the parsed extra admin wallet addresses (lowercased hex).
@@ -88,6 +99,7 @@ func (c *ChainConfig) AdminList() []string {
 }
 
 type ServerConfig struct {
+	TLSEnabled     bool   `mapstructure:"tls_enabled"`
 	Port           int    `mapstructure:"port"`
 	SSHGatewayHost string `mapstructure:"ssh_gateway_host"`
 	BrokerURL      string `mapstructure:"broker_url"`
@@ -124,6 +136,7 @@ func Load() (*Config, error) {
 	v.SetDefault("billing.price_per_cpu_per_sec", "0")
 	v.SetDefault("billing.price_per_mem_gb_per_sec", "0")
 	v.SetDefault("billing.create_fee", "5000000")
+	v.SetDefault("chain.provider_key_source", "local")
 	v.SetDefault("redis.addr", "redis:6379")
 	v.SetDefault("daytona.registry_url", "http://registry:6000")
 	v.SetDefault("alert.dedup_window_sec", 3600)          // 1h between same-kind alerts
@@ -157,8 +170,11 @@ func Load() (*Config, error) {
 		"chain.contract_address":           "SETTLEMENT_CONTRACT",
 		"chain.tapp_registry":              "TAPP_REGISTRY",
 		"chain.admin_addresses":            "ADMIN_ADDRESSES",
+		"chain.attestor_app_id":            "ATTESTOR_APP_ID",
 		"chain.chain_id":                   "CHAIN_ID",
+		"chain.provider_key_source":        "PROVIDER_KEY_SOURCE",
 		"server.port":                      "PORT",
+		"server.tls_enabled":               "TLS_ENABLED",
 		"server.ssh_gateway_host":          "SSH_GATEWAY_HOST",
 		"server.broker_url":                "BROKER_URL",
 		"server.sealed_only":               "SEALED_ONLY",
@@ -266,6 +282,12 @@ func (c *Config) validate() error {
 	}
 	if c.Chain.ChainID == 0 {
 		return fmt.Errorf("required config missing: CHAIN_ID")
+	}
+	if c.Chain.ProviderKeySource != "local" && c.Chain.ProviderKeySource != "kms" {
+		return fmt.Errorf("PROVIDER_KEY_SOURCE must be \"local\" or \"kms\", got %q", c.Chain.ProviderKeySource)
+	}
+	if c.Chain.AttestorAppID != "" && (!c.Server.TLSEnabled || c.Chain.ProviderKeySource != "kms") {
+		return fmt.Errorf("ATTESTOR_APP_ID requires TLS_ENABLED=true and PROVIDER_KEY_SOURCE=kms")
 	}
 	return nil
 }
