@@ -2,7 +2,7 @@
 
 Networks: **0G Mainnet** (chain ID 16661) · **0G Galileo Testnet** (chain ID 16602, used by dev + testnet). Each section below states its network, explorer, and RPC.
 
-Owner: mainnet contract/beacon = `0x87605Ec8E10Eb373C1d070e15E5d78FAC4D7621d` (since 2026-10-04; deployed by `0x73443d…`); dev + testnet contract/beacon = `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f`.
+Owner (contract + beacon, read on chain 2026-10-28): mainnet = `0xc0603224dE8c3B910a4487368E476e19dC6127cF` (Fordefi MPC vault, since 2026-10-16; deployed by `0x73443d…`); testnet = `0x9C58F839451EBf3e7f82442bC48E4088746380Bb` (since 2026-10-14); dev = `0x2AB7F05bA6560ef2B21Aa1b52FCc96DB51Cfa0B3` (since 2026-10-19).
 
 
 > Chinese version: [CONTRACTS.zh.md](README.zh.md)
@@ -26,6 +26,9 @@ Owner: mainnet contract/beacon = `0x87605Ec8E10Eb373C1d070e15E5d78FAC4D7621d` (s
 |------|------|-------|
 | 2026-09-09 | `0x90a0f1BcaCE1A516CF4D1918178EB99E08c16f24` | Initial mainnet deploy (v2): provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement. Bound to TappRegistry `0x5487…e612`. Owner = deployer `0x7344…431b`. |
 | 2026-10-04 | (no impl change) | **Ownership transferred** — contract `owner` + beacon owner set to `0x87605Ec8E10Eb373C1d070e15E5d78FAC4D7621d` (previously `0x7344…431b`). No implementation change. |
+| 2026-10-16 | (no impl change) | **Ownership transferred** — contract `owner` + beacon owner set to the Fordefi MPC vault `0xc0603224dE8c3B910a4487368E476e19dC6127cF` (previously `0x8760…621d`): contract tx `0xcf7fce1484530133dacc873d6e75b728de9c049b8005d737cb6c06ca333e243c`, beacon tx `0xa903456f00729094ba82f11823a1c1c741d50c3828b83f2e71d00d5538dca2da`. No implementation change. |
+
+The KMS-provider implementation (dev 2026-10-26, testnet 2026-10-27) is not on mainnet yet; its beacon upgrade is a vault transaction.
 
 ```env
 SETTLEMENT_CONTRACT=0x650C16a491ad52dB6b7f3053bCaD650cb43d2206
@@ -53,7 +56,9 @@ CHAIN_ID=16661
 | initial | — | Initial deploy: per-provider balance isolation, owner model |
 | 2026-03-10 | `0x9a3D6C66e3e6E020D8D40d851Db76D76EBfa93f2` | Removed `msg.sender == provider` check in `settleFeesWithTEE`; TEE key signs settlement txs directly, no `PROVIDER_PRIVATE_KEY` needed |
 | 2026-07-19 | `0x47a8E809Cd81b94eD19874da73C0E3F82DD90E5C` | **v2 redeploy (new proxy/beacon)**: provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement.  Previous dev proxy `0x2024eB0C…E9b3` retired (refund-only) |
-| 2026-09-05 | (no impl change) | **Ownership transferred** — contract `owner` + beacon owner set to `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f` (previously `0xB831…CEd7`). No implementation change. |
+| 2026-09-04 | (no impl change) | **Ownership transferred** — contract `owner` + beacon owner set to `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f` (previously `0xB831…CEd7`, via `0xea69…1837` the same day). No implementation change. |
+| 2026-10-19 | (no impl change) | **Ownership transferred** — contract `owner` + beacon owner set to `0x2AB7F05bA6560ef2B21Aa1b52FCc96DB51Cfa0B3` (previously `0x3f1a…9fef9f`): contract tx `0x23c2987fbec6627f11cec151145c1ff8676efb072038e2aa241cb29261e2e0e4`, beacon tx `0x6cc2047fb81fb9699f4481b813b02a6958495b56dc40f26a4ef6a7fb7ce11890`. No implementation change. |
+| 2026-10-26 | `0xD3f1B3633F015D126e8374b5EDBE699a680DC3D3` | **KMS provider key** (#144): `addOrUpdateKmsService` registers a provider that is the app's KMS key, endorsed by an active node of the app (EIP-712 over `KmsProvider(provider, appId)`), and binds it to the app's current TappRegistry instance (`registeredAt`), which settlement and owner actions check; `repinKmsProvider` re-binds after a TappRegistry redeploy; new views `kmsBindings`, `kmsProviderDigest`, `isActiveProvider`. Node-signer providers unchanged; the new state takes one `__gap` slot. Deploy tx `0x4d6a26378fffd057fab27fe045f4febd06050b52bc1121062aa466f482e01143`, beacon `upgradeTo` tx `0xb07d9262ee6aaf700bef687a93cf19b50baa5c079151b1f8f2f65b90a9e70b0a`. Not yet verified on chainscan. On 2026-10-27 the dev sandbox's KMS provider `0x6051…c13a` was registered (tx `0x9fd5fc1dd675978669d69a03bd0b019e86c980f590b9b206dc9196c6f65ca6ea`) and its node-signer service `0x5f04…9965` removed (tx `0x73051b4d77c94d05bba27d2ee156d53b562931da7f70c6f4de7ca3fa29a90c6b`). |
 
 ```env
 SETTLEMENT_CONTRACT=0x3D0F2D62A60c8e62095671FfB23D15Cc4C98ca7c
@@ -77,7 +82,9 @@ TAPP_REGISTRY=0x2Ce80374318B1d7Fb3345724457a182E0ad165c9
 | Date | Impl | Notes |
 |------|------|-------|
 | 2026-07-20 | `0x7a1A5FC5B1A6AC1127e2D8b63400615B2ea49C47` | **v2 redeploy (new proxy/beacon)**: provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement. Verified on chainscan. Bound to TappRegistry `0x2Ce8…65c9` (repointed from `0x95a0…` via setTappRegistry right after deploy). Supersedes the v1 testnet proxies `0xA07b0033…FC12c` and `0x3d4d8a05…cf6f` — both retired (refund-only) |
-| 2026-09-05 | (no impl change) | **Ownership transferred** — contract `owner` + beacon owner set to `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f` (previously `0xB831…CEd7`). No implementation change. |
+| 2026-09-04 | (no impl change) | **Ownership transferred** — contract `owner` + beacon owner set to `0x3f1a683418dba4c38dd853a7b896f7327a9fef9f` (previously `0xB831…CEd7`, via `0xea69…1837` the same day). No implementation change. |
+| 2026-10-14 | (no impl change) | **Ownership transferred** — contract `owner` + beacon owner set to `0x9C58F839451EBf3e7f82442bC48E4088746380Bb` (previously `0x3f1a…9fef9f`): contract tx `0x0ddd81829ab2a845ef16268bc993f64e235b6002af50e1342d3938366c0e9547`, beacon tx `0x555654195574a78476dd503d56f76db4e91f4bbf697d663a1c8cd34902faf3db`. No implementation change. |
+| 2026-10-27 | `0x950Abcec39982F3e3eD6dF8F3D4e567AC69a180c` | The KMS-provider implementation (same source as dev's 2026-10-26 row, deployed separately): **KMS provider key** (#144): `addOrUpdateKmsService` registers a provider that is the app's KMS key, endorsed by an active node of the app (EIP-712 over `KmsProvider(provider, appId)`), and binds it to the app's current TappRegistry instance (`registeredAt`), which settlement and owner actions check; `repinKmsProvider` re-binds after a TappRegistry redeploy; new views `kmsBindings`, `kmsProviderDigest`, `isActiveProvider`. Node-signer providers unchanged; the new state takes one `__gap` slot. Deploy tx `0x242710d3277a0d813c3d38ee3bec3e32c18694267cdeb84ad9e9e89f1e720a83`, beacon `upgradeTo` tx `0x1931d7f2774576124a932d698f5dba4eaa96ca8f7d7ca7707b2b4cea3d3b5274`. Not yet verified on chainscan. The same day the testnet sandbox's KMS provider `0xb769…9A5a` was registered (tx `0xa6909e4d396c86554e81b80ffc30ffa4f9f024cb8a6b3c4dc7e1847a6378c2e2`). Its old node-signer service `0x3F7E…5467` is no longer an active provider but is still registered (`removeService` pending). |
 
 **Provider stake:** held in TappRegistry per node (not in SandboxServing); see `minStakeAmount()` on the registry (1 0G at the time of writing).
 
