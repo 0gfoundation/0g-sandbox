@@ -31,6 +31,22 @@ type Snapshot struct {
 	CPU       int    `json:"cpu"`
 	Mem       int    `json:"mem"`
 	Disk      int    `json:"disk"`
+	// BuildInfo marks a snapshot Daytona builds from a Dockerfile, so it runs
+	// something other than the image named in ImageName.
+	BuildInfo *SnapshotBuildInfo `json:"buildInfo,omitempty"`
+}
+
+// SnapshotBuildInfo marks a snapshot built from a Dockerfile. Only the build
+// reference is kept.
+type SnapshotBuildInfo struct {
+	SnapshotRef string `json:"snapshotRef,omitempty"`
+}
+
+// OverridesImage reports whether the snapshot runs anything other than its
+// image. Its entrypoint is not checked: Daytona copies the image's own
+// entrypoint into the record, and POST /api/snapshots refuses an explicit one.
+func (s Snapshot) OverridesImage() bool {
+	return s.BuildInfo != nil
 }
 
 // Client is an authenticated Daytona REST client.

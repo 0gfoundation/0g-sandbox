@@ -244,6 +244,38 @@ const resp = await fetch("http://<proxy>/api/sandbox", {
 >     `provider_address`，并核对 `key_ref` 同时出现在 `runtime_data.key_commitments`
 >     和重放通过的 event log 中。
 
+#### `GET /api/attestor-tls`
+attestor 当前的 TLS SPKI pin,由本 provider 的 key 签名。sealed 容器经 attestor 转发取得
+该声明,只接受 pin 中的 key 作为 attestor 的 TLS 身份。字段顺序固定;响应体为紧凑 JSON,
+末尾无换行(此处展开显示)。
+```json
+{
+  "version":          3,
+  "chain_id":         16602,
+  "registry_address": "0x79d11d8d71784dfed781124e219ad3c62b3a17f6",
+  "tls_spki_sha256":  ["2b4d268f…b933", "2bffeb0c…501c"],
+  "issued_at":        1793318460,
+  "expires_at":       1793318748,
+  "signature":        "0x0d07…0e851c"
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `chain_id`、`registry_address` | EIP-712 domain 范围:provider 所在链与 TappRegistry |
+| `tls_spki_sha256` | 1–16 个 attestor TLS SubjectPublicKeyInfo 的 SHA-256;小写 hex,无 `0x`,严格升序 |
+| `issued_at`、`expires_at` | Unix 秒;`issued_at < expires_at <= issued_at + 300` |
+| `signature` | `provider_address` 对 EIP-712 `AttestorTLS(bytes32[] tlsSpkiSha256,uint64 issuedAt,uint64 expiresAt)` 的签名,domain 为 `0G Sandbox AttestorTLS`、version `3` |
+
+- **`200`:** 已签名的声明。临近过期前,所有调用者拿到相同字节。
+- **`429`:** `{"error":"too many requests"}`,带 `Retry-After: 1`。提供缓存的声明不消耗限流令牌。只有需要等待进行中刷新的请求共享一个限额(所有调用者合计每秒 20 个请求,突发 50);超出的请求只在没有可提供的缓存声明时得到 `429`。
+- **`503`:** `{"error":"attestor tls unavailable"}`。未同时设置 `ATTESTOR_APP_ID` 与
+  `PROVIDER_KEY_SOURCE=kms` 时始终如此。否则会带 `Retry-After: 5`,表示当前没有剩余有效期
+  超过 5 秒的声明。
+
+所有响应都带 `Cache-Control: no-store`。签名与缓存规则见
+[APP_IDENTITY.zh.md](APP_IDENTITY.zh.md#attestor-tls-声明get-apiattestor-tls)。
+
 #### `GET /api/providers`
 本 billing 实例所服务的那个 provider(provider key 的地址,运行时派生,见上面的 `provider_key_source`)的链上 service 数据。返回一个
 数组——目前只有一条——实时读自 `SandboxServing.services`。若该 provider 没有有效的
@@ -303,9 +335,11 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 
 **Sealed 沙箱**(`"sealed": true`):
 - 通过内部 registry 把镜像解析为 content digest(无法解析则硬失败)
+- 拒绝(**400**)记录中带 `buildInfo`(由 Dockerfile 构建)的 snapshot:证书只证明镜像 digest,必须运行镜像自身的 entrypoint。`POST /api/snapshots` 拒绝 `entrypoint` 和 `buildInfo`;除此之外,记录里的 `entrypoint` 就是镜像自身的,由 Daytona 填入
 - 生成一个临时 secp256k1 密钥对作为容器的签名身份
-- 向容器注入两个环境变量:`SANDBOX_SEAL_KEY`(私钥;从响应中剥除)和 `SANDBOX_SEAL_ATTESTATION`(JSON,含 `seal_id`、`pubkey`、`image_hash`、TEE `signature`、`ts`)
-- 设置标签 `0g-sealed: "true"` 和 `0g-seal-id: <32-char hex>`
+- 删除调用者 `env` 中所有以 `SANDBOX_` 开头的键,以及 `ATTESTOR_TLS_DESCRIPTOR`、`ATTESTOR_ALLOW_UNPINNED_DEV` 和 `TEE_SIGNER_ADDRESS`;其余 `env` 键原样透传
+- 注入 `SANDBOX_SEAL_KEY`(私钥;从响应中剥除)、`SANDBOX_SEAL_ATTESTATION`(v3 证书:`version`、`chain_id`、`registry_address`、`app_id`、`registered_at`、`seal_id`、`pubkey`、`image_hash`、`ts`,以及 provider key 的 EIP-712 `signature`;见 [APP_IDENTITY.zh.md](APP_IDENTITY.zh.md#sealed-容器证书v3)),并在 provider 设置了 `PROXY_DOMAIN` 时注入 `SANDBOX_PROXY_DOMAIN`
+- 设置标签 `0g-sealed: "true"` 和 `0g-seal-id: <64-char hex>`
 - 在沙箱整个生命周期内**阻断 SSH 和 toolbox 访问**
 
 **Provider 侧 `SEALED_ONLY=true`:** 运营方在 billing 服务器设了这个环境变量后,任何
@@ -817,7 +851,7 @@ struct Service {
   "labels": {
     "daytona-owner": "0x1234...abcd",
     "0g-sealed":     "true",
-    "0g-seal-id":    "a3f8c2d1e4b706951234567890abcdef"
+    "0g-seal-id":    "a3f8c2d1e4b706951234567890abcdefa3f8c2d1e4b706951234567890abcdef"
   }
 }
 ```
@@ -828,7 +862,7 @@ struct Service {
 | `state` | string | `started`、`stopped`、`starting`、`stopping`、`archived`、`error` |
 | `labels["daytona-owner"]` | string | owner 钱包地址(hex) |
 | `labels["0g-sealed"]` | string | 若以 `sealed: true` 创建则为 `"true"`;否则不存在 |
-| `labels["0g-seal-id"]` | string | 32 字符 hex,关联沙箱到其 TEE attestation;非 sealed 沙箱无此项 |
+| `labels["0g-seal-id"]` | string | 64 字符小写 hex,关联沙箱到其容器证书;非 sealed 沙箱无此项 |
 
 创建时注入的 `SANDBOX_SEAL_KEY` 环境变量**会从所有 API 响应中剥除** —— 它只在容器内部可见。
 
@@ -913,7 +947,9 @@ http://<port>-<sandboxId>.<PROXY_DOMAIN>/<path>
 | `402 Payment Required` | 余额不足以创建沙箱,或未 acknowledge TEE signer |
 | `403 Forbidden` | 沙箱归属于其他钱包;或仅 provider 端点;或受管端点(`autostop`/`autoarchive`) |
 | `500 Internal Server Error` | Redis 错误或意外失败 |
+| `429 Too Many Requests` | `GET /api/attestor-tls`:没有可提供的声明,且等待刷新的限额已满(`Retry-After: 1`) |
 | `502 Bad Gateway` | 上游 Daytona 或链 RPC 错误 |
+| `503 Service Unavailable` | sealed 签发者认证不可用;或 `GET /api/attestor-tls` 没有有效声明 |
 
 ### 认证错误信息
 

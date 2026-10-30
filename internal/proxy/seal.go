@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"os"
 	"strings"
 	"time"
@@ -19,8 +18,21 @@ import (
 const (
 	sealIDLabel             = "0g-seal-id"
 	sealIDBytes             = 32 // hex-encoded length = 64
-	imageAttestationVersion = 2
+	imageAttestationVersion = 3
+
+	imageAttestationDomainName    = "0G Sandbox ImageAttestation"
+	imageAttestationDomainVersion = "3"
 )
+
+var imageAttestationTypeHash = crypto.Keccak256Hash([]byte(
+	"ImageAttestation(string appId,uint64 registeredAt,bytes32 sealId,bytes containerPubkey,bytes32 imageHash,uint64 issuedAt)",
+))
+
+// Caller env keys removed from every sealed create, in addition to every
+// SANDBOX_* key, which only the provider writes. The sealed runtime treats
+// ATTESTOR_ALLOW_UNPINNED_DEV as a dev-only bypass and no longer reads the
+// other two; none of them may come from the caller.
+var strippedSealEnv = []string{"ATTESTOR_TLS_DESCRIPTOR", "ATTESTOR_ALLOW_UNPINNED_DEV", "TEE_SIGNER_ADDRESS"}
 
 // SealIssuer is authenticated by the server's live chain lookup, never by a
 // create request. RegisteredAt identifies the current registry app instance.
@@ -41,78 +53,105 @@ func (s SealIssuer) validate() error {
 	return nil
 }
 
-// ImageAttestation is the v2 envelope given to the sealed runtime. Its digest
-// is nine fixed ABI words, not a JSON hash or a concatenated text message.
+// ImageAttestation is the v3 container certificate given to the sealed runtime
+// as SANDBOX_SEAL_ATTESTATION. Field order is the wire order. The signature is
+// EIP-712 over ImageAttestation in the domain of ChainID and RegistryAddress.
 type ImageAttestation struct {
 	Version uint64 `json:"version"`
 	SealIssuer
 	SealID    string `json:"seal_id"`
 	PublicKey string `json:"pubkey"`
 	ImageHash string `json:"image_hash"`
-	Signature string `json:"signature"`
 	Timestamp uint64 `json:"ts"`
+	Signature string `json:"signature"`
 }
 
-func (a ImageAttestation) signingWords() ([]byte, error) {
+func (a ImageAttestation) domainSeparator() common.Hash {
+	return eip712DomainSeparator(imageAttestationDomainName, imageAttestationDomainVersion, a.ChainID, a.RegistryAddress)
+}
+
+func (a ImageAttestation) structHash() (common.Hash, error) {
 	if a.Version != imageAttestationVersion {
-		return nil, fmt.Errorf("unsupported sealed attestation version")
+		return common.Hash{}, fmt.Errorf("unsupported sealed attestation version")
 	}
 	if err := a.SealIssuer.validate(); err != nil {
-		return nil, err
+		return common.Hash{}, err
 	}
 	sealID, err := hex.DecodeString(a.SealID)
-	if err != nil || len(a.SealID) != 64 || len(sealID) != 32 {
-		return nil, fmt.Errorf("seal_id must be 64 hex chars")
+	if err != nil || len(sealID) != sealIDBytes || a.SealID != strings.ToLower(a.SealID) {
+		return common.Hash{}, fmt.Errorf("seal_id must be 64 lowercase hex chars")
 	}
 	pub, err := hex.DecodeString(strings.TrimPrefix(a.PublicKey, "0x"))
 	if err != nil || !strings.HasPrefix(a.PublicKey, "0x") || len(pub) != 33 {
-		return nil, fmt.Errorf("pubkey must be a 0x-prefixed compressed public key")
+		return common.Hash{}, fmt.Errorf("pubkey must be a 0x-prefixed compressed public key")
 	}
 	if _, err := crypto.DecompressPubkey(pub); err != nil {
-		return nil, fmt.Errorf("invalid container public key: %w", err)
+		return common.Hash{}, fmt.Errorf("invalid container public key: %w", err)
 	}
 	image, err := hex.DecodeString(strings.TrimPrefix(a.ImageHash, "sha256:"))
-	if err != nil || !strings.HasPrefix(a.ImageHash, "sha256:") || len(image) != 32 {
-		return nil, fmt.Errorf("image_hash must be sha256: followed by 64 hex chars")
+	if err != nil || !strings.HasPrefix(a.ImageHash, "sha256:") || len(image) != 32 || a.ImageHash != strings.ToLower(a.ImageHash) {
+		return common.Hash{}, fmt.Errorf("image_hash must be sha256: followed by 64 lowercase hex chars")
 	}
 	if a.Timestamp == 0 {
-		return nil, fmt.Errorf("attestation timestamp must be positive")
+		return common.Hash{}, fmt.Errorf("attestation timestamp must be positive")
 	}
-	words := make([]byte, 9*32)
-	copy(words[0:32], crypto.Keccak256([]byte("0g.sandbox.ImageAttestation.v2")))
-	new(big.Int).SetUint64(a.ChainID).FillBytes(words[32:64])
-	copy(words[64+12:96], a.RegistryAddress[:])
-	copy(words[96:128], crypto.Keccak256([]byte(a.AppID)))
-	new(big.Int).SetUint64(a.RegisteredAt).FillBytes(words[128:160])
-	copy(words[160:192], sealID)
-	copy(words[192:224], crypto.Keccak256(pub))
-	copy(words[224:256], image)
-	new(big.Int).SetUint64(a.Timestamp).FillBytes(words[256:288])
-	return words, nil
+	encoded := make([]byte, 7*32)
+	copy(encoded[0:32], imageAttestationTypeHash[:])
+	copy(encoded[32:64], crypto.Keccak256([]byte(a.AppID)))
+	putUint64Word(encoded[64:96], a.RegisteredAt)
+	copy(encoded[96:128], sealID)
+	copy(encoded[128:160], crypto.Keccak256(pub))
+	copy(encoded[160:192], image)
+	putUint64Word(encoded[192:224], a.Timestamp)
+	return crypto.Keccak256Hash(encoded), nil
 }
 
 func (a ImageAttestation) signingDigest() (common.Hash, error) {
-	words, err := a.signingWords()
+	structHash, err := a.structHash()
 	if err != nil {
 		return common.Hash{}, err
 	}
-	return crypto.Keccak256Hash(words), nil
+	return eip712Digest(a.domainSeparator(), structHash), nil
+}
+
+// issueImageAttestation signs a v3 certificate with the provider key and
+// returns its SANDBOX_SEAL_ATTESTATION JSON.
+func issueImageAttestation(issuer SealIssuer, sealID, pubKey, imageHash string, issuedAt uint64, key *ecdsa.PrivateKey) (string, error) {
+	attestation := ImageAttestation{
+		Version: imageAttestationVersion, SealIssuer: issuer,
+		SealID: sealID, PublicKey: pubKey, ImageHash: imageHash, Timestamp: issuedAt,
+	}
+	digest, err := attestation.signingDigest()
+	if err != nil {
+		return "", err
+	}
+	if attestation.Signature, err = signDigest(digest, key); err != nil {
+		return "", err
+	}
+	out, err := json.Marshal(attestation)
+	if err != nil {
+		return "", fmt.Errorf("marshal attestation: %w", err)
+	}
+	return string(out), nil
 }
 
 // InjectSeal wires the sealed-container identity material into a sandbox create
 // request body that has already been processed by InjectOwner.
 //
-// It generates an independent ephemeral secp256k1 keypair, builds a v2
-// app-signed attestation binding the current issuer scope, and injects two env vars into the
-// container started by Daytona:
+// It generates an independent ephemeral secp256k1 keypair, builds a v3
+// certificate binding the current issuer scope, and injects two env vars into
+// the container started by Daytona:
 //
 //   - SANDBOX_SEAL_KEY         — hex private key; the container's signing identity.
 //     Never logged, never returned through the API, never stored outside the enclave.
-//   - SANDBOX_SEAL_ATTESTATION — JSON the container presents to other services
-//     to prove which image it runs and which key it holds.
+//   - SANDBOX_SEAL_ATTESTATION — the certificate the container presents to other
+//     services to prove which image it runs and which key it holds.
+//
+// Every caller-supplied SANDBOX_* key and the strippedSealEnv keys are removed
+// first, so the container sees only the values written here.
 //
 // The sealId is also written to label "0g-seal-id" so operators can correlate
-// a running sandbox with the attestation that was issued for it.
+// a running sandbox with the certificate that was issued for it.
 //
 // appKey is the stable KMS app signer (ProviderKey), never the node signer.
 func InjectSeal(body []byte, appKey *ecdsa.PrivateKey, imageHash string, issuer SealIssuer) ([]byte, error) {
@@ -131,13 +170,14 @@ func InjectSeal(body []byte, appKey *ecdsa.PrivateKey, imageHash string, issuer 
 
 	// sealId: accept a caller-provided value (64 hex chars = 32 bytes) so
 	// verifiers can pre-register an expected id; fall back to a fresh random
-	// value. Reject malformed input rather than silently overwriting it.
+	// value. Reject malformed input rather than silently overwriting it. The
+	// certificate carries the lowercase form.
 	var sealID string
 	if v, ok := m["seal_id"].(string); ok && v != "" {
 		if _, err := hex.DecodeString(v); err != nil || len(v) != sealIDBytes*2 {
 			return nil, fmt.Errorf("seal_id must be %d hex chars", sealIDBytes*2)
 		}
-		sealID = v
+		sealID = strings.ToLower(v)
 	} else {
 		var raw [sealIDBytes]byte
 		if _, err := rand.Read(raw[:]); err != nil {
@@ -162,30 +202,14 @@ func InjectSeal(body []byte, appKey *ecdsa.PrivateKey, imageHash string, issuer 
 	// reconstructing the point from an address.
 	pubKey := "0x" + hex.EncodeToString(crypto.CompressPubkey(&privKey.PublicKey))
 	privHex := "0x" + hex.EncodeToString(crypto.FromECDSA(privKey))
-	attestation := ImageAttestation{
-		Version: imageAttestationVersion, SealIssuer: issuer,
-		SealID: sealID, PublicKey: pubKey, ImageHash: imageHash,
-		Timestamp: uint64(time.Now().Unix()),
-	}
-	hash, err := attestation.signingDigest()
+	attestation, err := issueImageAttestation(issuer, sealID, pubKey, imageHash, uint64(time.Now().Unix()), appKey)
 	if err != nil {
 		return nil, err
 	}
-	sig, err := crypto.Sign(hash[:], appKey)
-	if err != nil {
-		return nil, fmt.Errorf("sign attestation: %w", err)
-	}
-	sig[64] += 27 // normalise V to 27/28 for Solidity ecrecover compatibility
 
-	attestation.Signature = "0x" + hex.EncodeToString(sig)
-	attestationJSON, err := json.Marshal(attestation)
-	if err != nil {
-		return nil, fmt.Errorf("marshal attestation: %w", err)
-	}
-
-	// Write sealId to label so operators can correlate sandbox ↔ attestation.
-	// pubkey is intentionally omitted: the verifier obtains it from the attestation
-	// presented by the container itself, not from the proxy.
+	// Write sealId to label so operators can correlate sandbox ↔ certificate.
+	// pubkey is intentionally omitted: the verifier obtains it from the
+	// certificate presented by the container itself, not from the proxy.
 	labels, _ := m["labels"].(map[string]any)
 	if labels == nil {
 		labels = make(map[string]any)
@@ -200,8 +224,9 @@ func InjectSeal(body []byte, appKey *ecdsa.PrivateKey, imageHash string, issuer 
 	if env == nil {
 		env = make(map[string]any)
 	}
+	stripCallerSealEnv(env)
 	env[sealKeyEnv] = privHex
-	env["SANDBOX_SEAL_ATTESTATION"] = string(attestationJSON)
+	env["SANDBOX_SEAL_ATTESTATION"] = attestation
 
 	// SANDBOX_PROXY_DOMAIN lets bootstrap inside the sealed container
 	// compose its own public URL by combining this host:port with the
@@ -215,6 +240,17 @@ func InjectSeal(body []byte, appKey *ecdsa.PrivateKey, imageHash string, issuer 
 	m["env"] = env
 
 	return json.Marshal(m)
+}
+
+func stripCallerSealEnv(env map[string]any) {
+	for key := range env {
+		if strings.HasPrefix(key, "SANDBOX_") {
+			delete(env, key)
+		}
+	}
+	for _, key := range strippedSealEnv {
+		delete(env, key)
+	}
 }
 
 // stripSealKey removes SANDBOX_SEAL_KEY from the env map in a sandbox JSON

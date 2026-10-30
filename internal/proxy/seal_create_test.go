@@ -22,7 +22,20 @@ import (
 	"go.uber.org/zap"
 )
 
-func newSealedCreateFixture(t *testing.T) (*Handler, *gin.Engine, <-chan ImageAttestation, *atomic.Int32) {
+// forwardedSeal is what a sealed create forwarded to Daytona.
+type forwardedSeal struct {
+	Attestation ImageAttestation
+	Env         map[string]any
+}
+
+func newSealedCreateFixture(t *testing.T) (*Handler, *gin.Engine, <-chan forwardedSeal, *atomic.Int32) {
+	t.Helper()
+	return newSealedCreateFixtureWithSnapshot(t, nil)
+}
+
+// newSealedCreateFixtureWithSnapshot adds extra fields to the Daytona record
+// of the "sealed" snapshot.
+func newSealedCreateFixtureWithSnapshot(t *testing.T, extra map[string]any) (*Handler, *gin.Engine, <-chan forwardedSeal, *atomic.Int32) {
 	t.Helper()
 	registry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Docker-Content-Digest", testSealImageHash)
@@ -35,10 +48,13 @@ func newSealedCreateFixture(t *testing.T) (*Handler, *gin.Engine, <-chan ImageAt
 	t.Cleanup(registry.Close)
 	image := strings.TrimPrefix(strings.Replace(registry.URL, "127.0.0.1", "localhost", 1), "http://") + "/sealed:test"
 	created := &atomic.Int32{}
-	envelopes := make(chan ImageAttestation, 4)
+	envelopes := make(chan forwardedSeal, 4)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		snapshot := map[string]any{"name": "sealed", "cpu": 1, "mem": 1, "state": "active", "imageName": image}
+		for k, v := range extra {
+			snapshot[k] = v
+		}
 		if r.Method == http.MethodGet && r.URL.Path == "/api/snapshots" {
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{snapshot}, "totalPages": 1})
 			return
@@ -64,7 +80,7 @@ func newSealedCreateFixture(t *testing.T) (*Handler, *gin.Engine, <-chan ImageAt
 				if err := json.Unmarshal([]byte(raw), &a); err != nil {
 					t.Error(err)
 				}
-				envelopes <- a
+				envelopes <- forwardedSeal{Attestation: a, Env: env}
 			}
 		}
 		body["id"] = "new-sandbox"
@@ -175,18 +191,22 @@ func TestSealedCreateRefreshesIssuerAndUsesProviderKey(t *testing.T) {
 		return issuer, nil
 	}
 	for i := uint64(1); i <= 2; i++ {
-		request := httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"sealed","sealed":true,"registered_at":999,"env":{"SANDBOX_SEAL_ATTESTATION":"caller"}}`))
+		request := httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"sealed","sealed":true,"registered_at":999,"env":{"SANDBOX_SEAL_ATTESTATION":"caller","ATTESTOR_TLS_DESCRIPTOR":"caller","ATTESTOR_URL":"https://attestor.example"}}`))
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, request)
 		if w.Code != http.StatusOK {
 			t.Fatalf("create %d: %d %s", i, w.Code, w.Body.String())
 		}
-		a := <-envelopes
-		if a.Version != 2 || a.RegisteredAt != testSealIssuer().RegisteredAt+i {
+		forwarded := <-envelopes
+		a := forwarded.Attestation
+		if a.Version != 3 || a.RegisteredAt != testSealIssuer().RegisteredAt+i {
 			t.Fatalf("stale/caller issuer: %+v", a)
 		}
 		if recoverSealSigner(t, a).Hex() != h.providerAddress {
 			t.Fatal("attestation did not use provider app signer")
+		}
+		if _, ok := forwarded.Env["ATTESTOR_TLS_DESCRIPTOR"]; ok || forwarded.Env["ATTESTOR_URL"] != "https://attestor.example" {
+			t.Fatalf("forwarded env %v", forwarded.Env)
 		}
 		if strings.Contains(w.Body.String(), sealKeyEnv) {
 			t.Fatal("returned container secret")
@@ -208,5 +228,74 @@ func TestNonsealedCreateNeedsNoIssuer(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"sealed"}`)))
 	if w.Code != http.StatusOK || created.Load() != 1 {
 		t.Fatalf("nonsealed path changed: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// The certificate attests only the image digest, so a sealed create refuses a
+// snapshot built from a Dockerfile, and releases its reservation.
+func TestSealedCreateRefusesSnapshotOverrides(t *testing.T) {
+	for name, extra := range map[string]map[string]any{
+		"build_info": {"buildInfo": map[string]any{"snapshotRef": "built", "dockerfileContent": "FROM scratch"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, r, _, created := newSealedCreateFixtureWithSnapshot(t, extra)
+			mr := miniredis.RunT(t)
+			rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+			t.Cleanup(func() { _ = rdb.Close() })
+			h.rdb = rdb
+			h.balCheck = &mockBalChecker{bal: big.NewInt(1000)}
+			h.createFee = big.NewInt(11)
+			h.computePricePerSec = new(big.Int)
+			h.SealIssuer = func(context.Context) (SealIssuer, error) {
+				t.Fatal("refused snapshot reached the issuer")
+				return SealIssuer{}, nil
+			}
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"sealed","sealed":true}`)))
+			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), errSnapshotOverridesImage.Error()) {
+				t.Fatalf("want refusal, got %d %s", w.Code, w.Body.String())
+			}
+			if created.Load() != 0 {
+				t.Fatal("created a sealed sandbox from an overriding snapshot")
+			}
+			if got := billing.GetReserved(context.Background(), rdb, "0xOWNER", h.providerAddress); got.Sign() != 0 {
+				t.Fatalf("reservation after refusal %s", got)
+			}
+
+			// Nonsealed creates are unaffected.
+			h.sealKey = nil
+			w = httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"sealed"}`)))
+			if w.Code != http.StatusOK || created.Load() != 1 {
+				t.Fatalf("nonsealed create: %d %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+// Daytona copies the image's own entrypoint into every snapshot record, so a
+// recorded entrypoint alone must not refuse a sealed create.
+func TestSealedCreateAcceptsSnapshotWithImageEntrypoint(t *testing.T) {
+	h, r, _, created := newSealedCreateFixtureWithSnapshot(t, map[string]any{"entrypoint": []string{"/usr/local/bin/sealed"}})
+	h.SealIssuer = func(context.Context) (SealIssuer, error) { return testSealIssuer(), nil }
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"sealed","sealed":true}`)))
+	if w.Code != http.StatusOK || created.Load() != 1 {
+		t.Fatalf("sealed create from a snapshot with its image entrypoint: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSnapshotCreateRejectsOverrides(t *testing.T) {
+	h, r, _, _ := newSealedCreateFixture(t)
+	h.AppOwner = func(context.Context) (string, error) { return "0xowner", nil }
+	for _, field := range []string{"entrypoint", "Entrypoint", "buildInfo", "BUILDINFO"} {
+		t.Run(field, func(t *testing.T) {
+			body := fmt.Sprintf(`{"name":"wrapped","imageName":"sealed:test",%q:["sh"]}`, field)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/snapshots", strings.NewReader(body)))
+			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "own entrypoint") {
+				t.Fatalf("want 400, got %d %s", w.Code, w.Body.String())
+			}
+		})
 	}
 }

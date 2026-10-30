@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -466,7 +467,7 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		}
 	}
 
-	// A v2 issuer refusal must release only this request's reservation. The
+	// An issuer refusal must release only this request's reservation. The
 	// caller may already be cancelled; cleanup has its own bounded context and
 	// Redis I/O timeout. Clearing the flag first makes this cleanup idempotent.
 	releaseRejectedSeal := func() {
@@ -479,8 +480,8 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		billing.Release(ctx, h.rdb.WithTimeout(2*time.Second), wallet, h.providerAddress, createRequired)
 	}
 
-	// Sealed containers: resolve image hash and inject app attestation + keypair
-	// before forwarding to Daytona.
+	// Sealed containers: resolve image hash and inject the container
+	// certificate + keypair before forwarding to Daytona.
 	sealed := extractSealed(body)
 	if err := ValidatePublicPorts(body, sealed); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -505,6 +506,11 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	if sealed {
 		imageRef, err := h.resolveImageRef(c.Request.Context(), body)
 		if err != nil {
+			releaseRejectedSeal()
+			if errors.Is(err, errSnapshotOverridesImage) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": "sealed containers require an image or snapshot: " + err.Error()})
 			return
 		}
@@ -1237,6 +1243,8 @@ func (h *Handler) handleListSnapshots(c *gin.Context) {
 
 // handleSnapshotCreate registers a Docker image as a named Daytona snapshot.
 // Admin-only: accepts {name, imageName}, forwards to Daytona internally.
+// entrypoint and buildInfo are rejected (rejectSnapshotOverrides): every
+// snapshot runs its image's own entrypoint.
 //
 // Before forwarding, the caller-supplied imageName is resolved to its content
 // digest and rewritten to a derived tag "<repo>:d-<shortdigest>" (created in
@@ -1266,6 +1274,10 @@ func (h *Handler) handleSnapshotCreate(c *gin.Context) {
 	var m map[string]any
 	if err := json.Unmarshal(body, &m); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+		return
+	}
+	if err := rejectSnapshotOverrides(m); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -1697,6 +1709,10 @@ func rewriteImage(body []byte, pinned string) ([]byte, error) {
 	return json.Marshal(m)
 }
 
+// errSnapshotOverridesImage refuses a sealed create from a snapshot built from
+// a Dockerfile: the certificate attests only the image digest.
+var errSnapshotOverridesImage = errors.New("sealed containers cannot use a snapshot built from a Dockerfile")
+
 func (h *Handler) resolveImageRef(ctx context.Context, body []byte) (string, error) {
 	var m struct {
 		Image    string `json:"image"`
@@ -1714,6 +1730,9 @@ func (h *Handler) resolveImageRef(ctx context.Context, body []byte) (string, err
 		}
 		for _, s := range snaps {
 			if s.Name == m.Snapshot {
+				if s.OverridesImage() {
+					return "", errSnapshotOverridesImage
+				}
 				return s.ImageName, nil
 			}
 		}

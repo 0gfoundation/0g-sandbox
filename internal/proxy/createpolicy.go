@@ -58,3 +58,24 @@ func requireSnapshotCreate(body []byte) error {
 	}
 	return nil
 }
+
+// snapshotOverrideFields are the snapshot-create fields that change what a
+// snapshot runs: Daytona starts a snapshot's entrypoint instead of its image's
+// own, and a buildInfo snapshot runs a Dockerfile build while its record still
+// names imageName. A sealed certificate attests only the image digest.
+// Values are lowercase; the caller's key is lowercased before comparison.
+var snapshotOverrideFields = []string{"entrypoint", "buildinfo"}
+
+// rejectSnapshotOverrides keeps every snapshot running its image's own
+// entrypoint.
+func rejectSnapshotOverrides(m map[string]any) error {
+	for k := range m {
+		lk := strings.ToLower(k)
+		for _, banned := range snapshotOverrideFields {
+			if lk == banned {
+				return fmt.Errorf("snapshots run their image's own entrypoint; %q is not supported", k)
+			}
+		}
+	}
+	return nil
+}

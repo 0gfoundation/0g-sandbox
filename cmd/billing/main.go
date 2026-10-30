@@ -47,6 +47,9 @@ func main() {
 	if err != nil {
 		log.Fatal("config load failed", zap.Error(err))
 	}
+	for _, warning := range cfg.Warnings() {
+		log.Warn(warning)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -74,8 +77,8 @@ func main() {
 	// every boot, so balances, nonces and the service outlive a reboot.
 	// Otherwise the provider is the TEE signer above, new with every
 	// tapp-server restart. The TEE signer stays the node identity either way:
-	// it endorses the KMS provider on chain; the stable provider signs v2
-	// sealed attestations.
+	// it endorses the KMS provider on chain; the stable provider signs sealed
+	// container certificates and attestor TLS statements.
 	var providerKeyInEvidence atomic.Bool
 	if cfg.Chain.ProviderKeySource == "kms" {
 		pk, err := tee.GetProviderKey(ctx)
@@ -454,6 +457,23 @@ func main() {
 		c.JSON(http.StatusOK, info)
 	})
 
+	// The attestor's discovered identity: its app signer is an application
+	// admin, and its TLS pins are what sealed containers authenticate it by.
+	var attestor *attestorIdentity
+	if cfg.Chain.AttestorAppID != "" {
+		attestor = newAttestorIdentity(uint64(cfg.Chain.ChainID), cfg.Chain.TappRegistry,
+			cfg.Chain.AttestorAppID, rdb, onchain, tee.ResolveAppIdentity)
+	}
+	// Public: the attestor's TLS pins signed by the provider key. Without an
+	// attestor app or a KMS provider every request answers 503.
+	var attestorPins proxy.AttestorTLSPins
+	if attestor != nil && onchain.KmsProvider() {
+		attestorPins = attestor.TLSPins
+	}
+	attestorTLS := proxy.NewAttestorTLS(onchain.ProviderKey(), onchain.ChainID().Uint64(),
+		onchain.TappRegistryAddress(), attestorPins, log)
+	r.GET("/api/attestor-tls", attestorTLS.Handle)
+
 	// Public snapshots list — no signing required; snapshots are provider-managed
 	// base images visible to all users.
 	r.GET("/api/snapshots", func(c *gin.Context) {
@@ -557,9 +577,8 @@ func main() {
 	}
 	proxyHandler.SealedOnly = cfg.Server.SealedOnly
 	proxyHandler.AppOwner = appOwnerFn
-	if cfg.Chain.AttestorAppID != "" {
-		proxyHandler.AppAdmin = newAttestorAuthorizer(uint64(cfg.Chain.ChainID), cfg.Chain.TappRegistry,
-			cfg.Chain.AttestorAppID, rdb, onchain, tee.ResolveAppIdentity)
+	if attestor != nil {
+		proxyHandler.AppAdmin = attestor.IsAppSigner
 	}
 	proxyHandler.RegisterPublic(apiPublic)
 	proxyHandler.Register(api)

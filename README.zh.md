@@ -1,7 +1,7 @@
 # 0G Sandbox
 
-基于 appId 的 attestor 授权、稳定 app signer 与 attested TLS：
-[应用身份配置](docs/APP_IDENTITY.zh.md)。
+基于 appId 的 attestor 授权、稳定 app signer、attested TLS、sealed 容器证书与
+attestor TLS 声明：[应用身份配置](docs/APP_IDENTITY.zh.md)。
 
 专为 Vibe Coding 打造的私有隔离沙盒，由 0G Network 提供支持。
 
@@ -131,6 +131,8 @@ go run ./cmd/billing/
 | `SSH_GATEWAY_HOST` | — | SSH 命令中重写的网关主机（如 `<provider-ip>`）；未设置时退回到浏览器 hostname |
 | `PROXY_DOMAIN` | — | 沙盒服务端口 URL 的域名模板：`http://<port>-<id>.<PROXY_DOMAIN>/<path>`。可用 `<your-ip>.nip.io:4000`（nip.io）或 `sandbox.yourdomain.com`（配合 nginx 的真实域名）。|
 | `PORT` | `8080` | HTTP 服务端口 |
+| `TLS_ENABLED` | `false` | `true`：使用 tapp 返回的 attested app 证书（`GetAppTlsCert`）直接终止 TLS，供调用方 pin |
+| `ATTESTOR_APP_ID` | — | attestor 的 tapp appId。其发现的稳定 app signer 成为应用管理员；在 `PROVIDER_KEY_SOURCE=kms` 时，其 TLS pin 经签名后由 `GET /api/attestor-tls` 提供。需要 `BACKEND_TAPP_SOCKET`。未设置 `PROVIDER_KEY_SOURCE=kms` 时服务仍会启动并记录警告，该端点返回 503；未设置 `TLS_ENABLED=true` 时同样只记录警告 |
 | `MOCK_TEE` | — | 设为 `true` 用于本地开发（使用 `MOCK_APP_PRIVATE_KEY` 代替 TDX gRPC）|
 | `MOCK_APP_PRIVATE_KEY` | — | `MOCK_TEE=true` 时使用的十六进制私钥 |
 | `MOCK_PROVIDER_PRIVATE_KEY` | — | `MOCK_TEE=true` 且 `PROVIDER_KEY_SOURCE=kms` 时用作 KMS provider key 的十六进制私钥 |

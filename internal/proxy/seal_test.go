@@ -1,15 +1,15 @@
 package proxy
 
 import (
+	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
-
-	"github.com/ethereum/go-ethereum/common"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
@@ -19,80 +19,170 @@ func testSealIssuer() SealIssuer {
 	return SealIssuer{ChainID: 16602, RegistryAddress: common.HexToAddress("0x1111111111111111111111111111111111111111"), AppID: "sandbox-test", RegisteredAt: 1234}
 }
 
-func loadSealVector(t *testing.T) (ImageAttestation, string, string, string) {
+type vectorKey struct {
+	PrivateKey string `json:"private_key"`
+	Address    string `json:"address"`
+}
+
+func (k vectorKey) key(t *testing.T) *ecdsa.PrivateKey {
 	t.Helper()
-	raw, err := os.ReadFile("testdata/sealed-attestation-v2-vector.json")
+	key, err := crypto.HexToECDSA(strings.TrimPrefix(k.PrivateKey, "0x"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var v struct {
-		Envelope  ImageAttestation `json:"envelope"`
-		Words     string           `json:"encoded_words"`
-		Digest    string           `json:"digest"`
-		AppSigner string           `json:"app_signer"`
+	if crypto.PubkeyToAddress(key.PublicKey) != common.HexToAddress(k.Address) {
+		t.Fatal("vector key does not match its address")
 	}
+	return key
+}
+
+type vectorDomain struct {
+	Name              string         `json:"name"`
+	Version           string         `json:"version"`
+	ChainID           uint64         `json:"chainId"`
+	VerifyingContract common.Address `json:"verifyingContract"`
+}
+
+// imageAttestationVector is testdata/image-attestation-v3.json, shared
+// byte-identical with the attestor and the sealed runtime.
+type imageAttestationVector struct {
+	ProviderKey  vectorKey `json:"test_only_provider_key"`
+	ContainerKey vectorKey `json:"test_only_container_key"`
+	TypedData    struct {
+		Domain  vectorDomain `json:"domain"`
+		Message struct {
+			AppID           string `json:"appId"`
+			RegisteredAt    uint64 `json:"registeredAt"`
+			SealID          string `json:"sealId"`
+			ContainerPubkey string `json:"containerPubkey"`
+			ImageHash       string `json:"imageHash"`
+			IssuedAt        uint64 `json:"issuedAt"`
+		} `json:"message"`
+	} `json:"typed_data"`
+	TypeHash               string `json:"type_hash"`
+	DomainSeparator        string `json:"domain_separator"`
+	StructHash             string `json:"struct_hash"`
+	Digest                 string `json:"digest"`
+	Signature              string `json:"signature"`
+	RecoveredAddress       string `json:"recovered_address"`
+	SandboxSealAttestation string `json:"sandbox_seal_attestation"`
+}
+
+func loadImageAttestationVector(t *testing.T) imageAttestationVector {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/image-attestation-v3.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v imageAttestationVector
 	if err := json.Unmarshal(raw, &v); err != nil {
 		t.Fatal(err)
 	}
-	return v.Envelope, v.Words, v.Digest, v.AppSigner
+	return v
 }
 
-func recoverSealSigner(t *testing.T, a ImageAttestation) common.Address {
+// recoverDigestSigner accepts V as 27/28 or 0/1, as verifiers do.
+func recoverDigestSigner(t *testing.T, digest common.Hash, signature string) common.Address {
 	t.Helper()
-	hash, err := a.signingDigest()
-	if err != nil {
-		t.Fatal(err)
-	}
-	sig, err := hex.DecodeString(strings.TrimPrefix(a.Signature, "0x"))
+	sig, err := hex.DecodeString(strings.TrimPrefix(signature, "0x"))
 	if err != nil || len(sig) != 65 {
 		t.Fatal("invalid signature")
 	}
-	if sig[64] != 27 && sig[64] != 28 {
-		t.Fatal("signature recovery byte must be 27/28")
+	if sig[64] >= 27 {
+		sig[64] -= 27
 	}
-	sig[64] -= 27
-	pub, err := crypto.SigToPub(hash[:], sig)
+	pub, err := crypto.SigToPub(digest[:], sig)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return crypto.PubkeyToAddress(*pub)
 }
 
-func TestImageAttestationV2KnownAnswer(t *testing.T) {
-	a, wantWords, wantDigest, wantSigner := loadSealVector(t)
-	words, err := a.signingWords()
+func recoverSealSigner(t *testing.T, a ImageAttestation) common.Address {
+	t.Helper()
+	digest, err := a.signingDigest()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := "0x" + hex.EncodeToString(words); got != wantWords {
-		t.Fatalf("ABI words mismatch: %s", got)
+	if !strings.HasSuffix(a.Signature, "1b") && !strings.HasSuffix(a.Signature, "1c") {
+		t.Fatal("signature recovery byte must be 27/28")
 	}
-	hash, err := a.signingDigest()
+	return recoverDigestSigner(t, digest, a.Signature)
+}
+
+func TestImageAttestationV3KnownAnswer(t *testing.T) {
+	v := loadImageAttestationVector(t)
+	providerKey := v.ProviderKey.key(t)
+	containerKey := v.ContainerKey.key(t)
+	if imageAttestationTypeHash.Hex() != v.TypeHash {
+		t.Fatalf("type hash %s", imageAttestationTypeHash.Hex())
+	}
+	if v.TypedData.Domain.Name != imageAttestationDomainName || v.TypedData.Domain.Version != imageAttestationDomainVersion {
+		t.Fatalf("domain %q/%q", v.TypedData.Domain.Name, v.TypedData.Domain.Version)
+	}
+	msg := v.TypedData.Message
+	if "0x"+hex.EncodeToString(crypto.CompressPubkey(&containerKey.PublicKey)) != msg.ContainerPubkey {
+		t.Fatal("container key does not match containerPubkey")
+	}
+
+	// Issuing from the typed-data inputs reproduces the wire string exactly.
+	issuer := SealIssuer{ChainID: v.TypedData.Domain.ChainID, RegistryAddress: v.TypedData.Domain.VerifyingContract, AppID: msg.AppID, RegisteredAt: msg.RegisteredAt}
+	wire, err := issueImageAttestation(issuer, strings.TrimPrefix(msg.SealID, "0x"), msg.ContainerPubkey,
+		"sha256:"+strings.TrimPrefix(msg.ImageHash, "0x"), msg.IssuedAt, providerKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hash.Hex() != wantDigest || hash.Hex() != "0x89f5a12fefe1868ddbc9a3f31091db032edb737c0782c876b3a455a493744b38" {
-		t.Fatalf("digest mismatch: %s", hash.Hex())
+	if wire != v.SandboxSealAttestation {
+		t.Fatalf("wire string mismatch:\n got %s\nwant %s", wire, v.SandboxSealAttestation)
 	}
-	if got := recoverSealSigner(t, a); got != common.HexToAddress(wantSigner) {
-		t.Fatalf("signer: %s", got)
+
+	var a ImageAttestation
+	if err := json.Unmarshal([]byte(v.SandboxSealAttestation), &a); err != nil {
+		t.Fatal(err)
 	}
-	key, err := crypto.HexToECDSA(strings.Repeat("01", 32))
+	if got := a.domainSeparator().Hex(); got != v.DomainSeparator {
+		t.Fatalf("domain separator %s", got)
+	}
+	structHash, err := a.structHash()
 	if err != nil {
 		t.Fatal(err)
 	}
-	sig, err := crypto.Sign(hash[:], key)
+	if structHash.Hex() != v.StructHash {
+		t.Fatalf("struct hash %s", structHash.Hex())
+	}
+	digest, err := a.signingDigest()
 	if err != nil {
 		t.Fatal(err)
 	}
-	sig[64] += 27
-	if "0x"+hex.EncodeToString(sig) != a.Signature {
-		t.Fatal("signature differs from independent vector")
+	if digest.Hex() != v.Digest {
+		t.Fatalf("digest %s", digest.Hex())
+	}
+	if a.Signature != v.Signature {
+		t.Fatalf("signature %s", a.Signature)
+	}
+	want := common.HexToAddress(v.RecoveredAddress)
+	if want != crypto.PubkeyToAddress(providerKey.PublicKey) || recoverSealSigner(t, a) != want {
+		t.Fatal("certificate does not recover to the provider key")
+	}
+	sig, _ := hex.DecodeString(strings.TrimPrefix(a.Signature, "0x"))
+	sig[64] -= 27
+	if recoverDigestSigner(t, digest, "0x"+hex.EncodeToString(sig)) != want {
+		t.Fatal("0/1 recovery byte did not recover the provider key")
+	}
+	if out, _ := json.Marshal(a); string(out) != v.SandboxSealAttestation {
+		t.Fatalf("re-marshalled certificate differs: %s", out)
 	}
 }
 
-func TestImageAttestationV2ScopeTampering(t *testing.T) {
-	a, _, _, wantSigner := loadSealVector(t)
+func TestImageAttestationV3ScopeTampering(t *testing.T) {
+	v := loadImageAttestationVector(t)
+	var a ImageAttestation
+	if err := json.Unmarshal([]byte(v.SandboxSealAttestation), &a); err != nil {
+		t.Fatal(err)
+	}
+	signer := common.HexToAddress(v.RecoveredAddress)
+	otherKey, _ := crypto.GenerateKey()
+	otherPub := "0x" + hex.EncodeToString(crypto.CompressPubkey(&otherKey.PublicKey))
 	for _, tc := range []struct {
 		name   string
 		change func(*ImageAttestation)
@@ -102,26 +192,38 @@ func TestImageAttestationV2ScopeTampering(t *testing.T) {
 		{"exact_app_id", func(a *ImageAttestation) { a.AppID += " " }},
 		{"epoch", func(a *ImageAttestation) { a.RegisteredAt++ }},
 		{"seal", func(a *ImageAttestation) { a.SealID = strings.Repeat("44", 32) }},
+		{"pubkey", func(a *ImageAttestation) { a.PublicKey = otherPub }},
 		{"image", func(a *ImageAttestation) { a.ImageHash = testSealImageHash }},
 		{"issued_at", func(a *ImageAttestation) { a.Timestamp++ }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			changed := a
 			tc.change(&changed)
-			if recoverSealSigner(t, changed) == common.HexToAddress(wantSigner) {
-				t.Fatal("tampered scope retained app signer")
+			if recoverSealSigner(t, changed) == signer {
+				t.Fatal("tampered certificate retained the provider signer")
 			}
 		})
 	}
-	for _, version := range []uint64{0, 1, 3} {
-		a.Version = version
-		if _, err := a.signingDigest(); err == nil {
+	for _, version := range []uint64{0, 1, 2, 4} {
+		changed := a
+		changed.Version = version
+		if _, err := changed.signingDigest(); err == nil {
 			t.Fatalf("accepted version %d", version)
 		}
 	}
+	upper := a
+	upper.SealID = strings.ToUpper(a.SealID)
+	if _, err := upper.signingDigest(); err == nil {
+		t.Fatal("accepted an uppercase seal_id")
+	}
+	upper = a
+	upper.ImageHash = "sha256:" + strings.ToUpper(strings.TrimPrefix(a.ImageHash, "sha256:"))
+	if _, err := upper.signingDigest(); err == nil {
+		t.Fatal("accepted an uppercase image_hash")
+	}
 }
 
-func TestInjectSealV2UsesAppSignerAndServerScope(t *testing.T) {
+func TestInjectSealUsesAppSignerAndServerScope(t *testing.T) {
 	appKey, _ := crypto.GenerateKey()
 	nodeKey, _ := crypto.GenerateKey()
 	issuer := testSealIssuer()
@@ -138,7 +240,7 @@ func TestInjectSealV2UsesAppSignerAndServerScope(t *testing.T) {
 	if err := json.Unmarshal([]byte(m["env"].(map[string]any)["SANDBOX_SEAL_ATTESTATION"].(string)), &a); err != nil {
 		t.Fatal(err)
 	}
-	if a.Version != 2 || a.SealIssuer != issuer {
+	if a.Version != 3 || a.SealIssuer != issuer {
 		t.Fatalf("caller scope escaped overwrite: %+v", a.SealIssuer)
 	}
 	for _, field := range []string{"version", "chain_id", "app_id", "registered_at", "registry_address"} {
@@ -159,7 +261,7 @@ func TestInjectSealV2UsesAppSignerAndServerScope(t *testing.T) {
 	}
 }
 
-func TestInjectSealV2RejectsInvalidIssuer(t *testing.T) {
+func TestInjectSealRejectsInvalidIssuer(t *testing.T) {
 	key, _ := crypto.GenerateKey()
 	for _, change := range []func(*SealIssuer){
 		func(s *SealIssuer) { s.ChainID = 0 },
@@ -399,5 +501,94 @@ func TestStripSealKey_RemovesPrivkey(t *testing.T) {
 	}
 	if env["SANDBOX_SEAL_ATTESTATION"] == nil {
 		t.Error("SANDBOX_SEAL_ATTESTATION must be preserved")
+	}
+}
+
+func TestInjectSealLowercasesCallerSealID(t *testing.T) {
+	key, _ := crypto.GenerateKey()
+	want := strings.Repeat("ab", 32)
+	out, err := InjectSeal([]byte(fmt.Sprintf(`{"seal_id":%q}`, strings.ToUpper(want))), key, testSealImageHash, testSealIssuer())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(out, &m); err != nil {
+		t.Fatal(err)
+	}
+	var a ImageAttestation
+	if err := json.Unmarshal([]byte(m["env"].(map[string]any)["SANDBOX_SEAL_ATTESTATION"].(string)), &a); err != nil {
+		t.Fatal(err)
+	}
+	if a.SealID != want || m["labels"].(map[string]any)[sealIDLabel] != want {
+		t.Fatalf("seal_id not canonical: certificate %q, label %v", a.SealID, m["labels"].(map[string]any)[sealIDLabel])
+	}
+}
+
+func TestInjectSealStripsCallerTrustEnv(t *testing.T) {
+	kept := map[string]any{
+		"ATTESTOR_URL": "https://attestor.example", "SEAL_BOOT_TICKET": strings.Repeat("11", 32),
+		"SEAL_SECRET_ENV": "0xciphertext", "API_KEY": "k", "CHAIN_RPC_URL": "https://rpc.example",
+		"AGENTIC_ID_ADDR": "0x01", "VERIFIED_FEEDBACK_ADDR": "0x02", "INDEXER_URL": "https://indexer.example",
+		"AGENT_FRAMEWORK": "openclaw",
+	}
+	callerEnv := map[string]any{
+		"ATTESTOR_TLS_DESCRIPTOR":     "caller",
+		"ATTESTOR_ALLOW_UNPINNED_DEV": "1",
+		"TEE_SIGNER_ADDRESS":          "0x0000000000000000000000000000000000000001",
+		"SANDBOX_SEAL_KEY":            "0x" + strings.Repeat("22", 32),
+		"SANDBOX_SEAL_ATTESTATION":    "caller",
+		"SANDBOX_PROXY_DOMAIN":        "caller.example",
+		"SANDBOX_ATTESTOR_IDENTITY":   "caller",
+		"SANDBOX_API_URL":             "https://caller.example",
+	}
+	for k, v := range kept {
+		callerEnv[k] = v
+	}
+	for _, proxyDomain := range []string{"", "proxy.example:4000"} {
+		t.Run("proxy_domain="+proxyDomain, func(t *testing.T) {
+			t.Setenv("PROXY_DOMAIN", proxyDomain)
+			key, _ := crypto.GenerateKey()
+			body, _ := json.Marshal(map[string]any{"env": callerEnv})
+			out, err := InjectSeal(body, key, testSealImageHash, testSealIssuer())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var m map[string]any
+			if err := json.Unmarshal(out, &m); err != nil {
+				t.Fatal(err)
+			}
+			env := m["env"].(map[string]any)
+			want := len(kept) + 2
+			if proxyDomain != "" {
+				want++
+				if env["SANDBOX_PROXY_DOMAIN"] != proxyDomain {
+					t.Fatalf("SANDBOX_PROXY_DOMAIN = %v", env["SANDBOX_PROXY_DOMAIN"])
+				}
+			} else if _, ok := env["SANDBOX_PROXY_DOMAIN"]; ok {
+				t.Fatal("caller SANDBOX_PROXY_DOMAIN survived")
+			}
+			if len(env) != want {
+				t.Fatalf("env keys %v", env)
+			}
+			for k, v := range kept {
+				if env[k] != v {
+					t.Fatalf("%s = %v, want caller value", k, env[k])
+				}
+			}
+			sealKey, err := crypto.HexToECDSA(strings.TrimPrefix(env[sealKeyEnv].(string), "0x"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var a ImageAttestation
+			if err := json.Unmarshal([]byte(env["SANDBOX_SEAL_ATTESTATION"].(string)), &a); err != nil {
+				t.Fatal(err)
+			}
+			if a.PublicKey != "0x"+hex.EncodeToString(crypto.CompressPubkey(&sealKey.PublicKey)) {
+				t.Fatal("SANDBOX_SEAL_KEY does not match the certificate pubkey")
+			}
+			if recoverSealSigner(t, a) != crypto.PubkeyToAddress(key.PublicKey) {
+				t.Fatal("certificate not signed by the provider key")
+			}
+		})
 	}
 }

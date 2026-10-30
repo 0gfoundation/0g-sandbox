@@ -27,8 +27,9 @@ go test ./...
 |---|---|
 | `internal/auth` | EIP-191 签名验证、nonce 防重放、过期检查 |
 | `internal/billing` | OnCreate/OnStart/OnStop/OnDelete、voucher 生成、nonce 递增 |
+| `internal/config` | 启动校验；`ATTESTOR_APP_ID` 配置不全时告警而不拒绝启动 |
 | `internal/daytona` | HTTP 客户端、认证头、错误处理 |
-| `internal/proxy` | 路由拦截、owner 注入/过滤、余额检查 |
+| `internal/proxy` | 路由拦截、owner 注入/过滤、余额检查；sealed 证书与 attestor TLS 声明的 known-answer 向量（`testdata/*-v3.json`，与 attestor 和 sealed runtime 共享）、sealed env 剥除、snapshot 覆盖拒绝、`GET /api/attestor-tls` 的缓存、503 与 429 |
 | `internal/settler` | 结算状态处理、persistStop、DLQ |
 | `internal/voucher` | EIP-712 签名、usageHash 构造 |
 
