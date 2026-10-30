@@ -356,7 +356,7 @@ All fields are optional.
 
 **Sealed sandboxes** (`"sealed": true`):
 - Resolves the image to its content digest via the internal registry (hard failure if unresolvable)
-- Refuses (**400**) a snapshot whose record has `buildInfo` (built from a Dockerfile): the certificate attests only the image digest, so the image's own entrypoint must run. `POST /api/snapshots` rejects `entrypoint` and `buildInfo`; the record's `entrypoint` is otherwise the image's own, which Daytona fills in
+- Refuses (**400**) a snapshot that does not run its image's own entrypoint: one whose record names an entrypoint other than the image config's, or one built from a Dockerfile (`buildInfo`). The certificate attests only the image digest. Daytona fills a record's `entrypoint` from the image when the snapshot was created without one
 - Generates an ephemeral secp256k1 keypair as the container's signing identity
 - Removes every caller `env` key that starts with `SANDBOX_`, and `ATTESTOR_TLS_DESCRIPTOR`, `ATTESTOR_ALLOW_UNPINNED_DEV` and `TEE_SIGNER_ADDRESS`; other `env` keys pass through
 - Injects `SANDBOX_SEAL_KEY` (private key; stripped from responses), `SANDBOX_SEAL_ATTESTATION` (v3 certificate: `version`, `chain_id`, `registry_address`, `app_id`, `registered_at`, `seal_id`, `pubkey`, `image_hash`, `ts`, EIP-712 `signature` by the provider key; see [APP_IDENTITY.md](APP_IDENTITY.md#sealed-container-certificate-v3)) and, when the provider sets `PROXY_DOMAIN`, `SANDBOX_PROXY_DOMAIN`

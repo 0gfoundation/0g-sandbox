@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/crane"
 	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 )
 
 // ErrTagSharesManifest signals that a DeleteTag candidate cannot be removed
@@ -40,6 +42,35 @@ func PinRef(imageRef, digest string) (string, error) {
 // For sealed containers this must succeed before sandbox creation proceeds;
 // callers should treat an error as a hard failure.
 func GetDigest(ctx context.Context, imageRef string) (string, error) {
+	opts, err := craneOptions(ctx, imageRef)
+	if err != nil {
+		return "", err
+	}
+	digest, err := crane.Digest(imageRef, opts...)
+	if err != nil {
+		return "", fmt.Errorf("get digest for %q: %w", imageRef, err)
+	}
+	return digest, nil
+}
+
+// GetEntrypoint reads the entrypoint from imageRef's own image config.
+func GetEntrypoint(ctx context.Context, imageRef string) ([]string, error) {
+	opts, err := craneOptions(ctx, imageRef)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := crane.Config(imageRef, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("get config for %q: %w", imageRef, err)
+	}
+	var cfg v1.ConfigFile
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config for %q: %w", imageRef, err)
+	}
+	return cfg.Config.Entrypoint, nil
+}
+
+func craneOptions(ctx context.Context, imageRef string) ([]crane.Option, error) {
 	opts := []crane.Option{
 		crane.WithContext(ctx),
 		crane.WithAuth(authn.Anonymous),
@@ -49,18 +80,13 @@ func GetDigest(ctx context.Context, imageRef string) (string, error) {
 	// does not have a TLD (e.g. "registry:6000/...").
 	ref, err := name.ParseReference(imageRef, name.Insecure)
 	if err != nil {
-		return "", fmt.Errorf("parse image ref %q: %w", imageRef, err)
+		return nil, fmt.Errorf("parse image ref %q: %w", imageRef, err)
 	}
 
 	if isInternalRegistry(ref.Context().RegistryStr()) {
 		opts = append(opts, crane.Insecure)
 	}
-
-	digest, err := crane.Digest(imageRef, opts...)
-	if err != nil {
-		return "", fmt.Errorf("get digest for %q: %w", imageRef, err)
-	}
-	return digest, nil
+	return opts, nil
 }
 
 // TagByDigest resolves imageRef to its content digest and creates a derived

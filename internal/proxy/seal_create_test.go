@@ -2,12 +2,14 @@ package proxy
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -35,14 +37,26 @@ func newSealedCreateFixture(t *testing.T) (*Handler, *gin.Engine, <-chan forward
 
 // newSealedCreateFixtureWithSnapshot adds extra fields to the Daytona record
 // of the "sealed" snapshot.
+// testSealEntrypoint is the fixture image's own entrypoint.
+var testSealEntrypoint = []string{"/usr/local/bin/sealed"}
+
 func newSealedCreateFixtureWithSnapshot(t *testing.T, extra map[string]any) (*Handler, *gin.Engine, <-chan forwardedSeal, *atomic.Int32) {
 	t.Helper()
+	entrypoint, _ := json.Marshal(testSealEntrypoint)
+	config := []byte(fmt.Sprintf(`{"architecture":"amd64","os":"linux","config":{"Entrypoint":%s},"rootfs":{"type":"layers","diff_ids":[]}}`, entrypoint))
+	configDigest := fmt.Sprintf("sha256:%x", sha256.Sum256(config))
+	manifest := []byte(fmt.Sprintf(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"mediaType":"application/vnd.oci.image.config.v1+json","digest":%q,"size":%d},"layers":[]}`, configDigest, len(config)))
 	registry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Docker-Content-Digest", testSealImageHash)
-		w.Header().Set("Content-Type", "application/vnd.oci.image.manifest.v1+json")
-		w.Header().Set("Content-Length", "2")
+		body := manifest
+		if strings.HasSuffix(r.URL.Path, "/blobs/"+configDigest) {
+			body = config
+		} else {
+			w.Header().Set("Docker-Content-Digest", fmt.Sprintf("sha256:%x", sha256.Sum256(manifest)))
+			w.Header().Set("Content-Type", "application/vnd.oci.image.manifest.v1+json")
+		}
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 		if r.Method != http.MethodHead {
-			_, _ = w.Write([]byte(`{}`))
+			_, _ = w.Write(body)
 		}
 	}))
 	t.Cleanup(registry.Close)
@@ -232,9 +246,11 @@ func TestNonsealedCreateNeedsNoIssuer(t *testing.T) {
 }
 
 // The certificate attests only the image digest, so a sealed create refuses a
-// snapshot built from a Dockerfile, and releases its reservation.
+// snapshot that runs anything but its image's own entrypoint, and releases its
+// reservation.
 func TestSealedCreateRefusesSnapshotOverrides(t *testing.T) {
 	for name, extra := range map[string]map[string]any{
+		"entrypoint": {"entrypoint": []string{"sh", "-c", "exec /entry"}},
 		"build_info": {"buildInfo": map[string]any{"snapshotRef": "built", "dockerfileContent": "FROM scratch"}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -276,26 +292,11 @@ func TestSealedCreateRefusesSnapshotOverrides(t *testing.T) {
 // Daytona copies the image's own entrypoint into every snapshot record, so a
 // recorded entrypoint alone must not refuse a sealed create.
 func TestSealedCreateAcceptsSnapshotWithImageEntrypoint(t *testing.T) {
-	h, r, _, created := newSealedCreateFixtureWithSnapshot(t, map[string]any{"entrypoint": []string{"/usr/local/bin/sealed"}})
+	h, r, _, created := newSealedCreateFixtureWithSnapshot(t, map[string]any{"entrypoint": testSealEntrypoint})
 	h.SealIssuer = func(context.Context) (SealIssuer, error) { return testSealIssuer(), nil }
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"sealed","sealed":true}`)))
 	if w.Code != http.StatusOK || created.Load() != 1 {
 		t.Fatalf("sealed create from a snapshot with its image entrypoint: %d %s", w.Code, w.Body.String())
-	}
-}
-
-func TestSnapshotCreateRejectsOverrides(t *testing.T) {
-	h, r, _, _ := newSealedCreateFixture(t)
-	h.AppOwner = func(context.Context) (string, error) { return "0xowner", nil }
-	for _, field := range []string{"entrypoint", "Entrypoint", "buildInfo", "BUILDINFO"} {
-		t.Run(field, func(t *testing.T) {
-			body := fmt.Sprintf(`{"name":"wrapped","imageName":"sealed:test",%q:["sh"]}`, field)
-			w := httptest.NewRecorder()
-			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/snapshots", strings.NewReader(body)))
-			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "own entrypoint") {
-				t.Fatalf("want 400, got %d %s", w.Code, w.Body.String())
-			}
-		})
 	}
 }

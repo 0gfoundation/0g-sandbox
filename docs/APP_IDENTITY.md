@@ -102,9 +102,10 @@ when its `PROXY_DOMAIN` is set, `SANDBOX_PROXY_DOMAIN`. Other caller env, such a
 `ATTESTOR_URL`, `SEAL_BOOT_TICKET` and `SEAL_SECRET_ENV`, passes through unchanged.
 
 The certificate attests only the image digest, so the container must run the image's
-own entrypoint. `POST /api/snapshots` rejects `entrypoint` and `buildInfo` in any key
-case, and a sealed create refuses a snapshot whose Daytona record has `buildInfo`. The
-record's `entrypoint` is not checked: Daytona fills it from the image itself.
+own entrypoint. A sealed create reads the entrypoint from the image's own config and
+refuses a snapshot whose Daytona record names a different one, or that Daytona builds
+from a Dockerfile (`buildInfo`). Snapshots themselves are not restricted: a non-sealed
+sandbox may still use one that overrides its entrypoint.
 
 A normal reboot changes the node signer but retains the app signer and registration
 instance, so a stored certificate remains usable. Re-registering the same appId creates

@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -504,7 +505,7 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	}
 	var imageHash string
 	if sealed {
-		imageRef, err := h.resolveImageRef(c.Request.Context(), body)
+		imageRef, snapshotEntrypoint, err := h.resolveImageRef(c.Request.Context(), body)
 		if err != nil {
 			releaseRejectedSeal()
 			if errors.Is(err, errSnapshotOverridesImage) {
@@ -516,11 +517,28 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		}
 		imageHash, err = registry.GetDigest(c.Request.Context(), imageRef)
 		if err != nil {
+			releaseRejectedSeal()
 			c.JSON(http.StatusUnprocessableEntity, gin.H{
 				"error":  "sealed containers require the image to be present in the registry",
 				"detail": err.Error(),
 			})
 			return
+		}
+		if len(snapshotEntrypoint) > 0 {
+			own, err := registry.GetEntrypoint(c.Request.Context(), imageRef)
+			if err != nil {
+				releaseRejectedSeal()
+				c.JSON(http.StatusUnprocessableEntity, gin.H{
+					"error":  "sealed containers require the image config to be readable",
+					"detail": err.Error(),
+				})
+				return
+			}
+			if !slices.Equal(own, snapshotEntrypoint) {
+				releaseRejectedSeal()
+				c.JSON(http.StatusBadRequest, gin.H{"error": errSnapshotOverridesImage.Error()})
+				return
+			}
 		}
 		// Pin the forwarded image to the attested digest. The attestation is
 		// signed over imageHash, but a mutable TAG forwarded to Daytona can be
@@ -1243,8 +1261,6 @@ func (h *Handler) handleListSnapshots(c *gin.Context) {
 
 // handleSnapshotCreate registers a Docker image as a named Daytona snapshot.
 // Admin-only: accepts {name, imageName}, forwards to Daytona internally.
-// entrypoint and buildInfo are rejected (rejectSnapshotOverrides): every
-// snapshot runs its image's own entrypoint.
 //
 // Before forwarding, the caller-supplied imageName is resolved to its content
 // digest and rewritten to a derived tag "<repo>:d-<shortdigest>" (created in
@@ -1276,11 +1292,6 @@ func (h *Handler) handleSnapshotCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
 		return
 	}
-	if err := rejectSnapshotOverrides(m); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
 	imageName, _ := m["imageName"].(string)
 	if imageName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "imageName required"})
@@ -1709,11 +1720,11 @@ func rewriteImage(body []byte, pinned string) ([]byte, error) {
 	return json.Marshal(m)
 }
 
-// errSnapshotOverridesImage refuses a sealed create from a snapshot built from
-// a Dockerfile: the certificate attests only the image digest.
-var errSnapshotOverridesImage = errors.New("sealed containers cannot use a snapshot built from a Dockerfile")
+// errSnapshotOverridesImage refuses a sealed create from a snapshot that does
+// not run its image's own entrypoint: the certificate attests only the image.
+var errSnapshotOverridesImage = errors.New("sealed containers must run their image's own entrypoint; this snapshot overrides it or is built from a Dockerfile")
 
-func (h *Handler) resolveImageRef(ctx context.Context, body []byte) (string, error) {
+func (h *Handler) resolveImageRef(ctx context.Context, body []byte) (string, []string, error) {
 	var m struct {
 		Image    string `json:"image"`
 		Snapshot string `json:"snapshot"`
@@ -1721,22 +1732,22 @@ func (h *Handler) resolveImageRef(ctx context.Context, body []byte) (string, err
 	json.NewDecoder(bytes.NewReader(body)).Decode(&m) //nolint:errcheck
 
 	if m.Image != "" {
-		return m.Image, nil
+		return m.Image, nil, nil
 	}
 	if m.Snapshot != "" {
 		snaps, err := h.dtona.ListSnapshots(ctx)
 		if err != nil {
-			return "", fmt.Errorf("list snapshots: %w", err)
+			return "", nil, fmt.Errorf("list snapshots: %w", err)
 		}
 		for _, s := range snaps {
 			if s.Name == m.Snapshot {
-				if s.OverridesImage() {
-					return "", errSnapshotOverridesImage
+				if s.BuildInfo != nil {
+					return "", nil, errSnapshotOverridesImage
 				}
-				return s.ImageName, nil
+				return s.ImageName, s.Entrypoint, nil
 			}
 		}
-		return "", fmt.Errorf("snapshot %q not found", m.Snapshot)
+		return "", nil, fmt.Errorf("snapshot %q not found", m.Snapshot)
 	}
-	return "", fmt.Errorf("no image or snapshot specified")
+	return "", nil, fmt.Errorf("no image or snapshot specified")
 }

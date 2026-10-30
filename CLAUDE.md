@@ -184,10 +184,10 @@ Signed by the TEE key. Nonce is per `(user, provider)` pair; must be strictly in
 When a sandbox create request includes `"sealed": true`, the proxy:
 
 1. Resolves the image/snapshot reference to its content digest via `registry.GetDigest`
-   (uses `crane.Digest`; insecure mode for `registry:` or `localhost:` hosts). A snapshot
-   whose record has `buildInfo` is refused: the certificate attests only the image digest.
-   `POST /api/snapshots` rejects `entrypoint` and `buildInfo`; Daytona fills a record's
-   `entrypoint` from the image itself, so it is not checked at create.
+   (uses `crane.Digest`; insecure mode for `registry:` or `localhost:` hosts). The
+   certificate attests only the image digest, so a snapshot that does not run the image's
+   own entrypoint is refused: its record names another entrypoint than the image config
+   (`registry.GetEntrypoint`), or it is built from a Dockerfile (`buildInfo`).
 2. Generates an ephemeral secp256k1 keypair for the container's signing identity
 3. Authenticates its KMS provider and current registration instance with bounded,
    block-pinned chain reads. Builds the v3 container certificate, signed with EIP-712:
@@ -377,7 +377,7 @@ The server starts on port 8080 (`PORT` env var) and exposes:
 - `Any /api/toolbox/:id/*` — Daytona toolbox proxy (owner only, sealed sandboxes blocked)
 - `GET /api/volumes` — list volumes owned by caller
 - `GET /api/snapshots` `POST /api/snapshots` `DELETE /api/snapshots/:id` — snapshot mgmt
-  (`POST` is admin-only and rejects `entrypoint`/`buildInfo`)
+  (`POST` is admin-only)
 - `GET /api/events` — on-chain VoucherSettled events
 
 Most management-plane routes use `withOwnerOrAdmin`: admins skip the owner

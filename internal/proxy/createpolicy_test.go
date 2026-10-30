@@ -37,15 +37,3 @@ func TestRequireSnapshotCreate(t *testing.T) {
 		}
 	}
 }
-
-func TestRejectSnapshotOverrides(t *testing.T) {
-	for _, k := range []string{"entrypoint", "Entrypoint", "ENTRYPOINT", "buildInfo", "buildinfo", "BuildInfo"} {
-		if err := rejectSnapshotOverrides(map[string]any{"name": "s", "imageName": "img", k: nil}); err == nil {
-			t.Errorf("%q accepted", k)
-		}
-	}
-	allowed := map[string]any{"name": "s", "imageName": "img", "cpu": 1, "gpu": 0, "memory": 1, "disk": 3, "general": false, "regionId": "r"}
-	if err := rejectSnapshotOverrides(allowed); err != nil {
-		t.Fatalf("plain snapshot rejected: %v", err)
-	}
-}

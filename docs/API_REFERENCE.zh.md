@@ -335,7 +335,7 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 
 **Sealed 沙箱**(`"sealed": true`):
 - 通过内部 registry 把镜像解析为 content digest(无法解析则硬失败)
-- 拒绝(**400**)记录中带 `buildInfo`(由 Dockerfile 构建)的 snapshot:证书只证明镜像 digest,必须运行镜像自身的 entrypoint。`POST /api/snapshots` 拒绝 `entrypoint` 和 `buildInfo`;除此之外,记录里的 `entrypoint` 就是镜像自身的,由 Daytona 填入
+- 拒绝(**400**)不运行镜像自身 entrypoint 的 snapshot:记录中的 entrypoint 与镜像 config 不同,或由 Dockerfile 构建(`buildInfo`)。证书只证明镜像 digest。创建 snapshot 时未指定 entrypoint 的,Daytona 会从镜像填入
 - 生成一个临时 secp256k1 密钥对作为容器的签名身份
 - 删除调用者 `env` 中所有以 `SANDBOX_` 开头的键,以及 `ATTESTOR_TLS_DESCRIPTOR`、`ATTESTOR_ALLOW_UNPINNED_DEV` 和 `TEE_SIGNER_ADDRESS`;其余 `env` 键原样透传
 - 注入 `SANDBOX_SEAL_KEY`(私钥;从响应中剥除)、`SANDBOX_SEAL_ATTESTATION`(v3 证书:`version`、`chain_id`、`registry_address`、`app_id`、`registered_at`、`seal_id`、`pubkey`、`image_hash`、`ts`,以及 provider key 的 EIP-712 `signature`;见 [APP_IDENTITY.zh.md](APP_IDENTITY.zh.md#sealed-容器证书v3)),并在 provider 设置了 `PROXY_DOMAIN` 时注入 `SANDBOX_PROXY_DOMAIN`

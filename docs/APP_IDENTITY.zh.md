@@ -86,9 +86,10 @@ sealed 创建时，provider 先从调用者 env 中删除所有以 `SANDBOX_` �
 写入 `SANDBOX_PROXY_DOMAIN`。其余调用者 env（如 `ATTESTOR_URL`、`SEAL_BOOT_TICKET`、
 `SEAL_SECRET_ENV`）原样透传。
 
-证书只证明镜像 digest，因此容器必须运行镜像自身的 entrypoint。`POST /api/snapshots`
-拒绝 `entrypoint` 与 `buildInfo`（键名不区分大小写），sealed 创建也拒绝 Daytona 记录中
-带 `buildInfo` 的 snapshot。记录里的 `entrypoint` 不做检查：Daytona 会从镜像本身填入它。
+证书只证明镜像 digest，因此容器必须运行镜像自身的 entrypoint。sealed 创建时从镜像自身
+的 config 读取 entrypoint，Daytona 记录中的 entrypoint 与之不同，或 snapshot 由 Dockerfile
+构建（`buildInfo`）时拒绝创建。snapshot 本身不受限制：非 sealed 沙箱仍可使用覆盖了
+entrypoint 的 snapshot。
 
 正常重启只改变节点 signer，app signer 和注册实例不变，已保存的证书因此可以继续使用。
 同 appId 注销重注册后，即使 KMS key 未变，也按新实例处理，不能继承旧证书。
