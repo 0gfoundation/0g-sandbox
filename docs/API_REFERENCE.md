@@ -897,7 +897,7 @@ Called by the provider's settler. Users do not call this directly.
 | `labels["0g-sealed"]` | string | `"true"` if the sandbox was created with `sealed: true`; absent otherwise |
 | `labels["0g-seal-id"]` | string | 64-char lowercase hex identifier correlating the sandbox to its container certificate; absent for non-sealed sandboxes |
 
-The `SANDBOX_SEAL_KEY` env var injected at create time is **stripped from all API responses** — it is only ever visible inside the container itself.
+The `SANDBOX_SEAL_KEY` env var injected at create time is **stripped from all API responses** — it is only ever visible inside the container itself. So is a caller's `SEAL_BOOT_TICKET` (an attestor's boot ticket for the container).
 
 ### Proxy URL
 

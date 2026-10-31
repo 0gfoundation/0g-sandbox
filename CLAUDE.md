@@ -207,6 +207,8 @@ When a sandbox create request includes `"sealed": true`, the proxy:
    - `SANDBOX_PROXY_DOMAIN` — only when `PROXY_DOMAIN` is set.
 
    Other caller env (`ATTESTOR_URL`, `SEAL_BOOT_TICKET`, `SEAL_SECRET_ENV`, ...) passes through.
+   Responses drop `SANDBOX_SEAL_KEY` and `SEAL_BOOT_TICKET` from every returned sandbox's env
+   (`responsescrub.go`, `stripSealKey`).
 5. Sets label `0g-sealed: "true"` → blocks SSH, toolbox, and the transparent `/api/sandbox/:id/<other>`
    passthrough for the sandbox lifetime (the passthrough reaches Daytona's port-preview and public-toggle
    endpoints, either of which would open ports beyond :8080; lifecycle routes keep working)

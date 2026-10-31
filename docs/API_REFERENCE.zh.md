@@ -869,7 +869,7 @@ struct Service {
 | `labels["0g-sealed"]` | string | 若以 `sealed: true` 创建则为 `"true"`;否则不存在 |
 | `labels["0g-seal-id"]` | string | 64 字符小写 hex,关联沙箱到其容器证书;非 sealed 沙箱无此项 |
 
-创建时注入的 `SANDBOX_SEAL_KEY` 环境变量**会从所有 API 响应中剥除** —— 它只在容器内部可见。
+创建时注入的 `SANDBOX_SEAL_KEY` 环境变量**会从所有 API 响应中剥除** —— 它只在容器内部可见。调用者传入的 `SEAL_BOOT_TICKET`（attestor 给该容器的启动票据）同样剥除。
 
 ### 代理 URL
 

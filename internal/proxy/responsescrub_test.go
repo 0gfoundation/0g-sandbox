@@ -38,6 +38,24 @@ func TestScrubSealKeyFromBody_Object(t *testing.T) {
 	}
 }
 
+// The boot ticket an attestor wrote into a sealed sandbox lets its holder
+// present that agent's first provision, so the owner reading the sandbox back
+// must not see it either — alone or beside the key.
+func TestScrubSealKeyFromBody_BootTicket(t *testing.T) {
+	for _, in := range [][]byte{
+		[]byte(`{"id":"sb-1","env":{"SEAL_BOOT_TICKET":"` + strings.Repeat("ab", 32) + `","SANDBOX_SEAL_ATTESTATION":"{}","ATTESTOR_URL":"https://a"}}`),
+		[]byte(`[{"id":"sb-1","env":{"SANDBOX_SEAL_KEY":"0x1","SEAL_BOOT_TICKET":"t"}}]`),
+	} {
+		out := scrubSealKeyFromBody(in)
+		if bytes.Contains(out, []byte(bootTicketEnv)) || bytes.Contains(out, []byte(sealKeyEnv)) {
+			t.Errorf("secret env survived: %s", out)
+		}
+		if bytes.Contains(in, []byte("ATTESTOR_URL")) && !bytes.Contains(out, []byte(`"ATTESTOR_URL":"https://a"`)) {
+			t.Errorf("unrelated env must be kept: %s", out)
+		}
+	}
+}
+
 func TestScrubSealKeyFromBody_Array(t *testing.T) {
 	in := []byte(`[{"id":"a","env":{"SANDBOX_SEAL_KEY":"0x1"}},{"id":"b","env":{"SANDBOX_SEAL_KEY":"0x2"}},{"id":"c","env":{}}]`)
 	out := scrubSealKeyFromBody(in)

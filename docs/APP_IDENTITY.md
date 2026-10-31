@@ -100,7 +100,12 @@ On a sealed create the provider refuses a caller env key that is not a variable 
 every caller env key that starts with `SANDBOX_`, plus `ATTESTOR_TLS_DESCRIPTOR`, `ATTESTOR_ALLOW_UNPINNED_DEV` and
 `TEE_SIGNER_ADDRESS`. It then writes `SANDBOX_SEAL_KEY`, `SANDBOX_SEAL_ATTESTATION` and,
 when its `PROXY_DOMAIN` is set, `SANDBOX_PROXY_DOMAIN`. Other caller env, such as
-`ATTESTOR_URL`, `SEAL_BOOT_TICKET` and `SEAL_SECRET_ENV`, passes through unchanged.
+`ATTESTOR_URL`, `SEAL_BOOT_TICKET` and `SEAL_SECRET_ENV`, passes through unchanged:
+the provider cannot tell an attestor's create from any other. Every response that
+returns a sandbox drops `SANDBOX_SEAL_KEY` and `SEAL_BOOT_TICKET` from its env, so
+neither the owner nor any other caller reads the key or an attestor's boot ticket back;
+`SANDBOX_SEAL_ATTESTATION` stays, and an attestor binds the first provision to the key
+it certifies.
 
 The certificate attests only the image digest, so the container must run the image's
 own entrypoint. A sealed create reads the entrypoint from the image's own config and

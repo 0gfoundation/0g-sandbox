@@ -279,15 +279,16 @@ func stripCallerSealEnv(env map[string]any) {
 	}
 }
 
-// stripSealKey removes SANDBOX_SEAL_KEY from the env map in a sandbox JSON
-// response body. The private key must never be returned to the caller.
+// stripSealKey removes SANDBOX_SEAL_KEY and SEAL_BOOT_TICKET (see
+// secretResponseEnv) from the env map in a sandbox JSON response body. The
+// private key and the boot ticket must never be returned to the caller.
 func stripSealKey(body []byte) ([]byte, error) {
 	var m map[string]any
 	if err := json.Unmarshal(body, &m); err != nil {
 		return nil, err
 	}
 	if env, ok := m["env"].(map[string]any); ok {
-		delete(env, sealKeyEnv)
+		deleteSecretEnv(env)
 	}
 	return json.Marshal(m)
 }

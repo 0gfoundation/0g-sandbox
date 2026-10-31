@@ -85,7 +85,10 @@ sealed 创建时，调用者 env 中有键不是合法变量名（`[A-Za-z_][A-Z
 `ATTESTOR_TLS_DESCRIPTOR`、`ATTESTOR_ALLOW_UNPINNED_DEV` 和 `TEE_SIGNER_ADDRESS`，
 再写入 `SANDBOX_SEAL_KEY`、`SANDBOX_SEAL_ATTESTATION`，以及在其 `PROXY_DOMAIN` 已设置时
 写入 `SANDBOX_PROXY_DOMAIN`。其余调用者 env（如 `ATTESTOR_URL`、`SEAL_BOOT_TICKET`、
-`SEAL_SECRET_ENV`）原样透传。
+`SEAL_SECRET_ENV`）原样透传：provider 无法区分 attestor 的 create 与其他调用者的 create。
+所有返回 sandbox 的响应都会从其 env 中删除 `SANDBOX_SEAL_KEY` 和 `SEAL_BOOT_TICKET`，
+owner 与其他调用者都读不回私钥或 attestor 的启动票据；`SANDBOX_SEAL_ATTESTATION` 保留，
+attestor 把首次 provision 绑定到其中认证的公钥。
 
 证书只证明镜像 digest，因此容器必须运行镜像自身的 entrypoint。sealed 创建时从镜像自身
 的 config 读取 entrypoint，Daytona 记录中的 entrypoint 与之不同，或 snapshot 由 Dockerfile

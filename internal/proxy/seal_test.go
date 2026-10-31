@@ -489,7 +489,7 @@ func TestInjectSeal_SignatureVerifiable(t *testing.T) {
 }
 
 func TestStripSealKey_RemovesPrivkey(t *testing.T) {
-	body := []byte(`{"id":"abc","env":{"SANDBOX_SEAL_KEY":"0xdeadbeef","SANDBOX_SEAL_ATTESTATION":"{}"},"labels":{}}`)
+	body := []byte(`{"id":"abc","env":{"SANDBOX_SEAL_KEY":"0xdeadbeef","SEAL_BOOT_TICKET":"ticket","SANDBOX_SEAL_ATTESTATION":"{}"},"labels":{}}`)
 	out, err := stripSealKey(body)
 	if err != nil {
 		t.Fatalf("stripSealKey: %v", err)
@@ -499,6 +499,9 @@ func TestStripSealKey_RemovesPrivkey(t *testing.T) {
 	env := m["env"].(map[string]any)
 	if _, ok := env["SANDBOX_SEAL_KEY"]; ok {
 		t.Error("SANDBOX_SEAL_KEY must be removed from response")
+	}
+	if _, ok := env["SEAL_BOOT_TICKET"]; ok {
+		t.Error("SEAL_BOOT_TICKET must be removed from response")
 	}
 	if env["SANDBOX_SEAL_ATTESTATION"] == nil {
 		t.Error("SANDBOX_SEAL_ATTESTATION must be preserved")
