@@ -76,8 +76,10 @@ type ChainConfig struct {
 	// resolved from the chain at runtime (getAppInfo(BACKEND_APP_NAME).owner),
 	// never configured, so it can't drift from the on-chain truth.
 	AdminAddresses string `mapstructure:"admin_addresses"`
-	// AttestorAppID authorizes the discovered stable app signer. Operator
-	// wallets in AdminAddresses remain separate from application identities.
+	// AttestorAppID authorizes the discovered stable app signer and, with a
+	// KMS provider, serves the attestor's TLS pins at GET /api/attestor-tls.
+	// Operator wallets in AdminAddresses remain separate from application
+	// identities.
 	AttestorAppID string `mapstructure:"attestor_app_id"`
 	ChainID       int64  `mapstructure:"chain_id"`
 }
@@ -286,8 +288,17 @@ func (c *Config) validate() error {
 	if c.Chain.ProviderKeySource != "local" && c.Chain.ProviderKeySource != "kms" {
 		return fmt.Errorf("PROVIDER_KEY_SOURCE must be \"local\" or \"kms\", got %q", c.Chain.ProviderKeySource)
 	}
-	if c.Chain.AttestorAppID != "" && (!c.Server.TLSEnabled || c.Chain.ProviderKeySource != "kms") {
-		return fmt.Errorf("ATTESTOR_APP_ID requires TLS_ENABLED=true and PROVIDER_KEY_SOURCE=kms")
-	}
 	return nil
+}
+
+// Warnings lists settings that start the server with a feature unavailable.
+func (c *Config) Warnings() []string {
+	var out []string
+	if c.Chain.AttestorAppID != "" && c.Chain.ProviderKeySource != "kms" {
+		out = append(out, "ATTESTOR_APP_ID is set without PROVIDER_KEY_SOURCE=kms: GET /api/attestor-tls answers 503")
+	}
+	if c.Chain.AttestorAppID != "" && !c.Server.TLSEnabled {
+		out = append(out, "ATTESTOR_APP_ID is set without TLS_ENABLED=true: callers cannot pin this provider's attested app TLS")
+	}
+	return out
 }

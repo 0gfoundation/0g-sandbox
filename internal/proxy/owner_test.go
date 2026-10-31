@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -29,6 +30,9 @@ func TestInjectOwner_EmptyBody(t *testing.T) {
 	}
 	if m["autoArchiveInterval"] != float64(60) {
 		t.Errorf("autoArchiveInterval: got %v want 60", m["autoArchiveInterval"])
+	}
+	if m["autoDeleteInterval"] != float64(-1) {
+		t.Errorf("autoDeleteInterval: got %v want -1", m["autoDeleteInterval"])
 	}
 	// Private by default: a plain create with no publicPorts must not be public.
 	if m["public"] != false {
@@ -375,5 +379,33 @@ func TestMergeProtectedLabels_CaseVariantsDropped(t *testing.T) {
 func TestMergeProtectedLabels_InvalidJSON(t *testing.T) {
 	if _, err := MergeProtectedLabels([]byte(`not json`), sealedCurrent); err == nil {
 		t.Error("expected error for invalid JSON")
+	}
+}
+
+// The caller cannot choose any lifecycle interval, in any spelling. An
+// ephemeral sandbox (autoDeleteInterval 0) is what Daytona requires before it
+// links a new sandbox to an existing one.
+func TestInjectOwner_PinsIntervals(t *testing.T) {
+	body := []byte(`{"snapshot":"s","autoDeleteInterval":0,"AutoDeleteInterval":0,"autoStopInterval":5,"AUTOSTOPINTERVAL":5,"autoArchiveInterval":1,"autoarchiveinterval":1}`)
+	out, err := InjectOwner(body, "0xW")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(out, &m); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]float64{"autoStopInterval": 0, "autoArchiveInterval": 60, "autoDeleteInterval": -1}
+	for k, v := range m {
+		for name, pinned := range want {
+			if strings.EqualFold(k, name) && (k != name || v != pinned) {
+				t.Errorf("%s = %v; want only %s = %v", k, v, name, pinned)
+			}
+		}
+	}
+	for name := range want {
+		if _, ok := m[name]; !ok {
+			t.Errorf("%s missing", name)
+		}
 	}
 }

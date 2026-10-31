@@ -27,8 +27,9 @@ go test ./...
 |---|---|
 | `internal/auth` | EIP-191 signature verification, nonce replay protection, expiry |
 | `internal/billing` | OnCreate/OnStart/OnStop/OnDelete handlers, voucher generation, nonce increment |
+| `internal/config` | Startup validation; `ATTESTOR_APP_ID` warnings instead of refusals |
 | `internal/daytona` | HTTP client, auth headers, error handling |
-| `internal/proxy` | Request interception, owner label injection/filtering, balance check |
+| `internal/proxy` | Request interception, owner label injection/filtering, balance check; sealed certificate and attestor TLS statement known-answer vectors (`testdata/*-v3.json`, shared with the attestor and sealed runtime), sealed env stripping, snapshot override refusal, `GET /api/attestor-tls` caching, 503 and 429 |
 | `internal/settler` | Settlement status handling, persistStop, DLQ |
 | `internal/voucher` | EIP-712 signing, usageHash construction |
 

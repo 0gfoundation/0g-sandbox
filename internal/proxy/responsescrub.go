@@ -10,17 +10,34 @@ import (
 // never appear in any response body returned to a caller.
 const sealKeyEnv = "SANDBOX_SEAL_KEY"
 
-// scrubSealKeyFromBody removes the sealKeyEnv entry from the env map of a
-// JSON sandbox object — or from every element of a JSON array of sandbox
-// objects. Bodies that do not contain the key, are not JSON, or use any other
-// shape are returned byte-for-byte unchanged, so the scrub is safe to apply
-// to every JSON response that passes through the reverse proxy.
+// bootTicketEnv is the boot ticket an attestor writes into the env of a
+// sealed sandbox it creates. Whoever holds it can present a first provision
+// for that agent, so it is as secret as the seal key: the owner reading the
+// sandbox back must not learn it.
+const bootTicketEnv = "SEAL_BOOT_TICKET"
+
+// secretResponseEnv lists the env vars removed from every sandbox object a
+// response carries. SANDBOX_SEAL_ATTESTATION (the public certificate) stays.
+var secretResponseEnv = []string{sealKeyEnv, bootTicketEnv}
+
+// scrubSealKeyFromBody removes the secretResponseEnv entries from the env map
+// of a JSON sandbox object — or from every element of a JSON array of sandbox
+// objects. Bodies that contain none of the keys, are not JSON, or use any
+// other shape are returned byte-for-byte unchanged, so the scrub is safe to
+// apply to every JSON response that passes through the reverse proxy.
 //
 // Numbers are decoded with UseNumber so every value re-marshals exactly as
 // received — wei amounts and other integers beyond 2^53 must not round-trip
 // through float64.
 func scrubSealKeyFromBody(body []byte) []byte {
-	if !bytes.Contains(body, []byte(`"`+sealKeyEnv+`"`)) {
+	mentioned := false
+	for _, key := range secretResponseEnv {
+		if bytes.Contains(body, []byte(`"`+key+`"`)) {
+			mentioned = true
+			break
+		}
+	}
+	if !mentioned {
 		return body
 	}
 	dec := json.NewDecoder(bytes.NewReader(body))
@@ -39,12 +56,12 @@ func scrubSealKeyFromBody(body []byte) []byte {
 	return out
 }
 
-// scrubSealKeyInValue deletes sealKeyEnv from v's env map, or from the env
-// map of each object element when v is an array. It reports whether anything
-// was deleted. Only these two shapes are touched: a sandbox object is flat
-// (its env sits at the top level) and list responses are arrays of sandbox
-// objects, so deeper "env" keys — a user service echoing its own JSON through
-// the toolbox, for example — are left alone.
+// scrubSealKeyInValue deletes the secretResponseEnv keys from v's env map, or
+// from the env map of each object element when v is an array. It reports
+// whether anything was deleted. Only these two shapes are touched: a sandbox
+// object is flat (its env sits at the top level) and list responses are
+// arrays of sandbox objects, so deeper "env" keys — a user service echoing
+// its own JSON through the toolbox, for example — are left alone.
 func scrubSealKeyInValue(v any) bool {
 	switch t := v.(type) {
 	case map[string]any:
@@ -52,11 +69,7 @@ func scrubSealKeyInValue(v any) bool {
 		if !ok {
 			return false
 		}
-		if _, had := env[sealKeyEnv]; had {
-			delete(env, sealKeyEnv)
-			return true
-		}
-		return false
+		return deleteSecretEnv(env)
 	case []any:
 		changed := false
 		for _, e := range t {
@@ -68,4 +81,17 @@ func scrubSealKeyInValue(v any) bool {
 	default:
 		return false
 	}
+}
+
+// deleteSecretEnv removes every secretResponseEnv key from env and reports
+// whether one was present.
+func deleteSecretEnv(env map[string]any) bool {
+	changed := false
+	for _, key := range secretResponseEnv {
+		if _, had := env[key]; had {
+			delete(env, key)
+			changed = true
+		}
+	}
+	return changed
 }

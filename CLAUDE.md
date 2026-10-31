@@ -56,7 +56,8 @@ internal/
   daytona/    Daytona HTTP client (create/stop/list sandboxes)
   events/     event log (audit trail for billing actions)
   proxy/      gin handler: proxies Daytona, enforces sandbox ownership
-    seal.go             InjectSeal, stripSealKey — sealed container attestation
+    seal.go             InjectSeal, stripSealKey — sealed container certificate (v3)
+    attestortls.go      GET /api/attestor-tls — provider-signed attestor TLS pins
     sealdebug_off.go    production: sealed → blocks SSH/toolbox
     sealdebug_on.go     sealdebug build: sealed → attestation injected, SSH/toolbox open
   registry/
@@ -102,7 +103,7 @@ contracts/
   Default is `local`, today's model above.
 - **Two keys at runtime:**
   - `chain.Client.ProviderKey()` signs vouchers, settlement txs, broker
-    requests and v2 sealed-workload attestations.
+    requests, v3 sealed-container certificates and attestor TLS statements.
   - `NodeKey()`, the rotating TEE signer, signs the provider's endorsement
     and remains the node-registration identity; it does not sign sealed proofs.
 - **Registration:** `addOrUpdateKmsService` (`cmd/provider register --kms`)
@@ -123,7 +124,10 @@ contracts/
   `GetAppSigner` reports whether measurement succeeded. tapp restores this
   boot's metadata after process restarts; billing does not poll for secrets.
 - **AppId authorization / TLS:** see `docs/APP_IDENTITY.md`. `ATTESTOR_APP_ID`
-  discovers the stable attestor signer through the local pinned-Scan infra;
+  discovers the stable attestor signer and its TLS pins through the local
+  pinned-Scan infra; with a KMS provider, `GET /api/attestor-tls` serves those
+  pins signed by `ProviderKey()`. Without a KMS provider the server still starts,
+  logs a warning and that endpoint answers 503.
   `TLS_ENABLED=true` serves the attested P-256 app TLS certificate directly.
 - **Prerequisites:** the KMS must run attested admission. Without it, the
   owner could register a plain key as a node and take the provider key
@@ -180,28 +184,41 @@ Signed by the TEE key. Nonce is per `(user, provider)` pair; must be strictly in
 When a sandbox create request includes `"sealed": true`, the proxy:
 
 1. Resolves the image/snapshot reference to its content digest via `registry.GetDigest`
-   (uses `crane.Digest`; insecure mode for `registry:` or `localhost:` hosts)
+   (uses `crane.Digest`; insecure mode for `registry:` or `localhost:` hosts). The
+   certificate attests only the image digest, so a snapshot that does not run the image's
+   own entrypoint is refused: its record names another entrypoint than the image config
+   (`registry.GetEntrypoint`), or it is built from a Dockerfile (`buildInfo`).
 2. Generates an ephemeral secp256k1 keypair for the container's signing identity
 3. Authenticates its KMS provider and current registration instance with bounded,
-   block-pinned chain reads. Builds a v2 app-signed attestation using nine ABI words:
+   block-pinned chain reads. Builds the v3 container certificate, signed with EIP-712:
    ```
-   digest = keccak256(abi.encode(domainHash, chainId, registry, appIdHash,
-     registeredAt, sealId, keccak256(compressedPubkey), imageHash, issuedAt))
+   EIP712Domain(name "0G Sandbox ImageAttestation", version "3", chainId, verifyingContract = TappRegistry)
+   ImageAttestation(string appId,uint64 registeredAt,bytes32 sealId,bytes containerPubkey,bytes32 imageHash,uint64 issuedAt)
    ```
-   `domainHash = keccak256("0g.sandbox.ImageAttestation.v2")`; appIdHash uses exact
-   UTF-8 bytes. `ProviderKey()` signs the raw digest. Signature V is normalised to27/28.
-4. Injects two env vars into the container:
+   `containerPubkey` is the raw 33-byte compressed key; `appId` uses exact UTF-8 bytes.
+   `ProviderKey()` signs `keccak256(0x1901 ‖ domainSeparator ‖ structHash)` raw (no
+   EIP-191 prefix). Signature V is normalised to 27/28.
+4. Refuses (400) a caller env key that is not a variable name (`[A-Za-z_][A-Za-z0-9_]*`).
+   Removes every caller-supplied `SANDBOX_*` env key plus `ATTESTOR_TLS_DESCRIPTOR`,
+   `ATTESTOR_ALLOW_UNPINNED_DEV` and `TEE_SIGNER_ADDRESS`, then injects:
    - `SANDBOX_SEAL_KEY` — hex private key; the container's signing identity.
      Never returned through the API; stripped from the create response.
-   - `SANDBOX_SEAL_ATTESTATION` — JSON: `{version, chain_id, registry_address, app_id, registered_at, seal_id, pubkey, image_hash, signature, ts}`
+   - `SANDBOX_SEAL_ATTESTATION` — compact JSON in this order: `{version, chain_id, registry_address, app_id, registered_at, seal_id, pubkey, image_hash, ts, signature}`
+   - `SANDBOX_PROXY_DOMAIN` — only when `PROXY_DOMAIN` is set.
+
+   Other caller env (`ATTESTOR_URL`, `SEAL_BOOT_TICKET`, `SEAL_SECRET_ENV`, ...) passes through.
+   Responses drop `SANDBOX_SEAL_KEY` and `SEAL_BOOT_TICKET` from every returned sandbox's env
+   (`responsescrub.go`, `stripSealKey`).
 5. Sets label `0g-sealed: "true"` → blocks SSH, toolbox, and the transparent `/api/sandbox/:id/<other>`
    passthrough for the sandbox lifetime (the passthrough reaches Daytona's port-preview and public-toggle
    endpoints, either of which would open ports beyond :8080; lifecycle routes keep working)
-6. Sets label `0g-seal-id: <64-char hex>` → operators can correlate sandbox ↔ attestation
+6. Sets label `0g-seal-id: <64-char hex>` → operators can correlate sandbox ↔ certificate
 
 Sealing requires `PROVIDER_KEY_SOURCE=kms` and a valid current KMS service binding.
-The v2 attestor authenticates the app signer and signed issuer scope through discovery;
-legacy node-signed workloads need an owner reset. See `docs/APP_IDENTITY.md`.
+The attestor authenticates the certificate's signer and issuer scope through discovery.
+Sealed containers authenticate the attestor's TLS by the pins in `GET /api/attestor-tls`,
+which the attestor relays. Containers holding an earlier certificate version must be
+recreated. See `docs/APP_IDENTITY.md`.
 Sealing also requires the image to be present in the internal registry (needed to resolve the
 content digest). A non-resolvable image reference is a hard failure; the create request is
 rejected.
@@ -337,6 +354,10 @@ The server starts on port 8080 (`PORT` env var) and exposes:
 - `GET /healthz` — liveness probe
 - `GET /dashboard` — operator dashboard (embedded HTML)
 - `GET /api/info` — provider info (address, contract, pricing, `sealed_only`)
+- `GET /api/attestor-tls` — the attestor's TLS SPKI pins, EIP-712-signed by the provider key
+  (`Cache-Control: no-store`; a cached statement costs no rate-limit token; requests that
+  wait for a refresh share 20 req/s, burst 50, and beyond it get 429 when no statement is
+  servable; 503 without `ATTESTOR_APP_ID` + KMS provider)
 - `GET /api/providers` — list registered providers
 - `GET /api/snapshots` — list available snapshots
 - `GET /api/sandbox_list` — list all sandboxes (admin view, no auth)
@@ -359,6 +380,7 @@ The server starts on port 8080 (`PORT` env var) and exposes:
 - `Any /api/toolbox/:id/*` — Daytona toolbox proxy (owner only, sealed sandboxes blocked)
 - `GET /api/volumes` — list volumes owned by caller
 - `GET /api/snapshots` `POST /api/snapshots` `DELETE /api/snapshots/:id` — snapshot mgmt
+  (`POST` is admin-only and refuses UUID-shaped names)
 - `GET /api/events` — on-chain VoucherSettled events
 
 Most management-plane routes use `withOwnerOrAdmin`: admins skip the owner
@@ -369,7 +391,7 @@ admins would let the operator read user code or trigger billable starts,
 violating the workload-privacy guarantee.
 
 **Admin-only (caller wallet must be in `ADMIN_ADDRESSES`):**
-- `POST /api/registry/pull` — pull image into internal registry
+- `POST /api/registry/pull` — pull image into internal registry (tags immutable: 409 on re-pointing; `daytona-*` repos and `d-*` tags reserved)
 - `POST /api/registry/gc` — garbage-collect orphan derived tags
 - `POST /api/archive-all` — archive every running sandbox + clear Redis sessions
 - `DELETE /api/sandbox/:id/force` — operator-intent override of `DELETE /api/sandbox/:id`

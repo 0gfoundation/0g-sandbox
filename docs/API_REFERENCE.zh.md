@@ -244,6 +244,38 @@ const resp = await fetch("http://<proxy>/api/sandbox", {
 >     `provider_address`，并核对 `key_ref` 同时出现在 `runtime_data.key_commitments`
 >     和重放通过的 event log 中。
 
+#### `GET /api/attestor-tls`
+attestor 当前的 TLS SPKI pin,由本 provider 的 key 签名。sealed 容器经 attestor 转发取得
+该声明,只接受 pin 中的 key 作为 attestor 的 TLS 身份。字段顺序固定;响应体为紧凑 JSON,
+末尾无换行(此处展开显示)。
+```json
+{
+  "version":          3,
+  "chain_id":         16602,
+  "registry_address": "0x79d11d8d71784dfed781124e219ad3c62b3a17f6",
+  "tls_spki_sha256":  ["2b4d268f…b933", "2bffeb0c…501c"],
+  "issued_at":        1793318460,
+  "expires_at":       1793318748,
+  "signature":        "0x0d07…0e851c"
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `chain_id`、`registry_address` | EIP-712 domain 范围:provider 所在链与 TappRegistry |
+| `tls_spki_sha256` | 1–16 个 attestor TLS SubjectPublicKeyInfo 的 SHA-256;小写 hex,无 `0x`,严格升序 |
+| `issued_at`、`expires_at` | Unix 秒;`issued_at < expires_at <= issued_at + 300` |
+| `signature` | `provider_address` 对 EIP-712 `AttestorTLS(bytes32[] tlsSpkiSha256,uint64 issuedAt,uint64 expiresAt)` 的签名,domain 为 `0G Sandbox AttestorTLS`、version `3` |
+
+- **`200`:** 已签名的声明。临近过期前,所有调用者拿到相同字节。
+- **`429`:** `{"error":"too many requests"}`,带 `Retry-After: 1`。提供缓存的声明不消耗限流令牌。只有需要等待进行中刷新的请求共享一个限额(所有调用者合计每秒 20 个请求,突发 50);超出的请求只在没有可提供的缓存声明时得到 `429`。
+- **`503`:** `{"error":"attestor tls unavailable"}`。未同时设置 `ATTESTOR_APP_ID` 与
+  `PROVIDER_KEY_SOURCE=kms` 时始终如此。否则会带 `Retry-After: 5`,表示当前没有剩余有效期
+  超过 5 秒的声明。
+
+所有响应都带 `Cache-Control: no-store`。签名与缓存规则见
+[APP_IDENTITY.zh.md](APP_IDENTITY.zh.md#attestor-tls-声明get-apiattestor-tls)。
+
 #### `GET /api/providers`
 本 billing 实例所服务的那个 provider(provider key 的地址,运行时派生,见上面的 `provider_key_source`)的链上 service 数据。返回一个
 数组——目前只有一条——实时读自 `SandboxServing.services`。若该 provider 没有有效的
@@ -281,16 +313,19 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 **Body:**
 ```json
 {
-  "image":       "ubuntu:22.04",
+  "snapshot":    "ubuntu-2c",
   "sealed":      false,
   "publicPorts": [8080, 3000]
 }
 ```
-所有字段可选。
+只有 `snapshot` 必填。自定义资源字段(`image`、`cpu`、`memory`、`disk`、`gpu`、`class`、`buildInfo`,任意大小写)一律 **400** 拒绝:计费规格始终取自 snapshot 记录。字段名按原样读取:body 中两个字段名只差大小写(`"Snapshot"`,或用 U+017F 的 `"ſnapshot"`)时 **400** 拒绝;`snapshot` 写成其他任何拼法也 **400** 拒绝。
+
+body 只能包含以下顶层字段(任意大小写):`snapshot`、`name`、`env`、`labels`、`sealed`、`seal_id`、`publicPorts`、`user`、`target`、`networkBlockAll`、`networkAllowList`、`public`、`autoStopInterval`、`autoArchiveInterval`、`autoDeleteInterval` 和 `volumes`。其他字段(如 `linkedSandbox`、`gpuType`)一律 **400** 拒绝。无论调用方传什么,provider 都会设置 `public`(见下)、`autoStopInterval` = 0、`autoArchiveInterval` = 60 和 `autoDeleteInterval` = -1(永不自动删除),并移除 `volumes`。`name` 含 `.` 时 **400** 拒绝:Daytona 把沙箱名用作关联沙箱之间的 DNS 别名,带点的名字可能冒充公网主机名。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `image` | string | 要用的 Docker 镜像或 snapshot 名 |
+| `snapshot` | string | 用来创建的 snapshot 名或 id |
+| `name` | string | 显示名称;不能含 `.` |
 | `sealed` | bool | `true` 则创建 sealed 沙箱(见下) |
 | `publicPorts` | int[] | 公开端口白名单:只有名单内端口可经预览代理公开访问,其余端口回落到预览认证(owner 的 token 仍可用)。不传 = 全端口公开。最多 16 个,范围 1-65535,系统端口 22222/2280/33333 拒绝,创建后不可改。sealed 沙箱必须包含 8080 |
 
@@ -302,10 +337,15 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 - 名单外端口返回 **307 跳转**到 provider 的 OIDC 端点(对公众等于被拦)
 
 **Sealed 沙箱**(`"sealed": true`):
+- 把 `snapshot` 按名字或 id 解析为唯一一条 snapshot 记录,并把该记录的 id 转发给 Daytona。可能指向多条记录的引用(两条记录同名,或某条记录的 id 是另一条记录的名字)**400** 拒绝
 - 通过内部 registry 把镜像解析为 content digest(无法解析则硬失败)
+- 拒绝(**400**)不运行镜像自身 entrypoint 的 snapshot:记录中的 entrypoint 与镜像 config 不同,或由 Dockerfile 构建(`buildInfo`)。证书只证明镜像 digest。创建 snapshot 时未指定 entrypoint 的,Daytona 会从镜像填入
+- 拒绝(**400**)runner 镜像(记录的 `ref`,即 Daytona 实际启动的副本)的镜像 config digest 与被认证 manifest 不同的 snapshot,或尚无 `ref` 的 snapshot;任一镜像无法读取时返回 **422**。见 [APP_IDENTITY.zh.md](APP_IDENTITY.zh.md#sealed-容器证书v3)
 - 生成一个临时 secp256k1 密钥对作为容器的签名身份
-- 向容器注入两个环境变量:`SANDBOX_SEAL_KEY`(私钥;从响应中剥除)和 `SANDBOX_SEAL_ATTESTATION`(JSON,含 `seal_id`、`pubkey`、`image_hash`、TEE `signature`、`ts`)
-- 设置标签 `0g-sealed: "true"` 和 `0g-seal-id: <32-char hex>`
+- 调用者 `env` 中有键不是合法变量名(`[A-Za-z_][A-Za-z0-9_]*`)时 **400** 拒绝:运行时按 `KEY=VALUE` 拼接条目,含 `=` 的键可能给另一个变量多加一条
+- 删除调用者 `env` 中所有以 `SANDBOX_` 开头的键,以及 `ATTESTOR_TLS_DESCRIPTOR`、`ATTESTOR_ALLOW_UNPINNED_DEV` 和 `TEE_SIGNER_ADDRESS`;其余 `env` 键原样透传
+- 注入 `SANDBOX_SEAL_KEY`(私钥;从响应中剥除)、`SANDBOX_SEAL_ATTESTATION`(v3 证书:`version`、`chain_id`、`registry_address`、`app_id`、`registered_at`、`seal_id`、`pubkey`、`image_hash`、`ts`,以及 provider key 的 EIP-712 `signature`;见 [APP_IDENTITY.zh.md](APP_IDENTITY.zh.md#sealed-容器证书v3)),并在 provider 设置了 `PROXY_DOMAIN` 时注入 `SANDBOX_PROXY_DOMAIN`
+- 设置标签 `0g-sealed: "true"` 和 `0g-seal-id: <64-char hex>`
 - 在沙箱整个生命周期内**阻断 SSH 和 toolbox 访问**
 
 **Provider 侧 `SEALED_ONLY=true`:** 运营方在 billing 服务器设了这个环境变量后,任何
@@ -817,7 +857,7 @@ struct Service {
   "labels": {
     "daytona-owner": "0x1234...abcd",
     "0g-sealed":     "true",
-    "0g-seal-id":    "a3f8c2d1e4b706951234567890abcdef"
+    "0g-seal-id":    "a3f8c2d1e4b706951234567890abcdefa3f8c2d1e4b706951234567890abcdef"
   }
 }
 ```
@@ -828,9 +868,9 @@ struct Service {
 | `state` | string | `started`、`stopped`、`starting`、`stopping`、`archived`、`error` |
 | `labels["daytona-owner"]` | string | owner 钱包地址(hex) |
 | `labels["0g-sealed"]` | string | 若以 `sealed: true` 创建则为 `"true"`;否则不存在 |
-| `labels["0g-seal-id"]` | string | 32 字符 hex,关联沙箱到其 TEE attestation;非 sealed 沙箱无此项 |
+| `labels["0g-seal-id"]` | string | 64 字符小写 hex,关联沙箱到其容器证书;非 sealed 沙箱无此项 |
 
-创建时注入的 `SANDBOX_SEAL_KEY` 环境变量**会从所有 API 响应中剥除** —— 它只在容器内部可见。
+创建时注入的 `SANDBOX_SEAL_KEY` 环境变量**会从所有 API 响应中剥除** —— 它只在容器内部可见。调用者传入的 `SEAL_BOOT_TICKET`（attestor 给该容器的启动票据）同样剥除。
 
 ### 代理 URL
 
@@ -913,7 +953,9 @@ http://<port>-<sandboxId>.<PROXY_DOMAIN>/<path>
 | `402 Payment Required` | 余额不足以创建沙箱,或未 acknowledge TEE signer |
 | `403 Forbidden` | 沙箱归属于其他钱包;或仅 provider 端点;或受管端点(`autostop`/`autoarchive`) |
 | `500 Internal Server Error` | Redis 错误或意外失败 |
+| `429 Too Many Requests` | `GET /api/attestor-tls`:没有可提供的声明,且等待刷新的限额已满(`Retry-After: 1`) |
 | `502 Bad Gateway` | 上游 Daytona 或链 RPC 错误 |
+| `503 Service Unavailable` | sealed 签发者认证不可用;或 `GET /api/attestor-tls` 没有有效声明 |
 
 ### 认证错误信息
 

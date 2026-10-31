@@ -260,6 +260,39 @@ Server configuration and pricing.
 >     `provider_address` from its compressed secp256k1 public key, and check that
 >     its `key_ref` occurs in `runtime_data.key_commitments` and the replayed event log.
 
+#### `GET /api/attestor-tls`
+The attestor's current TLS SPKI pins, signed by this provider's key. Sealed containers
+fetch it through the attestor's relay and accept the attestor's TLS only from a pinned
+key. Field order is fixed; the body is compact JSON with no trailing newline (shown
+expanded here).
+```json
+{
+  "version":          3,
+  "chain_id":         16602,
+  "registry_address": "0x79d11d8d71784dfed781124e219ad3c62b3a17f6",
+  "tls_spki_sha256":  ["2b4d268f…b933", "2bffeb0c…501c"],
+  "issued_at":        1793318460,
+  "expires_at":       1793318748,
+  "signature":        "0x0d07…0e851c"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `chain_id`, `registry_address` | EIP-712 domain scope: the provider's chain and TappRegistry |
+| `tls_spki_sha256` | 1–16 SHA-256 hashes of the attestor's TLS SubjectPublicKeyInfo; lowercase hex without `0x`, strictly ascending |
+| `issued_at`, `expires_at` | Unix seconds; `issued_at < expires_at <= issued_at + 300` |
+| `signature` | EIP-712 `AttestorTLS(bytes32[] tlsSpkiSha256,uint64 issuedAt,uint64 expiresAt)` signature by `provider_address`, domain `0G Sandbox AttestorTLS` version `3` |
+
+- **`200`:** the signed statement. Every caller gets the same bytes until the statement nears expiry.
+- **`429`:** `{"error":"too many requests"}` with `Retry-After: 1`. A cached statement is served without a rate-limit token. Only requests that would wait for a running refresh share one limit across all callers (20 requests/s, burst 50); a request beyond it gets `429` only when no servable statement is cached.
+- **`503`:** `{"error":"attestor tls unavailable"}`. Without `ATTESTOR_APP_ID` and
+  `PROVIDER_KEY_SOURCE=kms` this is the only answer. Otherwise it carries
+  `Retry-After: 5` and means no statement with more than 5 s of validity is available.
+
+Every response carries `Cache-Control: no-store`. Signing and caching rules:
+[APP_IDENTITY.md](APP_IDENTITY.md#attestor-tls-statement-get-apiattestor-tls).
+
 #### `GET /api/providers`
 On-chain service data for the provider this billing instance serves (the
 provider key's address, derived at runtime — see `provider_key_source` above). Returns an array — currently a
@@ -299,16 +332,19 @@ All monetary amounts are in **neuron** (1 0G = 10¹⁸ neuron).
 **Body:**
 ```json
 {
-  "image":       "ubuntu:22.04",
+  "snapshot":    "ubuntu-2c",
   "sealed":      false,
   "publicPorts": [8080, 3000]
 }
 ```
-All fields are optional.
+Only `snapshot` is required. Custom resources (`image`, `cpu`, `memory`, `disk`, `gpu`, `class`, `buildInfo`, in any letter case) are refused with **400**: the billed spec always comes from the snapshot record. Field names are read exactly as written: a body with two names that differ only by case (`"Snapshot"`, or `"ſnapshot"` with U+017F) is refused with **400**, and so is any spelling of `snapshot` other than `snapshot`.
+
+The body may carry only these top-level fields (in any letter case): `snapshot`, `name`, `env`, `labels`, `sealed`, `seal_id`, `publicPorts`, `user`, `target`, `networkBlockAll`, `networkAllowList`, `public`, `autoStopInterval`, `autoArchiveInterval`, `autoDeleteInterval` and `volumes`. Any other field, such as `linkedSandbox` or `gpuType`, is refused with **400**. Whatever the caller sends, the provider sets `public` (see below), `autoStopInterval` = 0, `autoArchiveInterval` = 60 and `autoDeleteInterval` = -1 (never), and removes `volumes`. A `name` that contains `.` is refused with **400**: Daytona uses sandbox names as DNS aliases between linked sandboxes, and a dotted name could stand for a public hostname.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `image` | string | Docker image or snapshot name to use |
+| `snapshot` | string | Snapshot name or id to create from |
+| `name` | string | Display name; must not contain `.` |
 | `sealed` | bool | If `true`, creates a sealed sandbox (see below) |
 | `publicPorts` | int[] | Public port allowlist: only these ports are publicly reachable via the preview proxy; all others fall back to preview auth (owner tokens still work). Omit = all ports public. Max 16 entries, range 1-65535, system ports 22222/2280/33333 rejected, immutable after create. Sealed sandboxes must include 8080 |
 
@@ -322,10 +358,15 @@ All fields are optional.
   endpoint (effectively blocked for public callers)
 
 **Sealed sandboxes** (`"sealed": true`):
+- Resolves `snapshot` to exactly one snapshot record, by name or id, and forwards that record's id to Daytona. A reference that could name more than one record (two records with that name, or a record whose id is another record's name) is refused with **400**
 - Resolves the image to its content digest via the internal registry (hard failure if unresolvable)
+- Refuses (**400**) a snapshot that does not run its image's own entrypoint: one whose record names an entrypoint other than the image config's, or one built from a Dockerfile (`buildInfo`). The certificate attests only the image digest. Daytona fills a record's `entrypoint` from the image when the snapshot was created without one
+- Refuses (**400**) a snapshot whose runner image (the record's `ref`, the copy Daytona starts) has an image config digest other than the certified manifest's, or that has no `ref` yet; **422** when either image cannot be read. See [APP_IDENTITY.md](APP_IDENTITY.md#sealed-container-certificate-v3)
 - Generates an ephemeral secp256k1 keypair as the container's signing identity
-- Injects two env vars into the container: `SANDBOX_SEAL_KEY` (private key; stripped from response) and `SANDBOX_SEAL_ATTESTATION` (JSON with `seal_id`, `pubkey`, `image_hash`, TEE `signature`, `ts`)
-- Sets labels `0g-sealed: "true"` and `0g-seal-id: <32-char hex>`
+- Refuses (**400**) a caller `env` key that is not a variable name (`[A-Za-z_][A-Za-z0-9_]*`): the runtime joins entries as `KEY=VALUE`, so a key holding `=` could add a second entry for another variable
+- Removes every caller `env` key that starts with `SANDBOX_`, and `ATTESTOR_TLS_DESCRIPTOR`, `ATTESTOR_ALLOW_UNPINNED_DEV` and `TEE_SIGNER_ADDRESS`; other `env` keys pass through
+- Injects `SANDBOX_SEAL_KEY` (private key; stripped from responses), `SANDBOX_SEAL_ATTESTATION` (v3 certificate: `version`, `chain_id`, `registry_address`, `app_id`, `registered_at`, `seal_id`, `pubkey`, `image_hash`, `ts`, EIP-712 `signature` by the provider key; see [APP_IDENTITY.md](APP_IDENTITY.md#sealed-container-certificate-v3)) and, when the provider sets `PROXY_DOMAIN`, `SANDBOX_PROXY_DOMAIN`
+- Sets labels `0g-sealed: "true"` and `0g-seal-id: <64-char hex>`
 - **Blocks SSH and toolbox access** for the sandbox's lifetime
 
 **Provider-side `SEALED_ONLY=true`:** when the operator sets this env on the
@@ -844,7 +885,7 @@ Called by the provider's settler. Users do not call this directly.
   "labels": {
     "daytona-owner": "0x1234...abcd",
     "0g-sealed":     "true",
-    "0g-seal-id":    "a3f8c2d1e4b706951234567890abcdef"
+    "0g-seal-id":    "a3f8c2d1e4b706951234567890abcdefa3f8c2d1e4b706951234567890abcdef"
   }
 }
 ```
@@ -855,9 +896,9 @@ Called by the provider's settler. Users do not call this directly.
 | `state` | string | `started`, `stopped`, `starting`, `stopping`, `archived`, `error` |
 | `labels["daytona-owner"]` | string | Owner wallet address (hex) |
 | `labels["0g-sealed"]` | string | `"true"` if the sandbox was created with `sealed: true`; absent otherwise |
-| `labels["0g-seal-id"]` | string | 32-char hex identifier correlating the sandbox to its TEE attestation; absent for non-sealed sandboxes |
+| `labels["0g-seal-id"]` | string | 64-char lowercase hex identifier correlating the sandbox to its container certificate; absent for non-sealed sandboxes |
 
-The `SANDBOX_SEAL_KEY` env var injected at create time is **stripped from all API responses** — it is only ever visible inside the container itself.
+The `SANDBOX_SEAL_KEY` env var injected at create time is **stripped from all API responses** — it is only ever visible inside the container itself. So is a caller's `SEAL_BOOT_TICKET` (an attestor's boot ticket for the container).
 
 ### Proxy URL
 
@@ -941,7 +982,9 @@ All errors return JSON: `{ "error": "<message>" }`
 | `402 Payment Required` | Insufficient balance to create sandbox, or TEE signer not acknowledged |
 | `403 Forbidden` | Sandbox is owned by a different wallet; or provider-only endpoint; or managed endpoint (`autostop`/`autoarchive`) |
 | `500 Internal Server Error` | Redis error or unexpected failure |
+| `429 Too Many Requests` | `GET /api/attestor-tls`: no servable statement and the refresh-wait limit reached (`Retry-After: 1`) |
 | `502 Bad Gateway` | Upstream Daytona or chain RPC error |
+| `503 Service Unavailable` | Sealed issuer authentication unavailable; or `GET /api/attestor-tls` has no valid statement |
 
 ### Auth Error Messages
 
