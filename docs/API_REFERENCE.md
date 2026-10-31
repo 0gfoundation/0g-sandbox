@@ -339,9 +339,12 @@ All monetary amounts are in **neuron** (1 0G = 10¹⁸ neuron).
 ```
 Only `snapshot` is required. Custom resources (`image`, `cpu`, `memory`, `disk`, `gpu`, `class`, `buildInfo`, in any letter case) are refused with **400**: the billed spec always comes from the snapshot record. Field names are read exactly as written: a body with two names that differ only by case (`"Snapshot"`, or `"ſnapshot"` with U+017F) is refused with **400**, and so is any spelling of `snapshot` other than `snapshot`.
 
+The body may carry only these top-level fields (in any letter case): `snapshot`, `name`, `env`, `labels`, `sealed`, `seal_id`, `publicPorts`, `user`, `target`, `networkBlockAll`, `networkAllowList`, `public`, `autoStopInterval`, `autoArchiveInterval`, `autoDeleteInterval` and `volumes`. Any other field, such as `linkedSandbox` or `gpuType`, is refused with **400**. Whatever the caller sends, the provider sets `public` (see below), `autoStopInterval` = 0, `autoArchiveInterval` = 60 and `autoDeleteInterval` = -1 (never), and removes `volumes`. A `name` that contains `.` is refused with **400**: Daytona uses sandbox names as DNS aliases between linked sandboxes, and a dotted name could stand for a public hostname.
+
 | Field | Type | Description |
 |-------|------|-------------|
 | `snapshot` | string | Snapshot name or id to create from |
+| `name` | string | Display name; must not contain `.` |
 | `sealed` | bool | If `true`, creates a sealed sandbox (see below) |
 | `publicPorts` | int[] | Public port allowlist: only these ports are publicly reachable via the preview proxy; all others fall back to preview auth (owner tokens still work). Omit = all ports public. Max 16 entries, range 1-65535, system ports 22222/2280/33333 rejected, immutable after create. Sealed sandboxes must include 8080 |
 

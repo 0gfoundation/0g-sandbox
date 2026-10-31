@@ -30,6 +30,7 @@ type forwardedSeal struct {
 	Env         map[string]any
 	Snapshot    any
 	Labels      map[string]any
+	Body        map[string]any
 }
 
 // testSealSnapshotID is the Daytona id of the fixture's "sealed" snapshot.
@@ -128,7 +129,7 @@ func newSealedCreateFixtureWithRecords(t *testing.T, build func(image string) []
 					t.Error(err)
 				}
 				labels, _ := body["labels"].(map[string]any)
-				envelopes <- forwardedSeal{Attestation: a, Env: env, Snapshot: body["snapshot"], Labels: labels}
+				envelopes <- forwardedSeal{Attestation: a, Env: env, Snapshot: body["snapshot"], Labels: labels, Body: body}
 			}
 		}
 		body["id"] = "new-sandbox"
@@ -239,7 +240,7 @@ func TestSealedCreateRefreshesIssuerAndUsesProviderKey(t *testing.T) {
 		return issuer, nil
 	}
 	for i := uint64(1); i <= 2; i++ {
-		request := httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"sealed","sealed":true,"registered_at":999,"env":{"SANDBOX_SEAL_ATTESTATION":"caller","ATTESTOR_TLS_DESCRIPTOR":"caller","ATTESTOR_URL":"https://attestor.example"}}`))
+		request := httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"sealed","sealed":true,"env":{"SANDBOX_SEAL_ATTESTATION":"caller","ATTESTOR_TLS_DESCRIPTOR":"caller","ATTESTOR_URL":"https://attestor.example"}}`))
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, request)
 		if w.Code != http.StatusOK {
@@ -262,6 +263,53 @@ func TestSealedCreateRefreshesIssuerAndUsesProviderKey(t *testing.T) {
 	}
 	if lookups != 2 || created.Load() != 2 {
 		t.Fatalf("lookups %d, creates %d", lookups, created.Load())
+	}
+}
+
+// A create cannot name a sandbox to link to. Daytona resolves linkedSandbox in
+// the organization every tenant shares, puts both sandboxes on one network,
+// and gives the new sandbox's name to it as a DNS alias there.
+func TestSealedCreateNeverForwardsSandboxLinks(t *testing.T) {
+	refused := []string{
+		`{"snapshot":"sealed","sealed":true,"linkedSandbox":"other-sandbox-id","autoDeleteInterval":0}`,
+		`{"snapshot":"sealed","sealed":true,"LinkedSandbox":"other-sandbox-id","autoDeleteInterval":0}`,
+		`{"snapshot":"sealed","sealed":true,"linkedſandbox":"other-sandbox-id","autoDeleteInterval":0}`,
+		`{"snapshot":"sealed","sealed":true,"name":"EVMRPC-testnet.0g.ai"}`,
+		`{"snapshot":"sealed","sealed":true,"Name":"evmrpc-testnet.0g.ai"}`,
+	}
+	for _, body := range refused {
+		h, r, _, created := newSealedCreateFixture(t)
+		h.SealIssuer = func(context.Context) (SealIssuer, error) { return testSealIssuer(), nil }
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(body)))
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%s: got %d %s; want 400", body, w.Code, w.Body.String())
+		}
+		if created.Load() != 0 {
+			t.Errorf("%s: reached Daytona", body)
+		}
+	}
+
+	h, r, envelopes, _ := newSealedCreateFixture(t)
+	h.SealIssuer = func(context.Context) (SealIssuer, error) { return testSealIssuer(), nil }
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"sealed","sealed":true,"name":"my-agent","AutoDeleteInterval":0,"autoDeleteInterval":0}`)))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("case-variant pair: got %d %s; want 400", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"sealed","sealed":true,"name":"my-agent","autoDeleteInterval":0}`)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	forwarded := (<-envelopes).Body
+	if forwarded["autoDeleteInterval"] != float64(-1) || forwarded["name"] != "my-agent" {
+		t.Fatalf("forwarded autoDeleteInterval %v name %v; want -1 and my-agent", forwarded["autoDeleteInterval"], forwarded["name"])
+	}
+	for k := range forwarded {
+		if strings.EqualFold(k, "linkedSandbox") {
+			t.Fatalf("forwarded %q", k)
+		}
 	}
 }
 

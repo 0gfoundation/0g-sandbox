@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -18,8 +19,28 @@ import (
 // seven — is what makes "billed spec == provisioned spec by construction" hold.
 var customResourceFields = []string{"cpu", "memory", "disk", "gpu", "image", "class", "buildinfo"}
 
+// createFields are the only top-level fields a create may carry; any other
+// field is refused (see requireSnapshotCreate). Keys are compared with
+// strings.EqualFold, like customResourceFields.
+//
+// The proxy creates as Daytona admin in one organization that every tenant
+// shares, so a Daytona create field that has not been reviewed here does not
+// reach Daytona by default. linkedSandbox is an example: Daytona looks the
+// named sandbox up by id or name in that shared organization, puts both
+// sandboxes on one network, and gives the new sandbox's name to it as a DNS
+// alias there, with no check that the caller owns the named sandbox.
+var createFields = []string{
+	// Read by the proxy and forwarded.
+	"snapshot", "name", "env", "labels", "sealed", "seal_id", "publicPorts",
+	// Daytona settings that shape only the caller's own sandbox.
+	"user", "target", "networkBlockAll", "networkAllowList",
+	// Replaced or removed by InjectOwner whatever the caller sends.
+	"public", "autoStopInterval", "autoArchiveInterval", "autoDeleteInterval", "volumes",
+}
+
 // requireSnapshotCreate enforces the snapshot-only create policy. A create must
-// name a snapshot and MUST NOT carry any custom-resource field.
+// name a snapshot, MUST NOT carry any custom-resource field, and may carry no
+// field outside createFields. A name must not contain a dot (checkSandboxName).
 //
 // Why: the billing gate derives the spec (cpu/memory) it charges for from the
 // request, while Daytona provisions from the SAME request under different
@@ -53,6 +74,16 @@ func requireSnapshotCreate(body []byte) error {
 			}
 		}
 	}
+	for k, v := range m {
+		if !slices.ContainsFunc(createFields, func(f string) bool { return strings.EqualFold(k, f) }) {
+			return fmt.Errorf("field %q is not supported in a create request", k)
+		}
+		if strings.EqualFold(k, "name") {
+			if err := checkSandboxName(v); err != nil {
+				return err
+			}
+		}
+	}
 	// snapshot must be present and a non-empty string.
 	snap, ok := m["snapshot"]
 	if !ok {
@@ -61,6 +92,21 @@ func requireSnapshotCreate(body []byte) error {
 	var name string
 	if err := json.Unmarshal(snap, &name); err != nil || strings.TrimSpace(name) == "" {
 		return fmt.Errorf("a snapshot is required to create a sandbox")
+	}
+	return nil
+}
+
+// checkSandboxName refuses a sandbox name that contains a dot. Daytona uses
+// the name as a DNS alias on the networks it links sandboxes through, and
+// Docker's resolver matches aliases ignoring case. A dotless name cannot
+// stand for a public hostname such as a chain RPC or attestor host.
+func checkSandboxName(raw json.RawMessage) error {
+	var name string
+	if err := json.Unmarshal(raw, &name); err != nil {
+		return fmt.Errorf("name must be a string")
+	}
+	if strings.Contains(name, ".") {
+		return fmt.Errorf("name must not contain \".\"")
 	}
 	return nil
 }

@@ -320,9 +320,12 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 ```
 只有 `snapshot` 必填。自定义资源字段(`image`、`cpu`、`memory`、`disk`、`gpu`、`class`、`buildInfo`,任意大小写)一律 **400** 拒绝:计费规格始终取自 snapshot 记录。字段名按原样读取:body 中两个字段名只差大小写(`"Snapshot"`,或用 U+017F 的 `"ſnapshot"`)时 **400** 拒绝;`snapshot` 写成其他任何拼法也 **400** 拒绝。
 
+body 只能包含以下顶层字段(任意大小写):`snapshot`、`name`、`env`、`labels`、`sealed`、`seal_id`、`publicPorts`、`user`、`target`、`networkBlockAll`、`networkAllowList`、`public`、`autoStopInterval`、`autoArchiveInterval`、`autoDeleteInterval` 和 `volumes`。其他字段(如 `linkedSandbox`、`gpuType`)一律 **400** 拒绝。无论调用方传什么,provider 都会设置 `public`(见下)、`autoStopInterval` = 0、`autoArchiveInterval` = 60 和 `autoDeleteInterval` = -1(永不自动删除),并移除 `volumes`。`name` 含 `.` 时 **400** 拒绝:Daytona 把沙箱名用作关联沙箱之间的 DNS 别名,带点的名字可能冒充公网主机名。
+
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `snapshot` | string | 用来创建的 snapshot 名或 id |
+| `name` | string | 显示名称;不能含 `.` |
 | `sealed` | bool | `true` 则创建 sealed 沙箱(见下) |
 | `publicPorts` | int[] | 公开端口白名单:只有名单内端口可经预览代理公开访问,其余端口回落到预览认证(owner 的 token 仍可用)。不传 = 全端口公开。最多 16 个,范围 1-65535,系统端口 22222/2280/33333 拒绝,创建后不可改。sealed 沙箱必须包含 8080 |
 
