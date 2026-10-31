@@ -28,7 +28,12 @@ import (
 type forwardedSeal struct {
 	Attestation ImageAttestation
 	Env         map[string]any
+	Snapshot    any
+	Labels      map[string]any
 }
+
+// testSealSnapshotID is the Daytona id of the fixture's "sealed" snapshot.
+const testSealSnapshotID = "5b7c0f0e-1d2a-4c3b-8e4f-000000000001"
 
 func newSealedCreateFixture(t *testing.T) (*Handler, *gin.Engine, <-chan forwardedSeal, *atomic.Int32) {
 	t.Helper()
@@ -41,6 +46,20 @@ func newSealedCreateFixture(t *testing.T) (*Handler, *gin.Engine, <-chan forward
 var testSealEntrypoint = []string{"/usr/local/bin/sealed"}
 
 func newSealedCreateFixtureWithSnapshot(t *testing.T, extra map[string]any) (*Handler, *gin.Engine, <-chan forwardedSeal, *atomic.Int32) {
+	t.Helper()
+	return newSealedCreateFixtureWithRecords(t, func(image string) []map[string]any {
+		snapshot := map[string]any{"id": testSealSnapshotID, "name": "sealed", "cpu": 1, "mem": 1, "state": "active", "imageName": image}
+		for k, v := range extra {
+			snapshot[k] = v
+		}
+		return []map[string]any{snapshot}
+	}, nil)
+}
+
+// newSealedCreateFixtureWithRecords serves the given snapshot records, built
+// around the fixture image. GET /api/snapshots/<ref> resolves ids before names,
+// as Daytona does, unless get overrides it.
+func newSealedCreateFixtureWithRecords(t *testing.T, build func(image string) []map[string]any, get func(ref string) map[string]any) (*Handler, *gin.Engine, <-chan forwardedSeal, *atomic.Int32) {
 	t.Helper()
 	entrypoint, _ := json.Marshal(testSealEntrypoint)
 	config := []byte(fmt.Sprintf(`{"architecture":"amd64","os":"linux","config":{"Entrypoint":%s},"rootfs":{"type":"layers","diff_ids":[]}}`, entrypoint))
@@ -63,18 +82,32 @@ func newSealedCreateFixtureWithSnapshot(t *testing.T, extra map[string]any) (*Ha
 	image := strings.TrimPrefix(strings.Replace(registry.URL, "127.0.0.1", "localhost", 1), "http://") + "/sealed:test"
 	created := &atomic.Int32{}
 	envelopes := make(chan forwardedSeal, 4)
+	records := build(image)
+	if get == nil {
+		get = func(ref string) map[string]any {
+			for _, field := range []string{"id", "name"} {
+				for _, rec := range records {
+					if rec[field] == ref {
+						return rec
+					}
+				}
+			}
+			return nil
+		}
+	}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		snapshot := map[string]any{"name": "sealed", "cpu": 1, "mem": 1, "state": "active", "imageName": image}
-		for k, v := range extra {
-			snapshot[k] = v
-		}
 		if r.Method == http.MethodGet && r.URL.Path == "/api/snapshots" {
-			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{snapshot}, "totalPages": 1})
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": records, "totalPages": 1})
 			return
 		}
 		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/snapshots/") {
-			_ = json.NewEncoder(w).Encode(snapshot)
+			rec := get(strings.TrimPrefix(r.URL.Path, "/api/snapshots/"))
+			if rec == nil {
+				http.NotFound(w, r)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(rec)
 			return
 		}
 		if r.Method != http.MethodPost || r.URL.Path != "/api/sandbox" {
@@ -94,7 +127,8 @@ func newSealedCreateFixtureWithSnapshot(t *testing.T, extra map[string]any) (*Ha
 				if err := json.Unmarshal([]byte(raw), &a); err != nil {
 					t.Error(err)
 				}
-				envelopes <- forwardedSeal{Attestation: a, Env: env}
+				labels, _ := body["labels"].(map[string]any)
+				envelopes <- forwardedSeal{Attestation: a, Env: env, Snapshot: body["snapshot"], Labels: labels}
 			}
 		}
 		body["id"] = "new-sandbox"
@@ -298,5 +332,167 @@ func TestSealedCreateAcceptsSnapshotWithImageEntrypoint(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"sealed","sealed":true}`)))
 	if w.Code != http.StatusOK || created.Load() != 1 {
 		t.Fatalf("sealed create from a snapshot with its image entrypoint: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// The proxy forwards the certified snapshot record by id, so Daytona starts
+// the record whose image the certificate names.
+func TestSealedCreateForwardsCertifiedSnapshotID(t *testing.T) {
+	for _, ref := range []string{"sealed", testSealSnapshotID} {
+		t.Run(ref, func(t *testing.T) {
+			h, r, envelopes, created := newSealedCreateFixture(t)
+			h.SealIssuer = func(context.Context) (SealIssuer, error) { return testSealIssuer(), nil }
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"`+ref+`","sealed":true}`)))
+			if w.Code != http.StatusOK || created.Load() != 1 {
+				t.Fatalf("create: %d %s", w.Code, w.Body.String())
+			}
+			forwarded := <-envelopes
+			if forwarded.Snapshot != testSealSnapshotID {
+				t.Fatalf("forwarded snapshot %v, want the certified record id", forwarded.Snapshot)
+			}
+			if forwarded.Labels[imageLabel] != "snapshot:"+ref {
+				t.Fatalf("image label %v", forwarded.Labels[imageLabel])
+			}
+		})
+	}
+}
+
+// Go's struct decode matches "Snapshot" and "ſnapshot" (U+017F) to the
+// snapshot field and keeps the last one, while Daytona reads only the exact
+// key. A create that names a snapshot under two spellings is refused, so the
+// certificate cannot name one image while Daytona starts another.
+func TestCreateRefusesFoldedSnapshotKeys(t *testing.T) {
+	build := func(image string) []map[string]any {
+		return []map[string]any{
+			{"id": testSealSnapshotID, "name": "sealed", "cpu": 1, "mem": 1, "state": "active", "imageName": image},
+			{"id": "5b7c0f0e-1d2a-4c3b-8e4f-000000000002", "name": "decoy", "cpu": 1, "mem": 1, "state": "active", "imageName": "decoy:latest"},
+		}
+	}
+	bodies := []string{
+		// serde_json without preserve_order sorts keys bytewise, so the attestor
+		// relays the U+017F variant after the exact key.
+		`{"sealed":true,"snapshot":"decoy","ſnapshot":"sealed"}`,
+		`{"Snapshot":"sealed","sealed":true,"snapshot":"decoy"}`,
+		`{"sealed":true,"snapshot":"decoy","Snapshot":"sealed"}`,
+		`{"sealed":true,"snapshot":"sealed","SNAPSHOT":"sealed"}`,
+		`{"ſnapshot":"sealed","sealed":true}`,
+		`{"Snapshot":"sealed","sealed":true}`,
+	}
+	for _, sealed := range []bool{true, false} {
+		for _, body := range bodies {
+			t.Run(fmt.Sprintf("sealed=%v/%s", sealed, body), func(t *testing.T) {
+				h, r, _, created := newSealedCreateFixtureWithRecords(t, build, nil)
+				if !sealed {
+					h.sealKey = nil
+					body = strings.Replace(body, `"sealed":true`, `"sealed":false`, 1)
+				}
+				h.SealIssuer = func(context.Context) (SealIssuer, error) {
+					t.Fatal("refused create reached the issuer")
+					return SealIssuer{}, nil
+				}
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(body)))
+				if w.Code != http.StatusBadRequest {
+					t.Fatalf("want 400, got %d %s", w.Code, w.Body.String())
+				}
+				if created.Load() != 0 {
+					t.Fatal("created a sandbox from an ambiguous snapshot field")
+				}
+			})
+		}
+	}
+}
+
+// A sealed create refuses a reference that Daytona could resolve to a record
+// other than the certified one, and releases its reservation.
+func TestSealedCreateRefusesAmbiguousSnapshot(t *testing.T) {
+	const other = "5b7c0f0e-1d2a-4c3b-8e4f-000000000002"
+	record := func(id, name, image string) map[string]any {
+		return map[string]any{"id": id, "name": name, "cpu": 1, "mem": 1, "state": "active", "imageName": image}
+	}
+	cases := map[string]struct {
+		ref   string
+		build func(image string) []map[string]any
+		get   func(ref string) map[string]any
+	}{
+		"duplicate_name": {"sealed", func(image string) []map[string]any {
+			return []map[string]any{record(testSealSnapshotID, "sealed", image), record(other, "sealed", "decoy:latest")}
+		}, nil},
+		"id_named_by_another_record": {"sealed", func(image string) []map[string]any {
+			return []map[string]any{record(testSealSnapshotID, "sealed", image), record(other, testSealSnapshotID, "decoy:latest")}
+		}, nil},
+		"ref_is_name_and_id": {other, func(image string) []map[string]any {
+			return []map[string]any{record(testSealSnapshotID, other, image), record(other, "decoy", "decoy:latest")}
+		}, nil},
+		"billing_record_differs": {"sealed", func(image string) []map[string]any {
+			return []map[string]any{record(testSealSnapshotID, "sealed", image)}
+		}, func(string) map[string]any { return record(other, "sealed", "decoy:latest") }},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			h, r, _, created := newSealedCreateFixtureWithRecords(t, tc.build, tc.get)
+			mr := miniredis.RunT(t)
+			rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+			t.Cleanup(func() { _ = rdb.Close() })
+			h.rdb = rdb
+			h.balCheck = &mockBalChecker{bal: big.NewInt(1000)}
+			h.createFee = big.NewInt(11)
+			h.computePricePerSec = new(big.Int)
+			h.SealIssuer = func(context.Context) (SealIssuer, error) {
+				t.Fatal("ambiguous snapshot reached the issuer")
+				return SealIssuer{}, nil
+			}
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"`+tc.ref+`","sealed":true}`)))
+			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "more than one snapshot record") {
+				t.Fatalf("want ambiguity refusal, got %d %s", w.Code, w.Body.String())
+			}
+			if created.Load() != 0 {
+				t.Fatal("created a sealed sandbox from an ambiguous snapshot")
+			}
+			if got := billing.GetReserved(context.Background(), rdb, "0xOWNER", h.providerAddress); got.Sign() != 0 {
+				t.Fatalf("reservation after refusal %s", got)
+			}
+		})
+	}
+}
+
+func TestResolveSnapshot(t *testing.T) {
+	const a, b = "5b7c0f0e-1d2a-4c3b-8e4f-00000000000a", "5b7c0f0e-1d2a-4c3b-8e4f-00000000000b"
+	snaps := []daytona.Snapshot{{ID: a, Name: "one"}, {ID: b, Name: "two"}}
+	for _, ref := range []string{"one", a} {
+		if s, err := resolveSnapshot(snaps, ref); err != nil || s.ID != a {
+			t.Fatalf("resolve %q: %v %v", ref, s, err)
+		}
+	}
+	// A record listed twice (pagination shifting) is still one record.
+	if s, err := resolveSnapshot(append(snaps, daytona.Snapshot{ID: a, Name: "one"}), "one"); err != nil || s.ID != a {
+		t.Fatalf("duplicate listing: %v %v", s, err)
+	}
+	for name, tc := range map[string]struct {
+		snaps []daytona.Snapshot
+		ref   string
+	}{
+		"not_found":      {snaps, "three"},
+		"no_id":          {[]daytona.Snapshot{{Name: "one"}}, "one"},
+		"same_name":      {[]daytona.Snapshot{{ID: a, Name: "one"}, {ID: b, Name: "one"}}, "one"},
+		"name_is_id":     {[]daytona.Snapshot{{ID: a, Name: "one"}, {ID: b, Name: a}}, a},
+		"id_is_a_name":   {[]daytona.Snapshot{{ID: a, Name: "one"}, {ID: b, Name: a}}, "one"},
+		"empty_snapshot": {nil, "one"},
+	} {
+		if s, err := resolveSnapshot(tc.snaps, tc.ref); err == nil {
+			t.Errorf("%s: resolved %+v", name, s)
+		}
+	}
+}
+
+func TestSnapshotCreateRefusesUUIDShapedName(t *testing.T) {
+	h, r, _, _ := newSealedCreateFixture(t)
+	h.adminAddresses = []string{"0xowner"}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/snapshots", strings.NewReader(`{"name":"5B7C0F0E-1D2A-4C3B-8E4F-000000000001","imageName":"x:1"}`)))
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "UUID-shaped") {
+		t.Fatalf("want refusal, got %d %s", w.Code, w.Body.String())
 	}
 }

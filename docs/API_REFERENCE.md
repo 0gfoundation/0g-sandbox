@@ -332,16 +332,16 @@ All monetary amounts are in **neuron** (1 0G = 10¹⁸ neuron).
 **Body:**
 ```json
 {
-  "image":       "ubuntu:22.04",
+  "snapshot":    "ubuntu-2c",
   "sealed":      false,
   "publicPorts": [8080, 3000]
 }
 ```
-All fields are optional.
+Only `snapshot` is required. Custom resources (`image`, `cpu`, `memory`, `disk`, `gpu`, `class`, `buildInfo`, in any letter case) are refused with **400**: the billed spec always comes from the snapshot record. Field names are read exactly as written: a body with two names that differ only by case (`"Snapshot"`, or `"ſnapshot"` with U+017F) is refused with **400**, and so is any spelling of `snapshot` other than `snapshot`.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `image` | string | Docker image or snapshot name to use |
+| `snapshot` | string | Snapshot name or id to create from |
 | `sealed` | bool | If `true`, creates a sealed sandbox (see below) |
 | `publicPorts` | int[] | Public port allowlist: only these ports are publicly reachable via the preview proxy; all others fall back to preview auth (owner tokens still work). Omit = all ports public. Max 16 entries, range 1-65535, system ports 22222/2280/33333 rejected, immutable after create. Sealed sandboxes must include 8080 |
 
@@ -355,6 +355,7 @@ All fields are optional.
   endpoint (effectively blocked for public callers)
 
 **Sealed sandboxes** (`"sealed": true`):
+- Resolves `snapshot` to exactly one snapshot record, by name or id, and forwards that record's id to Daytona. A reference that could name more than one record (two records with that name, or a record whose id is another record's name) is refused with **400**
 - Resolves the image to its content digest via the internal registry (hard failure if unresolvable)
 - Refuses (**400**) a snapshot that does not run its image's own entrypoint: one whose record names an entrypoint other than the image config's, or one built from a Dockerfile (`buildInfo`). The certificate attests only the image digest. Daytona fills a record's `entrypoint` from the image when the snapshot was created without one
 - Generates an ephemeral secp256k1 keypair as the container's signing identity

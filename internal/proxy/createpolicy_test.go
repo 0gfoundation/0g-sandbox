@@ -1,12 +1,16 @@
 package proxy
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRequireSnapshotCreate(t *testing.T) {
 	ok := []string{
 		`{"snapshot":"ubuntu-2c"}`,
 		`{"snapshot":"ubuntu-2c","name":"x","sealed":true}`,
 		`{"snapshot":"ubuntu-2c","publicPorts":[8080]}`,
+		`{"snapshot":"ubuntu-2c","Sealed":true}`, // one spelling: every reader folds sealed
 	}
 	for _, b := range ok {
 		if err := requireSnapshotCreate([]byte(b)); err != nil {
@@ -30,10 +34,32 @@ func TestRequireSnapshotCreate(t *testing.T) {
 		`{}`,                                // empty
 		`{"snapshot":""}`,                   // empty snapshot
 		`{"snapshot":123}`,                  // wrong type
+		// Field names that differ only by case: Go's struct decode folds them
+		// (last wins), Daytona reads the exact key.
+		`{"snapshot":"x","Snapshot":"y"}`,
+		`{"Snapshot":"y","snapshot":"x"}`,
+		`{"snapshot":"x","ſnapshot":"y"}`, // U+017F folds to s
+		`{"ſnapshot":"y"}`,
+		`{"SNAPSHOT":"y"}`,
+		`{"snapshot":"x","sealed":false,"Sealed":true}`,
+		`{"snapshot":"x","publicPorts":[8080],"publicPortſ":[22]}`,
+		`{"snapshot":"x","diſk":20}`,   // folded banned field
+		`{"snapshot":"x","claſſ":"l"}`, // folded banned field
 	}
 	for _, b := range bad {
 		if err := requireSnapshotCreate([]byte(b)); err == nil {
 			t.Errorf("must reject %s", b)
+		}
+	}
+}
+
+func TestFoldNameMatchesEqualFold(t *testing.T) {
+	words := []string{"snapshot", "Snapshot", "ſnapshot", "SNAPſHOT", "sealed", "ſealed", "kelvin", "\u212Aelvin", "Kelvin", "image", "ımage", "İmage", "env", "ENV", "labels"}
+	for _, a := range words {
+		for _, b := range words {
+			if got, want := foldName(a) == foldName(b), strings.EqualFold(a, b); got != want {
+				t.Errorf("foldName(%q)==foldName(%q) is %v; EqualFold %v", a, b, got, want)
+			}
 		}
 	}
 }

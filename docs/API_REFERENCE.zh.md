@@ -313,16 +313,16 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 **Body:**
 ```json
 {
-  "image":       "ubuntu:22.04",
+  "snapshot":    "ubuntu-2c",
   "sealed":      false,
   "publicPorts": [8080, 3000]
 }
 ```
-所有字段可选。
+只有 `snapshot` 必填。自定义资源字段(`image`、`cpu`、`memory`、`disk`、`gpu`、`class`、`buildInfo`,任意大小写)一律 **400** 拒绝:计费规格始终取自 snapshot 记录。字段名按原样读取:body 中两个字段名只差大小写(`"Snapshot"`,或用 U+017F 的 `"ſnapshot"`)时 **400** 拒绝;`snapshot` 写成其他任何拼法也 **400** 拒绝。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `image` | string | 要用的 Docker 镜像或 snapshot 名 |
+| `snapshot` | string | 用来创建的 snapshot 名或 id |
 | `sealed` | bool | `true` 则创建 sealed 沙箱(见下) |
 | `publicPorts` | int[] | 公开端口白名单:只有名单内端口可经预览代理公开访问,其余端口回落到预览认证(owner 的 token 仍可用)。不传 = 全端口公开。最多 16 个,范围 1-65535,系统端口 22222/2280/33333 拒绝,创建后不可改。sealed 沙箱必须包含 8080 |
 
@@ -334,6 +334,7 @@ service 注册(例如调用 `removeService` 之后),返回 `[]`。
 - 名单外端口返回 **307 跳转**到 provider 的 OIDC 端点(对公众等于被拦)
 
 **Sealed 沙箱**(`"sealed": true`):
+- 把 `snapshot` 按名字或 id 解析为唯一一条 snapshot 记录,并把该记录的 id 转发给 Daytona。可能指向多条记录的引用(两条记录同名,或某条记录的 id 是另一条记录的名字)**400** 拒绝
 - 通过内部 registry 把镜像解析为 content digest(无法解析则硬失败)
 - 拒绝(**400**)不运行镜像自身 entrypoint 的 snapshot:记录中的 entrypoint 与镜像 config 不同,或由 Dockerfile 构建(`buildInfo`)。证书只证明镜像 digest。创建 snapshot 时未指定 entrypoint 的,Daytona 会从镜像填入
 - 生成一个临时 secp256k1 密钥对作为容器的签名身份

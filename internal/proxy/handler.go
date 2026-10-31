@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -503,9 +504,11 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sealed issuer authentication not configured"})
 		return
 	}
-	var imageHash string
+	var imageHash, snapshotID string
 	if sealed {
-		imageRef, snapshotEntrypoint, err := h.resolveImageRef(c.Request.Context(), body)
+		var imageRef string
+		var snapshotEntrypoint []string
+		imageRef, snapshotEntrypoint, snapshotID, err = h.resolveImageRef(c.Request.Context(), body)
 		if err != nil {
 			releaseRejectedSeal()
 			if errors.Is(err, errSnapshotOverridesImage) {
@@ -513,6 +516,13 @@ func (h *Handler) handleCreate(c *gin.Context) {
 				return
 			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": "sealed containers require an image or snapshot: " + err.Error()})
+			return
+		}
+		// The billed spec came from GET /api/snapshots/<name>, which resolves
+		// ids before names. It must be the record the certificate covers.
+		if snapshotID != "" && snap != nil && snap.ID != snapshotID {
+			releaseRejectedSeal()
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("snapshot %q matches more than one snapshot record", snapName)})
 			return
 		}
 		imageHash, err = registry.GetDigest(c.Request.Context(), imageRef)
@@ -571,6 +581,16 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
+	}
+	// Forward the certified snapshot record by id, so Daytona cannot resolve
+	// the name to another record. The 0g-image label keeps the name.
+	if snapshotID != "" {
+		modified, err = setCreateField(modified, "snapshot", snapshotID)
+		if err != nil {
+			releaseRejectedSeal()
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
 	}
 
 	if sealed {
@@ -1297,6 +1317,12 @@ func (h *Handler) handleSnapshotCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "imageName required"})
 		return
 	}
+	// Daytona matches a UUID-shaped create reference against snapshot ids as
+	// well as names, so such a name could stand for another snapshot.
+	if name, _ := m["name"].(string); uuidShaped.MatchString(name) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "snapshot names must not be UUID-shaped"})
+		return
+	}
 
 	pinned, err := registry.TagByDigest(c.Request.Context(), imageName)
 	if err != nil {
@@ -1679,13 +1705,22 @@ func (h *Handler) outstandingDebt(ctx context.Context, wallet string) (held, pen
 	return held, pending
 }
 
+// createField returns the string value of a top-level create field, read by
+// its exact name as Daytona reads it. A struct decode would also match folded
+// spellings ("Snapshot", "ſnapshot") that Daytona ignores.
+func createField(body []byte, key string) string {
+	var m map[string]json.RawMessage
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&m); err != nil {
+		return ""
+	}
+	var v string
+	json.Unmarshal(m[key], &v) //nolint:errcheck
+	return v
+}
+
 // extractSnapshotName parses the "snapshot" field from a sandbox create request body.
 func extractSnapshotName(body []byte) string {
-	var m struct {
-		Snapshot string `json:"snapshot"`
-	}
-	json.NewDecoder(bytes.NewReader(body)).Decode(&m) //nolint:errcheck
-	return m.Snapshot
+	return createField(body, "snapshot")
 }
 
 // extractSealed parses the "sealed" boolean from a sandbox create request body.
@@ -1697,26 +1732,25 @@ func extractSealed(body []byte) bool {
 	return m.Sealed
 }
 
-// resolveImageRef extracts the image reference from a create request body and,
-// for snapshot-based sandboxes, resolves the snapshot name to its ImageName.
 // hasDirectImage reports whether the create body names an image directly
 // (as opposed to a snapshot) — only direct refs are caller-controlled and
 // need digest pinning.
 func hasDirectImage(body []byte) bool {
-	var m struct {
-		Image string `json:"image"`
-	}
-	json.NewDecoder(bytes.NewReader(body)).Decode(&m) //nolint:errcheck
-	return m.Image != ""
+	return createField(body, "image") != ""
 }
 
 // rewriteImage replaces the body's image field with the pinned reference.
 func rewriteImage(body []byte, pinned string) ([]byte, error) {
+	return setCreateField(body, "image", pinned)
+}
+
+// setCreateField sets one top-level field of a create body.
+func setCreateField(body []byte, key, value string) ([]byte, error) {
 	var m map[string]any
 	if err := json.Unmarshal(body, &m); err != nil {
 		return nil, err
 	}
-	m["image"] = pinned
+	m[key] = value
 	return json.Marshal(m)
 }
 
@@ -1724,30 +1758,64 @@ func rewriteImage(body []byte, pinned string) ([]byte, error) {
 // not run its image's own entrypoint: the certificate attests only the image.
 var errSnapshotOverridesImage = errors.New("sealed containers must run their image's own entrypoint; this snapshot overrides it or is built from a Dockerfile")
 
-func (h *Handler) resolveImageRef(ctx context.Context, body []byte) (string, []string, error) {
-	var m struct {
-		Image    string `json:"image"`
-		Snapshot string `json:"snapshot"`
+// resolveImageRef returns the image a sealed create runs, the entrypoint its
+// snapshot record names, and that record's id ("" for a direct image). The
+// caller forwards the id, so Daytona starts the record whose image was
+// certified.
+func (h *Handler) resolveImageRef(ctx context.Context, body []byte) (string, []string, string, error) {
+	if img := createField(body, "image"); img != "" {
+		return img, nil, "", nil
 	}
-	json.NewDecoder(bytes.NewReader(body)).Decode(&m) //nolint:errcheck
-
-	if m.Image != "" {
-		return m.Image, nil, nil
+	ref := createField(body, "snapshot")
+	if ref == "" {
+		return "", nil, "", fmt.Errorf("no image or snapshot specified")
 	}
-	if m.Snapshot != "" {
-		snaps, err := h.dtona.ListSnapshots(ctx)
-		if err != nil {
-			return "", nil, fmt.Errorf("list snapshots: %w", err)
-		}
-		for _, s := range snaps {
-			if s.Name == m.Snapshot {
-				if s.BuildInfo != nil {
-					return "", nil, errSnapshotOverridesImage
-				}
-				return s.ImageName, s.Entrypoint, nil
-			}
-		}
-		return "", nil, fmt.Errorf("snapshot %q not found", m.Snapshot)
+	snaps, err := h.dtona.ListSnapshots(ctx)
+	if err != nil {
+		return "", nil, "", fmt.Errorf("list snapshots: %w", err)
 	}
-	return "", nil, fmt.Errorf("no image or snapshot specified")
+	s, err := resolveSnapshot(snaps, ref)
+	if err != nil {
+		return "", nil, "", err
+	}
+	if s.BuildInfo != nil {
+		return "", nil, "", errSnapshotOverridesImage
+	}
+	return s.ImageName, s.Entrypoint, s.ID, nil
 }
+
+// resolveSnapshot finds the one snapshot record a create reference names.
+// Daytona matches the reference against record names and, when it is
+// UUID-shaped, against record ids, then takes the first active match. A
+// reference that matches more than one record is refused, as is a record whose
+// id is also another record's name: the proxy forwards the id, and Daytona must
+// not be able to resolve it to a different record.
+func resolveSnapshot(snaps []daytona.Snapshot, ref string) (*daytona.Snapshot, error) {
+	var match *daytona.Snapshot
+	for i := range snaps {
+		s := &snaps[i]
+		if s.Name != ref && s.ID != ref {
+			continue
+		}
+		if s.ID == "" {
+			return nil, fmt.Errorf("snapshot %q has no id", ref)
+		}
+		if match != nil && match.ID != s.ID {
+			return nil, fmt.Errorf("snapshot %q matches more than one snapshot record", ref)
+		}
+		match = s
+	}
+	if match == nil {
+		return nil, fmt.Errorf("snapshot %q not found", ref)
+	}
+	for _, s := range snaps {
+		if s.ID != match.ID && s.Name == match.ID {
+			return nil, fmt.Errorf("snapshot %q matches more than one snapshot record", ref)
+		}
+	}
+	return match, nil
+}
+
+// uuidShaped matches what Daytona treats as a snapshot id
+// (apps/api/src/common/utils/uuid.ts).
+var uuidShaped = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)

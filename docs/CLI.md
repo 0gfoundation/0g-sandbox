@@ -305,7 +305,7 @@ PROVIDER_KEY=0x<hex> go run ./cmd/provider/ snapshot \
 |------|---------|-------------|
 | `--api` | `http://localhost:8080` | 0G Sandbox service URL |
 | `--image` | (required) | Full registry image path |
-| `--name` | derived from `--image` | Snapshot name shown to users |
+| `--name` | derived from `--image` | Snapshot name shown to users. A UUID-shaped name is refused: Daytona matches those against snapshot ids |
 | `--cpu` | `1` | CPU cores for sandboxes using this snapshot |
 | `--memory` | `1` | Memory in GB |
 | `--disk` | `3` | Disk in GB |

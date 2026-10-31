@@ -377,7 +377,7 @@ The server starts on port 8080 (`PORT` env var) and exposes:
 - `Any /api/toolbox/:id/*` — Daytona toolbox proxy (owner only, sealed sandboxes blocked)
 - `GET /api/volumes` — list volumes owned by caller
 - `GET /api/snapshots` `POST /api/snapshots` `DELETE /api/snapshots/:id` — snapshot mgmt
-  (`POST` is admin-only)
+  (`POST` is admin-only and refuses UUID-shaped names)
 - `GET /api/events` — on-chain VoucherSettled events
 
 Most management-plane routes use `withOwnerOrAdmin`: admins skip the owner
