@@ -361,6 +361,7 @@ The body may carry only these top-level fields (in any letter case): `snapshot`,
 - Resolves `snapshot` to exactly one snapshot record, by name or id, and forwards that record's id to Daytona. A reference that could name more than one record (two records with that name, or a record whose id is another record's name) is refused with **400**
 - Resolves the image to its content digest via the internal registry (hard failure if unresolvable)
 - Refuses (**400**) a snapshot that does not run its image's own entrypoint: one whose record names an entrypoint other than the image config's, or one built from a Dockerfile (`buildInfo`). The certificate attests only the image digest. Daytona fills a record's `entrypoint` from the image when the snapshot was created without one
+- Refuses (**400**) a snapshot whose runner image (the record's `ref`, the copy Daytona starts) has an image config digest other than the certified manifest's, or that has no `ref` yet; **422** when either image cannot be read. See [APP_IDENTITY.md](APP_IDENTITY.md#sealed-container-certificate-v3)
 - Generates an ephemeral secp256k1 keypair as the container's signing identity
 - Refuses (**400**) a caller `env` key that is not a variable name (`[A-Za-z_][A-Za-z0-9_]*`): the runtime joins entries as `KEY=VALUE`, so a key holding `=` could add a second entry for another variable
 - Removes every caller `env` key that starts with `SANDBOX_`, and `ATTESTOR_TLS_DESCRIPTOR`, `ATTESTOR_ALLOW_UNPINNED_DEV` and `TEE_SIGNER_ADDRESS`; other `env` keys pass through

@@ -49,7 +49,7 @@ var testSealEntrypoint = []string{"/usr/local/bin/sealed"}
 func newSealedCreateFixtureWithSnapshot(t *testing.T, extra map[string]any) (*Handler, *gin.Engine, <-chan forwardedSeal, *atomic.Int32) {
 	t.Helper()
 	return newSealedCreateFixtureWithRecords(t, func(image string) []map[string]any {
-		snapshot := map[string]any{"id": testSealSnapshotID, "name": "sealed", "cpu": 1, "mem": 1, "state": "active", "imageName": image}
+		snapshot := map[string]any{"id": testSealSnapshotID, "name": "sealed", "cpu": 1, "mem": 1, "state": "active", "imageName": image, "ref": runnerRef(image, "runner")}
 		for k, v := range extra {
 			snapshot[k] = v
 		}
@@ -62,13 +62,28 @@ func newSealedCreateFixtureWithSnapshot(t *testing.T, extra map[string]any) (*Ha
 // as Daytona does, unless get overrides it.
 func newSealedCreateFixtureWithRecords(t *testing.T, build func(image string) []map[string]any, get func(ref string) map[string]any) (*Handler, *gin.Engine, <-chan forwardedSeal, *atomic.Int32) {
 	t.Helper()
-	entrypoint, _ := json.Marshal(testSealEntrypoint)
-	config := []byte(fmt.Sprintf(`{"architecture":"amd64","os":"linux","config":{"Entrypoint":%s},"rootfs":{"type":"layers","diff_ids":[]}}`, entrypoint))
-	configDigest := fmt.Sprintf("sha256:%x", sha256.Sum256(config))
-	manifest := []byte(fmt.Sprintf(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"mediaType":"application/vnd.oci.image.config.v1+json","digest":%q,"size":%d},"layers":[]}`, configDigest, len(config)))
+	// Every repository serves the fixture image, except "other", which serves
+	// an image with the same entrypoint and another filesystem, and "missing".
+	images := map[string][2][]byte{
+		"":      fixtureImage(testSealEntrypoint, "sha256:"+strings.Repeat("1", 64)),
+		"other": fixtureImage(testSealEntrypoint, "sha256:"+strings.Repeat("2", 64)),
+	}
 	registry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v2/missing/") {
+			http.NotFound(w, r)
+			return
+		}
+		image := images[""]
+		if strings.HasPrefix(r.URL.Path, "/v2/other/") {
+			image = images["other"]
+		}
+		manifest, config := image[0], image[1]
 		body := manifest
-		if strings.HasSuffix(r.URL.Path, "/blobs/"+configDigest) {
+		if strings.Contains(r.URL.Path, "/blobs/") {
+			if !strings.HasSuffix(r.URL.Path, fmt.Sprintf("/blobs/sha256:%x", sha256.Sum256(config))) {
+				http.NotFound(w, r)
+				return
+			}
 			body = config
 		} else {
 			w.Header().Set("Docker-Content-Digest", fmt.Sprintf("sha256:%x", sha256.Sum256(manifest)))
@@ -143,6 +158,20 @@ func newSealedCreateFixtureWithRecords(t *testing.T, build func(image string) []
 	r := gin.New()
 	h.Register(r.Group("/api", func(c *gin.Context) { c.Set("wallet_address", "0xOWNER"); c.Next() }))
 	return h, r, envelopes, created
+}
+
+// fixtureImage returns the manifest and config of an image with one layer.
+func fixtureImage(entrypoint []string, diffID string) [2][]byte {
+	ep, _ := json.Marshal(entrypoint)
+	config := []byte(fmt.Sprintf(`{"architecture":"amd64","os":"linux","config":{"Entrypoint":%s},"rootfs":{"type":"layers","diff_ids":[%q]}}`, ep, diffID))
+	manifest := []byte(fmt.Sprintf(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"mediaType":"application/vnd.oci.image.config.v1+json","digest":"sha256:%x","size":%d},"layers":[]}`, sha256.Sum256(config), len(config)))
+	return [2][]byte{manifest, config}
+}
+
+// runnerRef names a Daytona runner image in the fixture registry that holds
+// image, in repository repo.
+func runnerRef(image, repo string) string {
+	return strings.SplitN(image, "/", 2)[0] + "/" + repo + "/daytona-" + strings.Repeat("a", 64) + ":daytona"
 }
 
 func TestSealedCreateIssuerFailureNeverCreates(t *testing.T) {
@@ -380,6 +409,62 @@ func TestSealedCreateAcceptsSnapshotWithImageEntrypoint(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"sealed","sealed":true}`)))
 	if w.Code != http.StatusOK || created.Load() != 1 {
 		t.Fatalf("sealed create from a snapshot with its image entrypoint: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// Daytona starts a snapshot's ref, the copy it pushed when the snapshot was
+// created, not its imageName. A sealed create refuses a snapshot whose ref is
+// missing, unreadable or holds an image other than the certified one, and
+// releases its reservation.
+func TestSealedCreateRefusesSnapshotRunningOtherImage(t *testing.T) {
+	for name, tc := range map[string]struct {
+		ref    func(image string) any
+		status int
+		want   string
+	}{
+		"other_image": {func(image string) any { return runnerRef(image, "other") }, http.StatusBadRequest, errSnapshotRunsOtherImage.Error()},
+		"no_ref":      {func(string) any { return nil }, http.StatusBadRequest, "has no runner image yet"},
+		"unreadable":  {func(image string) any { return runnerRef(image, "missing") }, http.StatusUnprocessableEntity, "snapshot's images to be readable"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, r, _, created := newSealedCreateFixtureWithRecords(t, func(image string) []map[string]any {
+				rec := map[string]any{"id": testSealSnapshotID, "name": "sealed", "cpu": 1, "mem": 1, "state": "active", "imageName": image, "entrypoint": testSealEntrypoint}
+				if ref := tc.ref(image); ref != nil {
+					rec["ref"] = ref
+				}
+				return []map[string]any{rec}
+			}, nil)
+			mr := miniredis.RunT(t)
+			rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+			t.Cleanup(func() { _ = rdb.Close() })
+			h.rdb = rdb
+			h.balCheck = &mockBalChecker{bal: big.NewInt(1000)}
+			h.createFee = big.NewInt(11)
+			h.computePricePerSec = new(big.Int)
+			h.SealIssuer = func(context.Context) (SealIssuer, error) {
+				t.Fatal("refused snapshot reached the issuer")
+				return SealIssuer{}, nil
+			}
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"sealed","sealed":true}`)))
+			if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.want) {
+				t.Fatalf("want %d %q, got %d %s", tc.status, tc.want, w.Code, w.Body.String())
+			}
+			if created.Load() != 0 {
+				t.Fatal("created a sealed sandbox from a snapshot that runs another image")
+			}
+			if got := billing.GetReserved(context.Background(), rdb, "0xOWNER", h.providerAddress); got.Sign() != 0 {
+				t.Fatalf("reservation after refusal %s", got)
+			}
+
+			// Nonsealed creates are unaffected.
+			h.sealKey = nil
+			w = httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"sealed"}`)))
+			if w.Code != http.StatusOK || created.Load() != 1 {
+				t.Fatalf("nonsealed create: %d %s", w.Code, w.Body.String())
+			}
+		})
 	}
 }
 

@@ -95,6 +95,20 @@ attestor 把首次 provision 绑定到其中认证的公钥。
 构建（`buildInfo`）时拒绝创建。snapshot 本身不受限制：非 sealed 沙箱仍可使用覆盖了
 entrypoint 的 snapshot。
 
+证书认证的是 Daytona 实际启动的镜像。Daytona 从不运行 snapshot 的 `imageName`：创建
+snapshot 时它把该镜像复制到内部 registry，作为记录的 `ref`
+（`<registry>/daytona/daytona-<hash>:daytona`），runner 启动的是 `ref`。因此 sealed 创建
+还会读取 `ref`，只有 `ref` 与 `imageName` 被认证的 manifest 具有相同的镜像 config digest
+（index 取其 `linux/amd64` 镜像）时才放行，否则 **400** 拒绝。config 按未压缩 digest
+列出每一层，Docker 拉取时会校验，因此 config digest 相同即文件系统与 entrypoint 相同；
+不比较 manifest digest，因为 runner 拉取后重新推送可能改变它。尚无 `ref` 的 snapshot，
+或镜像无法读取的 snapshot，同样拒绝。
+
+内部 registry 中的镜像不能通过 provider API 修改。`POST /api/registry/pull` 拒绝
+（**409**）把已存在的 tag 指向另一个 manifest（再次导入同一 manifest 不做任何改动），
+并拒绝（**400**）写入 Daytona 与 snapshot 注册使用的引用：名为 `daytona-*` 的仓库和
+以 `d-` 开头的 tag。
+
 正常重启只改变节点 signer，app signer 和注册实例不变，已保存的证书因此可以继续使用。
 同 appId 注销重注册后，即使 KMS key 未变，也按新实例处理，不能继承旧证书。
 

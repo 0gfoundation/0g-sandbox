@@ -506,9 +506,7 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	}
 	var imageHash, snapshotID string
 	if sealed {
-		var imageRef string
-		var snapshotEntrypoint []string
-		imageRef, snapshotEntrypoint, snapshotID, err = h.resolveImageRef(c.Request.Context(), body)
+		src, err := h.resolveImageRef(c.Request.Context(), body)
 		if err != nil {
 			releaseRejectedSeal()
 			if errors.Is(err, errSnapshotOverridesImage) {
@@ -518,6 +516,8 @@ func (h *Handler) handleCreate(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "sealed containers require an image or snapshot: " + err.Error()})
 			return
 		}
+		snapshotID = src.snapshotID
+		imageRef := src.image
 		// The billed spec came from GET /api/snapshots/<name>, which resolves
 		// ids before names. It must be the record the certificate covers.
 		if snapshotID != "" && snap != nil && snap.ID != snapshotID {
@@ -534,19 +534,17 @@ func (h *Handler) handleCreate(c *gin.Context) {
 			})
 			return
 		}
-		if len(snapshotEntrypoint) > 0 {
-			own, err := registry.GetEntrypoint(c.Request.Context(), imageRef)
-			if err != nil {
+		if snapshotID != "" {
+			if status, err := checkSnapshotRunsImage(c.Request.Context(), src, imageHash); err != nil {
 				releaseRejectedSeal()
-				c.JSON(http.StatusUnprocessableEntity, gin.H{
-					"error":  "sealed containers require the image config to be readable",
-					"detail": err.Error(),
-				})
-				return
-			}
-			if !slices.Equal(own, snapshotEntrypoint) {
-				releaseRejectedSeal()
-				c.JSON(http.StatusBadRequest, gin.H{"error": errSnapshotOverridesImage.Error()})
+				if status == http.StatusBadRequest {
+					c.JSON(status, gin.H{"error": err.Error()})
+				} else {
+					c.JSON(status, gin.H{
+						"error":  "sealed containers require the snapshot's images to be readable",
+						"detail": err.Error(),
+					})
+				}
 				return
 			}
 		}
@@ -1758,30 +1756,77 @@ func setCreateField(body []byte, key, value string) ([]byte, error) {
 // not run its image's own entrypoint: the certificate attests only the image.
 var errSnapshotOverridesImage = errors.New("sealed containers must run their image's own entrypoint; this snapshot overrides it or is built from a Dockerfile")
 
-// resolveImageRef returns the image a sealed create runs, the entrypoint its
-// snapshot record names, and that record's id ("" for a direct image). The
-// caller forwards the id, so Daytona starts the record whose image was
-// certified.
-func (h *Handler) resolveImageRef(ctx context.Context, body []byte) (string, []string, string, error) {
+// errSnapshotRunsOtherImage refuses a sealed create from a snapshot whose
+// runner image (the copy Daytona made when the snapshot was created, which is
+// what the runner starts) is not the image the certificate would name.
+var errSnapshotRunsOtherImage = errors.New("sealed containers must run the image their certificate names; this snapshot's runner image differs from its image")
+
+// sealedSource is what a sealed create starts.
+type sealedSource struct {
+	// image is the reference the certificate's image_hash is read from.
+	image string
+	// The rest describe a snapshot create and are empty for a direct image.
+	// runRef is the snapshot record's ref: Daytona never runs imageName but
+	// this copy of it, pushed to the internal registry at snapshot creation.
+	// entrypoint is the record's entrypoint and snapshotID its id, which the
+	// caller forwards so Daytona starts the record whose image was certified.
+	runRef     string
+	entrypoint []string
+	snapshotID string
+}
+
+// resolveImageRef returns what a sealed create starts.
+func (h *Handler) resolveImageRef(ctx context.Context, body []byte) (sealedSource, error) {
 	if img := createField(body, "image"); img != "" {
-		return img, nil, "", nil
+		return sealedSource{image: img}, nil
 	}
 	ref := createField(body, "snapshot")
 	if ref == "" {
-		return "", nil, "", fmt.Errorf("no image or snapshot specified")
+		return sealedSource{}, fmt.Errorf("no image or snapshot specified")
 	}
 	snaps, err := h.dtona.ListSnapshots(ctx)
 	if err != nil {
-		return "", nil, "", fmt.Errorf("list snapshots: %w", err)
+		return sealedSource{}, fmt.Errorf("list snapshots: %w", err)
 	}
 	s, err := resolveSnapshot(snaps, ref)
 	if err != nil {
-		return "", nil, "", err
+		return sealedSource{}, err
 	}
 	if s.BuildInfo != nil {
-		return "", nil, "", errSnapshotOverridesImage
+		return sealedSource{}, errSnapshotOverridesImage
 	}
-	return s.ImageName, s.Entrypoint, s.ID, nil
+	return sealedSource{image: s.ImageName, runRef: s.Ref, entrypoint: s.Entrypoint, snapshotID: s.ID}, nil
+}
+
+// checkSnapshotRunsImage refuses (400) a snapshot whose runner would start
+// anything other than the certified manifest of its image: a runner image
+// with another image config, or a recorded entrypoint other than the image's
+// own. Other statuses mean an image could not be read. Image configs are
+// compared because the runner's pull and re-push can change the manifest
+// digest but not the config, which names every layer by content.
+func checkSnapshotRunsImage(ctx context.Context, src sealedSource, imageHash string) (int, error) {
+	if src.runRef == "" {
+		return http.StatusBadRequest, fmt.Errorf("snapshot %s has no runner image yet; wait until it is active", src.snapshotID)
+	}
+	pinned, err := registry.PinRef(src.image, imageHash)
+	if err != nil {
+		return http.StatusUnprocessableEntity, err
+	}
+	certified, err := registry.GetConfig(ctx, pinned)
+	if err != nil {
+		return http.StatusUnprocessableEntity, err
+	}
+	runs, err := registry.GetConfig(ctx, src.runRef)
+	if err != nil {
+		return http.StatusUnprocessableEntity, err
+	}
+	if runs.Digest != certified.Digest {
+		return http.StatusBadRequest, errSnapshotRunsOtherImage
+	}
+	if len(src.entrypoint) > 0 && !slices.Equal(certified.Entrypoint, src.entrypoint) {
+		return http.StatusBadRequest, errSnapshotOverridesImage
+	}
+	return 0, nil
 }
 
 // resolveSnapshot finds the one snapshot record a create reference names.

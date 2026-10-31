@@ -611,7 +611,14 @@ func main() {
 		dst, err := registry.Copy(c.Request.Context(), req.Src, req.Name, req.Tag, req.Username, req.Password)
 		if err != nil {
 			log.Warn("registry pull failed", zap.Error(err))
-			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			status := http.StatusBadGateway
+			switch {
+			case errors.Is(err, registry.ErrTagExists):
+				status = http.StatusConflict
+			case errors.Is(err, registry.ErrReservedTarget):
+				status = http.StatusBadRequest
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"image": dst})

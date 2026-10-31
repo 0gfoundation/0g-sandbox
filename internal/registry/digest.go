@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,21 +54,35 @@ func GetDigest(ctx context.Context, imageRef string) (string, error) {
 	return digest, nil
 }
 
-// GetEntrypoint reads the entrypoint from imageRef's own image config.
-func GetEntrypoint(ctx context.Context, imageRef string) ([]string, error) {
+// ImageConfig is the identity of the image a runner starts from a reference.
+type ImageConfig struct {
+	// Digest is the sha256 of the image config (Docker's image ID). The config
+	// lists the uncompressed layer digests, which Docker checks on pull, so two
+	// references with one config digest start the same filesystem and process.
+	// Unlike the manifest digest it survives a runner's pull and re-push.
+	Digest     string
+	Entrypoint []string
+}
+
+// runnerPlatform is the platform Daytona runners pull.
+var runnerPlatform = &v1.Platform{OS: "linux", Architecture: "amd64"}
+
+// GetConfig reads the config of the image a runner pulls for imageRef: for an
+// index, the linux/amd64 image.
+func GetConfig(ctx context.Context, imageRef string) (ImageConfig, error) {
 	opts, err := craneOptions(ctx, imageRef)
 	if err != nil {
-		return nil, err
+		return ImageConfig{}, err
 	}
-	raw, err := crane.Config(imageRef, opts...)
+	raw, err := crane.Config(imageRef, append(opts, crane.WithPlatform(runnerPlatform))...)
 	if err != nil {
-		return nil, fmt.Errorf("get config for %q: %w", imageRef, err)
+		return ImageConfig{}, fmt.Errorf("get config for %q: %w", imageRef, err)
 	}
 	var cfg v1.ConfigFile
 	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config for %q: %w", imageRef, err)
+		return ImageConfig{}, fmt.Errorf("parse config for %q: %w", imageRef, err)
 	}
-	return cfg.Config.Entrypoint, nil
+	return ImageConfig{Digest: fmt.Sprintf("sha256:%x", sha256.Sum256(raw)), Entrypoint: cfg.Config.Entrypoint}, nil
 }
 
 func craneOptions(ctx context.Context, imageRef string) ([]crane.Option, error) {

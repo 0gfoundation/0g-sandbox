@@ -113,6 +113,23 @@ refuses a snapshot whose Daytona record names a different one, or that Daytona b
 from a Dockerfile (`buildInfo`). Snapshots themselves are not restricted: a non-sealed
 sandbox may still use one that overrides its entrypoint.
 
+The certificate names the image Daytona actually starts. Daytona never runs a
+snapshot's `imageName`: when the snapshot is created it copies that image into its
+internal registry as the record's `ref` (`<registry>/daytona/daytona-<hash>:daytona`),
+and runners start `ref`. A sealed create therefore also reads `ref` and refuses the
+snapshot (**400**) unless `ref` and the certified manifest of `imageName` have the same
+image config digest (for an index, the `linux/amd64` image's). The config lists every
+layer by its uncompressed digest, which Docker checks on pull, so equal config digests
+mean the same filesystem and entrypoint; the manifest digest is not compared because a
+runner's pull and re-push can change it. A snapshot that has no `ref` yet, or whose
+images cannot be read, is refused as well.
+
+Images in the internal registry are immutable through the provider API.
+`POST /api/registry/pull` refuses (**409**) to re-point an existing tag to another
+manifest (importing the same manifest again is a no-op), and refuses (**400**) the
+references Daytona and snapshot registration write: repositories named `daytona-*` and
+tags starting with `d-`.
+
 A normal reboot changes the node signer but retains the app signer and registration
 instance, so a stored certificate remains usable. Re-registering the same appId creates
 a different instance even if KMS returns the same key; its epoch must not inherit an

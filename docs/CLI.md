@@ -282,6 +282,11 @@ curl -X POST http://<provider-host>:8080/api/registry/pull \
 
 > The pull runs synchronously and may take several minutes for large images.
 > After import, use `snapshot` to register the image as a named snapshot.
+>
+> Imported tags are immutable: importing another image under an existing tag is
+> refused with **409** (the same image again is a no-op), so import each build under
+> a new tag. Repository names starting with `daytona-` and tags starting with `d-`
+> are reserved for Daytona and snapshot registration (**400**).
 
 ---
 

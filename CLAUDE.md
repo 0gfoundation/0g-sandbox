@@ -391,7 +391,7 @@ admins would let the operator read user code or trigger billable starts,
 violating the workload-privacy guarantee.
 
 **Admin-only (caller wallet must be in `ADMIN_ADDRESSES`):**
-- `POST /api/registry/pull` — pull image into internal registry
+- `POST /api/registry/pull` — pull image into internal registry (tags immutable: 409 on re-pointing; `daytona-*` repos and `d-*` tags reserved)
 - `POST /api/registry/gc` — garbage-collect orphan derived tags
 - `POST /api/archive-all` — archive every running sandbox + clear Redis sessions
 - `DELETE /api/sandbox/:id/force` — operator-intent override of `DELETE /api/sandbox/:id`
