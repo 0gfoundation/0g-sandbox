@@ -609,7 +609,7 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		modified, err = InjectSeal(modified, h.sealKey, imageHash, issuer)
 		if err != nil {
 			releaseRejectedSeal()
-			if strings.HasPrefix(err.Error(), "seal_id must be") {
+			if strings.HasPrefix(err.Error(), "seal_id must be") || errors.Is(err, ErrCallerEnvKey) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}

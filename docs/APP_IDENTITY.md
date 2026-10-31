@@ -95,8 +95,9 @@ The signature is EIP-712:
 `internal/proxy/testdata/image-attestation-v3.json` is a known-answer vector shared
 byte-identical with the attestor and the sealed runtime.
 
-On a sealed create the provider first removes every caller env key that starts with
-`SANDBOX_`, plus `ATTESTOR_TLS_DESCRIPTOR`, `ATTESTOR_ALLOW_UNPINNED_DEV` and
+On a sealed create the provider refuses a caller env key that is not a variable name
+(`[A-Za-z_][A-Za-z0-9_]*`), since the runtime joins entries as `KEY=VALUE`. It then removes
+every caller env key that starts with `SANDBOX_`, plus `ATTESTOR_TLS_DESCRIPTOR`, `ATTESTOR_ALLOW_UNPINNED_DEV` and
 `TEE_SIGNER_ADDRESS`. It then writes `SANDBOX_SEAL_KEY`, `SANDBOX_SEAL_ATTESTATION` and,
 when its `PROXY_DOMAIN` is set, `SANDBOX_PROXY_DOMAIN`. Other caller env, such as
 `ATTESTOR_URL`, `SEAL_BOOT_TICKET` and `SEAL_SECRET_ENV`, passes through unchanged.

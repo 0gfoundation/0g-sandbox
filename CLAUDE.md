@@ -198,7 +198,8 @@ When a sandbox create request includes `"sealed": true`, the proxy:
    `containerPubkey` is the raw 33-byte compressed key; `appId` uses exact UTF-8 bytes.
    `ProviderKey()` signs `keccak256(0x1901 ‖ domainSeparator ‖ structHash)` raw (no
    EIP-191 prefix). Signature V is normalised to 27/28.
-4. Removes every caller-supplied `SANDBOX_*` env key plus `ATTESTOR_TLS_DESCRIPTOR`,
+4. Refuses (400) a caller env key that is not a variable name (`[A-Za-z_][A-Za-z0-9_]*`).
+   Removes every caller-supplied `SANDBOX_*` env key plus `ATTESTOR_TLS_DESCRIPTOR`,
    `ATTESTOR_ALLOW_UNPINNED_DEV` and `TEE_SIGNER_ADDRESS`, then injects:
    - `SANDBOX_SEAL_KEY` — hex private key; the container's signing identity.
      Never returned through the API; stripped from the create response.

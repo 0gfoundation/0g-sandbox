@@ -80,7 +80,8 @@ KMS provider 背书。
 `internal/proxy/testdata/image-attestation-v3.json` 是与 attestor、sealed runtime
 逐字节一致的共享 known-answer 向量。
 
-sealed 创建时，provider 先从调用者 env 中删除所有以 `SANDBOX_` 开头的键，以及
+sealed 创建时，调用者 env 中有键不是合法变量名（`[A-Za-z_][A-Za-z0-9_]*`）时 provider
+拒绝创建，因为运行时按 `KEY=VALUE` 拼接条目。随后从调用者 env 中删除所有以 `SANDBOX_` 开头的键，以及
 `ATTESTOR_TLS_DESCRIPTOR`、`ATTESTOR_ALLOW_UNPINNED_DEV` 和 `TEE_SIGNER_ADDRESS`，
 再写入 `SANDBOX_SEAL_KEY`、`SANDBOX_SEAL_ATTESTATION`，以及在其 `PROXY_DOMAIN` 已设置时
 写入 `SANDBOX_PROXY_DOMAIN`。其余调用者 env（如 `ATTESTOR_URL`、`SEAL_BOOT_TICKET`、

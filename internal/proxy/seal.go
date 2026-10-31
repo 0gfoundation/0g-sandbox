@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -33,6 +34,26 @@ var imageAttestationTypeHash = crypto.Keccak256Hash([]byte(
 // ATTESTOR_ALLOW_UNPINNED_DEV as a dev-only bypass and no longer reads the
 // other two; none of them may come from the caller.
 var strippedSealEnv = []string{"ATTESTOR_TLS_DESCRIPTOR", "ATTESTOR_ALLOW_UNPINNED_DEV", "TEE_SIGNER_ADDRESS"}
+
+// ErrCallerEnvKey refuses a sealed create whose env has a key that is not a
+// variable name. The runtime joins each entry as KEY=VALUE, so a key such as
+// "CHAIN_RPC_URL=https://x/" would become a second CHAIN_RPC_URL entry beside
+// the one the caller's attestor sets, and either may win.
+var ErrCallerEnvKey = errors.New("env keys must match [A-Za-z_][A-Za-z0-9_]*")
+
+// isEnvName reports whether key matches [A-Za-z_][A-Za-z0-9_]*.
+func isEnvName(key string) bool {
+	if key == "" {
+		return false
+	}
+	for i, c := range key {
+		letter := c == '_' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+		if !letter && (i == 0 || c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
+}
 
 // SealIssuer is authenticated by the server's live chain lookup, never by a
 // create request. RegisteredAt identifies the current registry app instance.
@@ -223,6 +244,11 @@ func InjectSeal(body []byte, appKey *ecdsa.PrivateKey, imageHash string, issuer 
 	env, _ := m["env"].(map[string]any)
 	if env == nil {
 		env = make(map[string]any)
+	}
+	for key := range env {
+		if !isEnvName(key) {
+			return nil, ErrCallerEnvKey
+		}
 	}
 	stripCallerSealEnv(env)
 	env[sealKeyEnv] = privHex

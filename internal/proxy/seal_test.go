@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -590,5 +591,19 @@ func TestInjectSealStripsCallerTrustEnv(t *testing.T) {
 				t.Fatal("certificate not signed by the provider key")
 			}
 		})
+	}
+}
+
+func TestInjectSealRefusesEnvKeysThatAreNotVariableNames(t *testing.T) {
+	key, _ := crypto.GenerateKey()
+	for _, name := range []string{"CHAIN_RPC_URL=https://rpc.example/?x", "", "1A", "A-B", "A B", "A\nB", "Ä"} {
+		body, _ := json.Marshal(map[string]any{"env": map[string]any{"CHAIN_RPC_URL": "https://rpc.example", name: ""}})
+		if _, err := InjectSeal(body, key, testSealImageHash, testSealIssuer()); !errors.Is(err, ErrCallerEnvKey) {
+			t.Fatalf("%q: got %v", name, err)
+		}
+	}
+	body, _ := json.Marshal(map[string]any{"env": map[string]any{"_A1": "x", "a": "y", "SEAL_SECRET_ENV": "z"}})
+	if _, err := InjectSeal(body, key, testSealImageHash, testSealIssuer()); err != nil {
+		t.Fatal(err)
 	}
 }
