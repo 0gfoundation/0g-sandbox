@@ -28,6 +28,9 @@ services:
       ADMIN_ADDRESSES:         ${ADMIN_ADDRESSES:-}
       # Stable attestor identity comes from appId discovery, not an operator EOA.
       ATTESTOR_APP_ID:         ${ATTESTOR_APP_ID:-}
+      # Re-authorizes the attestor app after a re-registration or ownership
+      # transfer: "<registeredAt>:<0x owner>". See docs/APP_IDENTITY.md.
+      ATTESTOR_INSTANCE:       ${ATTESTOR_INSTANCE:-}
       TLS_ENABLED:            ${TLS_ENABLED:-false}
       # Proxy domain — copied into sealed sandbox containers as
       # SANDBOX_PROXY_DOMAIN so bootstrap can compose its public URL.
@@ -225,6 +228,10 @@ services:
     # Set RUNNER_RUNTIME=sysbox-runc to enable (needs host kernel >=5.12 for
     # shiftfs/idmapped-mounts; on 5.10 sysbox can't write resolv.conf). Default runc.
     runtime: ${RUNNER_RUNTIME:-runc}
+    # Daemon mode: the Daytona daemon is PID 1 in each sandbox and starts the image
+    # entrypoint from a shell holding the container env. That is not safe for sealed
+    # creates (PROVIDER_KEY_SOURCE=kms): a sealed provider needs the 0g-daytona runner
+    # with USE_SNAPSHOT_ENTRYPOINT=true, and SEALED_ONLY=true. See docs/APP_IDENTITY.md.
     environment:
       - ENVIRONMENT=production
       - API_PORT=3003
