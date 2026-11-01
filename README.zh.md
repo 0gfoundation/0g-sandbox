@@ -133,6 +133,7 @@ go run ./cmd/billing/
 | `PORT` | `8080` | HTTP 服务端口 |
 | `TLS_ENABLED` | `false` | `true`：使用 tapp 返回的 attested app 证书（`GetAppTlsCert`）直接终止 TLS，供调用方 pin |
 | `ATTESTOR_APP_ID` | — | attestor 的 tapp appId。其发现的稳定 app signer 成为应用管理员；在 `PROVIDER_KEY_SOURCE=kms` 时，其 TLS pin 经签名后由 `GET /api/attestor-tls` 提供。需要 `BACKEND_TAPP_SOCKET`。未设置 `PROVIDER_KEY_SOURCE=kms` 时服务仍会启动并记录警告，该端点返回 503；未设置 `TLS_ENABLED=true` 时同样只记录警告 |
+| `ATTESTOR_INSTANCE` | — | attestor app 重新注册或转移所有权后，重新授权其注册实例：取自其 `getAppInfo` 的 `<registeredAt>:<0x owner>`。替换首次使用时保存的实例；格式错误时拒绝启动。见 [docs/APP_IDENTITY.zh.md](docs/APP_IDENTITY.zh.md) |
 | `MOCK_TEE` | — | 设为 `true` 用于本地开发（使用 `MOCK_APP_PRIVATE_KEY` 代替 TDX gRPC）|
 | `MOCK_APP_PRIVATE_KEY` | — | `MOCK_TEE=true` 时使用的十六进制私钥 |
 | `MOCK_PROVIDER_PRIVATE_KEY` | — | `MOCK_TEE=true` 且 `PROVIDER_KEY_SOURCE=kms` 时用作 KMS provider key 的十六进制私钥 |

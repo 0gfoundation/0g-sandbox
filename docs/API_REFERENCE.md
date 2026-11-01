@@ -288,7 +288,9 @@ expanded here).
 - **`429`:** `{"error":"too many requests"}` with `Retry-After: 1`. A cached statement is served without a rate-limit token. Only requests that would wait for a running refresh share one limit across all callers (20 requests/s, burst 50); a request beyond it gets `429` only when no servable statement is cached.
 - **`503`:** `{"error":"attestor tls unavailable"}`. Without `ATTESTOR_APP_ID` and
   `PROVIDER_KEY_SOURCE=kms` this is the only answer. Otherwise it carries
-  `Retry-After: 5` and means no statement with more than 5 s of validity is available.
+  `Retry-After: 5` and means no statement with more than 5 s of validity is available,
+  for example because the attestor app was re-registered or transferred and awaits
+  re-authorization ([APP_IDENTITY.md](APP_IDENTITY.md)).
 
 Every response carries `Cache-Control: no-store`. Signing and caching rules:
 [APP_IDENTITY.md](APP_IDENTITY.md#attestor-tls-statement-get-apiattestor-tls).

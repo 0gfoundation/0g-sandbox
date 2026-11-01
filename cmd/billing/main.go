@@ -462,7 +462,14 @@ func main() {
 	var attestor *attestorIdentity
 	if cfg.Chain.AttestorAppID != "" {
 		attestor = newAttestorIdentity(uint64(cfg.Chain.ChainID), cfg.Chain.TappRegistry,
-			cfg.Chain.AttestorAppID, rdb, onchain, tee.ResolveAppIdentity)
+			cfg.Chain.AttestorAppID, cfg.Chain.AttestorInstance, rdb, onchain, tee.ResolveAppIdentity)
+		if err := attestor.storeAuthorized(ctx); err != nil {
+			log.Fatal("failed to store ATTESTOR_INSTANCE", zap.Error(err))
+		}
+		if cfg.Chain.AttestorInstance != "" {
+			log.Info("attestor registration instance authorized by ATTESTOR_INSTANCE",
+				zap.String("instance", cfg.Chain.AttestorInstance))
+		}
 	}
 	// Public: the attestor's TLS pins signed by the provider key. Without an
 	// attestor app or a KMS provider every request answers 503.

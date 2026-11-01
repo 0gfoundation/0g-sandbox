@@ -163,6 +163,7 @@ go run ./cmd/billing/
 | `PORT` | `8080` | HTTP server port |
 | `TLS_ENABLED` | `false` | `true`: terminate TLS with the attested app certificate from tapp (`GetAppTlsCert`) so callers can pin it |
 | `ATTESTOR_APP_ID` | — | Attestor tapp appId. Its discovered stable app signer becomes an application admin; with `PROVIDER_KEY_SOURCE=kms` its TLS pins are served, signed, at `GET /api/attestor-tls`. Needs `BACKEND_TAPP_SOCKET`. Without `PROVIDER_KEY_SOURCE=kms` the server starts with a warning and that endpoint answers 503; without `TLS_ENABLED=true` it also starts with a warning |
+| `ATTESTOR_INSTANCE` | — | Re-authorizes the attestor app's registration instance after a re-registration or ownership transfer: `<registeredAt>:<0x owner>` from its `getAppInfo`. Replaces the instance stored on first use; a malformed value refuses startup. See [docs/APP_IDENTITY.md](docs/APP_IDENTITY.md) |
 | `MOCK_TEE` | — | Set to `true` for local dev (uses `MOCK_APP_PRIVATE_KEY` instead of TDX gRPC) |
 | `MOCK_APP_PRIVATE_KEY` | — | Hex private key used when `MOCK_TEE=true` |
 | `MOCK_PROVIDER_PRIVATE_KEY` | — | Hex private key used as the KMS provider key when `MOCK_TEE=true` and `PROVIDER_KEY_SOURCE=kms` |

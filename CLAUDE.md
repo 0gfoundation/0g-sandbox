@@ -129,6 +129,9 @@ contracts/
   pins signed by `ProviderKey()`. Without a KMS provider the server still starts,
   logs a warning and that endpoint answers 503.
   `TLS_ENABLED=true` serves the attested P-256 app TLS certificate directly.
+  The attestor app's registration instance (`registeredAt:owner`) is pinned in Redis on
+  first use; a re-registration or ownership transfer stops admin rights and the
+  statement until the operator sets `ATTESTOR_INSTANCE` (or transfers the app back).
 - **Prerequisites:** the KMS must run attested admission. Without it, the
   owner could register a plain key as a node and take the provider key
   outside any TEE.
@@ -178,6 +181,7 @@ Signed by the TEE key. Nonce is per `(user, provider)` pair; must be strictly in
 | `voucher:<providerAddr>` | Redis list queue of pending vouchers |
 | `stop:sandbox:<sandboxID>` | Pending stop signal (value = reason string) |
 | `auth:nonce:<nonce>` | Seen request nonces (replay protection, TTL-based) |
+| `identity:attestor:<chain>:<registry>:<appId>:instance` | Authorized attestor registration instance (`registeredAt:owner`); `ATTESTOR_INSTANCE` replaces it |
 
 ### Sealed Containers (`sealed: true`)
 

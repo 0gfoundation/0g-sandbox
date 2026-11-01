@@ -25,9 +25,11 @@ type appInstanceReader interface {
 // attestorIdentity is the configured attestor app's identity as discovered
 // through the local tapp. Every use rechecks the live registration instance.
 //
-// A first successful bootstrap persists the authorized registration instance.
-// Reusing the app name after removal never silently authorizes its new owner.
-// Re-authorizing another instance is an explicit operator configuration change.
+// The authorized registration instance is the app's registeredAt and owner.
+// A first successful bootstrap persists it. Reusing the app name after
+// removal never silently authorizes its new owner, and neither does an
+// ownership transfer. Re-authorizing another instance is an explicit operator
+// configuration change: ATTESTOR_INSTANCE names it and replaces the stored one.
 type attestorIdentity struct {
 	chainID  uint64
 	registry string
@@ -36,22 +38,50 @@ type attestorIdentity struct {
 	chain    appInstanceReader
 	resolve  func(context.Context, uint64, string, string) (*tee.AppIdentity, error)
 	key      string
+	// authorized is ATTESTOR_INSTANCE in its stored form; empty keeps the
+	// stored instance.
+	authorized string
 
 	lookups singleflight.Group
 	mu      sync.Mutex
 	cached  *tee.AppIdentity
 }
 
-func newAttestorIdentity(chainID uint64, registry, appID string, rdb *redis.Client, chain appInstanceReader,
+// newAttestorIdentity takes authorized, the normalized ATTESTOR_INSTANCE, or
+// empty to keep the stored instance.
+func newAttestorIdentity(chainID uint64, registry, appID, authorized string, rdb *redis.Client, chain appInstanceReader,
 	resolve func(context.Context, uint64, string, string) (*tee.AppIdentity, error)) *attestorIdentity {
 	return &attestorIdentity{
-		chainID: chainID, registry: registry, appID: appID, rdb: rdb, chain: chain, resolve: resolve,
+		chainID: chainID, registry: registry, appID: appID, authorized: authorized, rdb: rdb, chain: chain, resolve: resolve,
 		key: fmt.Sprintf("identity:attestor:%d:%s:%s:instance", chainID, strings.ToLower(registry), appID),
 	}
 }
 
+// storeAuthorized replaces the stored instance with ATTESTOR_INSTANCE, so the
+// authorization also holds once the setting is removed. It runs at startup and
+// does nothing without the setting.
+func (s *attestorIdentity) storeAuthorized(ctx context.Context) error {
+	if s.authorized == "" {
+		return nil
+	}
+	return s.rdb.Set(ctx, s.key, s.authorized, 0).Err()
+}
+
+// pinned returns the authorized instance: ATTESTOR_INSTANCE when set, else the
+// stored one, which the first verified instance becomes.
+func (s *attestorIdentity) pinned(ctx context.Context, instance string) (string, error) {
+	if s.authorized != "" {
+		return s.authorized, nil
+	}
+	// Redis persists the authorization alongside the provider's other state.
+	if err := s.rdb.SetNX(ctx, s.key, instance, 0).Err(); err != nil {
+		return "", err
+	}
+	return s.rdb.Get(ctx, s.key).Result()
+}
+
 // Current returns the attestor identity once the live registration instance
-// matches it and the persisted instance pin. A cached discovery is reused
+// matches it and the authorized instance (pinned). A cached discovery is reused
 // while more than minLease of its lease remains.
 func (s *attestorIdentity) Current(ctx context.Context, minLease time.Duration) (*tee.AppIdentity, error) {
 	identity, err := s.discovered(ctx, minLease)
@@ -65,17 +95,14 @@ func (s *attestorIdentity) Current(ctx context.Context, minLease time.Duration) 
 	if current == 0 || owner == (common.Address{}) || current != identity.RegisteredAt {
 		return nil, fmt.Errorf("attestor registration instance changed")
 	}
-	// Redis persists the authorization alongside the provider's other state.
 	instance := strconv.FormatUint(current, 10) + ":" + strings.ToLower(owner.Hex())
-	if err := s.rdb.SetNX(ctx, s.key, instance, 0).Err(); err != nil {
-		return nil, err
-	}
-	pinned, err := s.rdb.Get(ctx, s.key).Result()
+	pinned, err := s.pinned(ctx, instance)
 	if err != nil {
 		return nil, err
 	}
 	if pinned != instance {
-		return nil, fmt.Errorf("attestor instance requires explicit re-authorization")
+		// Both values are public registry data; the log names what to authorize.
+		return nil, fmt.Errorf("attestor instance %s requires explicit re-authorization (authorized: %s); see ATTESTOR_INSTANCE", instance, pinned)
 	}
 	if !time.Now().Before(identity.ExpiresAt) {
 		return nil, fmt.Errorf("attestor identity expired during authorization")

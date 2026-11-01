@@ -74,3 +74,51 @@ func TestInvalidProviderKeySourceStillRefused(t *testing.T) {
 		t.Fatal("accepted an unknown PROVIDER_KEY_SOURCE")
 	}
 }
+
+func TestAttestorInstanceNormalized(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("ATTESTOR_APP_ID", "attestor")
+	t.Setenv("ATTESTOR_INSTANCE", " 1784691493:0x9C58AbCdEf0123456789aBcDeF0123456789aBcD ")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "1784691493:0x9c58abcdef0123456789abcdef0123456789abcd"; cfg.Chain.AttestorInstance != want {
+		t.Fatalf("ATTESTOR_INSTANCE = %q, want %q", cfg.Chain.AttestorInstance, want)
+	}
+}
+
+func TestInvalidAttestorInstanceRefused(t *testing.T) {
+	for _, value := range []string{
+		"1784691493",
+		"0x9c58abcdef0123456789abcdef0123456789abcd",
+		"0:0x9c58abcdef0123456789abcdef0123456789abcd",
+		"-1:0x9c58abcdef0123456789abcdef0123456789abcd",
+		"1784691493:9c58abcdef0123456789abcdef0123456789abcd",
+		"1784691493:0x9c58",
+		"1784691493:0x0000000000000000000000000000000000000000",
+		"0x9c58abcdef0123456789abcdef0123456789abcd:1784691493",
+	} {
+		t.Run(value, func(t *testing.T) {
+			setRequiredEnv(t)
+			t.Setenv("ATTESTOR_APP_ID", "attestor")
+			t.Setenv("ATTESTOR_INSTANCE", value)
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), "ATTESTOR_INSTANCE") {
+				t.Fatalf("accepted %q: %v", value, err)
+			}
+		})
+	}
+}
+
+func TestAttestorInstanceWithoutAppIDWarns(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("ATTESTOR_APP_ID", "")
+	t.Setenv("ATTESTOR_INSTANCE", "1784691493:0x9c58abcdef0123456789abcdef0123456789abcd")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if warnings := cfg.Warnings(); len(warnings) != 1 || !strings.Contains(warnings[0], "ATTESTOR_APP_ID") {
+		t.Fatalf("warnings %q", warnings)
+	}
+}

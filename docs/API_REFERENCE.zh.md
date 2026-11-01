@@ -271,7 +271,8 @@ attestor 当前的 TLS SPKI pin,由本 provider 的 key 签名。sealed 容器�
 - **`429`:** `{"error":"too many requests"}`,带 `Retry-After: 1`。提供缓存的声明不消耗限流令牌。只有需要等待进行中刷新的请求共享一个限额(所有调用者合计每秒 20 个请求,突发 50);超出的请求只在没有可提供的缓存声明时得到 `429`。
 - **`503`:** `{"error":"attestor tls unavailable"}`。未同时设置 `ATTESTOR_APP_ID` 与
   `PROVIDER_KEY_SOURCE=kms` 时始终如此。否则会带 `Retry-After: 5`,表示当前没有剩余有效期
-  超过 5 秒的声明。
+  超过 5 秒的声明,例如 attestor app 重新注册或转移所有权后尚未重新授权
+  ([APP_IDENTITY.zh.md](APP_IDENTITY.zh.md))。
 
 所有响应都带 `Cache-Control: no-store`。签名与缓存规则见
 [APP_IDENTITY.zh.md](APP_IDENTITY.zh.md#attestor-tls-声明get-apiattestor-tls)。

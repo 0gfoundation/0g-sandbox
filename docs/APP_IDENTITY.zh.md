@@ -7,6 +7,7 @@ PROVIDER_KEY_SOURCE=kms
 TLS_ENABLED=true
 BACKEND_TAPP_SOCKET=/run/tapp/tapp.sock
 ATTESTOR_APP_ID=your-attestor-app-id
+# ATTESTOR_INSTANCE=<registeredAt>:<0x owner>   # 仅用于重新授权，见下文
 ```
 
 tapp 在 claim 时配置可信 scan URL 和 TLS pin。scan 需要支持带类型的应用身份，
@@ -36,11 +37,31 @@ sandbox app owner 的现有管理权限保留。attestor 的 node signer 不会�
 节点必须声明合法稳定 app signer，所有非空 signer 声明必须一致。即使来自 standby，
 非法、过期或非生产环境的观测仍会导致发现失败。
 
-第一次成功查询后，授权的 attestor 注册 epoch 和 owner 会保存到 Redis：
+第一次成功查询后，授权的 attestor 注册实例 `<registeredAt>:<owner>`（app 的
+`getAppInfo` epoch 十进制值和小写 owner）会保存到 Redis：
 `identity:attestor:<chain>:<registry-lowercase>:<appId>:instance`。
-每次应用管理权限检查以及每次刷新 attestor TLS 声明，都会在一次链上调用中核对 epoch 和 owner。同名 app 注销重注册后，即使
-KMS key 未变，也需要操作员明确重新授权：核实目标部署后，移除这一条授权记录，
-再由新的已验证查询建立 epoch。Redis 应启用持久化，以保留跨进程重启的授权状态。
+每次应用管理权限检查以及每次刷新 attestor TLS 声明，都会在一次链上调用中核对 epoch 和 owner。
+Redis 应启用持久化，以保留跨进程重启的授权状态。
+
+以下两种 Registry 变化都需要操作员明确重新授权，即使 KMS key 未变：
+
+- 同名 app 注销后重新注册：`registeredAt` 改变。
+- app 所有权转移（`transferAppOwnership` 后 `acceptAppOwnership`）：`registeredAt`
+  不变，owner 改变。
+
+重新授权之前，attestor 的 app signer 没有管理权限，也不会签发声明。缓存的声明失效后
+（约 300 秒内），`GET /api/attestor-tls` 返回 503，sealed 容器既无法 provision，也无法
+上报状态。每次拒绝都会记录日志，并写明两个实例：
+`attestor instance <live> requires explicit re-authorization (authorized: <stored>)`。
+重新授权步骤：
+
+1. 核实目标部署，从上述日志或 TappRegistry 的 `getAppInfo(<appId>)` 读取当前实例。
+2. 在 provider 的环境变量中设置 `ATTESTOR_INSTANCE=<registeredAt>:<0x owner>`，然后重启
+   provider（tapp 部署中即修改 `.env` 并重启 app）。启动时它会替换已保存的实例，因此之后
+   移除该设置，授权依然有效。格式错误时拒绝启动；与当前实例不一致的值不授权任何实例。
+
+尚未重新授权的所有权转移，也可以通过把 app 转回已保存的 owner 来撤销。下一次刷新声明时
+即恢复服务，无需重启 provider。
 
 Registry 的 epoch 是时间戳；同一 owner 在同一区块内注销重注册，在 Registry 提供
 唯一注册序号之前无法区分。即使时间戳相同，换成另一 owner 也会被拒绝。

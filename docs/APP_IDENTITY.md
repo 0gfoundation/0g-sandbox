@@ -7,6 +7,7 @@ PROVIDER_KEY_SOURCE=kms
 TLS_ENABLED=true
 BACKEND_TAPP_SOCKET=/run/tapp/tapp.sock
 ATTESTOR_APP_ID=your-attestor-app-id
+# ATTESTOR_INSTANCE=<registeredAt>:<0x owner>   # only to re-authorize; see below
 ```
 
 Claim tapp with the intended Scan URL and TLS SPKI pin. Scan must support typed
@@ -44,15 +45,38 @@ At least one current node must declare a valid stable app signer; all nonempty
 signer declarations must agree. Invalid, expired or non-production observations
 still fail discovery, including those from a standby.
 
-The first successful lookup stores the authorized attestor registration epoch
-and owner in Redis under `identity:attestor:<chain>:<registry-lowercase>:<appId>:instance`.
+The first successful lookup stores the authorized attestor registration instance,
+`<registeredAt>:<owner>` (the app's `getAppInfo` epoch in decimal and its lowercase
+owner), in Redis under `identity:attestor:<chain>:<registry-lowercase>:<appId>:instance`.
 Both are checked against one live registry read on every application-admin check
-and every attestor TLS statement refresh.
-An app name removed and registered again needs deliberate operator
-re-authorization, even if its KMS key is unchanged. To authorize that new
-instance, verify the intended deployment, remove this one authorization record
-from the provider's Redis, and let a fresh verified lookup establish the new
-epoch. Keep Redis persistence enabled to preserve authorization across restarts.
+and every attestor TLS statement refresh. Keep Redis persistence enabled to preserve
+the authorization across restarts.
+
+Two registry changes need deliberate operator re-authorization, even if the KMS key
+is unchanged:
+
+- The app name is removed and registered again: `registeredAt` changes.
+- The app's ownership is transferred (`transferAppOwnership`, then
+  `acceptAppOwnership`): `registeredAt` stays and the owner changes.
+
+Until then the attestor's app signer has no admin rights and no statement is signed.
+`GET /api/attestor-tls` answers 503 once the cached statement lapses, within about
+300 seconds, so sealed containers can neither provision nor report status. Each
+refusal is logged with both instances:
+`attestor instance <live> requires explicit re-authorization (authorized: <stored>)`.
+To re-authorize:
+
+1. Verify the intended deployment and read its live instance from that log line or
+   from `getAppInfo(<appId>)` on the TappRegistry.
+2. Set `ATTESTOR_INSTANCE=<registeredAt>:<0x owner>` in the provider's environment and
+   restart the provider (in a tapp deployment: the `.env` change and app restart).
+   At startup it replaces the stored instance, so the authorization still holds once
+   the setting is removed. A malformed value refuses startup. A value other than the
+   live instance authorizes nothing.
+
+An ownership transfer not yet re-authorized can also be undone by transferring the
+app back to the stored owner. Service resumes at the next statement refresh, with no
+provider restart.
 
 The registry's epoch is a timestamp. A remove/re-register by the same owner in
 the same block is indistinguishable until the registry supplies a unique

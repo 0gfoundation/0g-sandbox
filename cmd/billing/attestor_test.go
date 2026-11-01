@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -36,7 +37,7 @@ func TestAttestorAppSignerAuthorizationAndInstancePin(t *testing.T) {
 		}
 		return &tee.AppIdentity{AppID: app, Signer: signer, RegisteredAt: chain.epoch, ExpiresAt: time.Now().Add(time.Minute)}, nil
 	}
-	check := newAttestorIdentity(16602, "0x3333333333333333333333333333333333333333", "attestor", rdb, chain, resolve).IsAppSigner
+	check := newAttestorIdentity(16602, "0x3333333333333333333333333333333333333333", "attestor", "", rdb, chain, resolve).IsAppSigner
 	if ok, err := check(ctx, signer.Hex()); !ok || err != nil {
 		t.Fatalf("app signer rejected: %v", err)
 	}
@@ -66,9 +67,63 @@ func TestAttestorAppSignerAuthorizationAndInstancePin(t *testing.T) {
 		t.Fatal("registration change accepted")
 	}
 	// A process restart cannot turn a new instance into the old authorization.
-	check = newAttestorIdentity(16602, "0x3333333333333333333333333333333333333333", "attestor", rdb, chain, resolve).IsAppSigner
+	check = newAttestorIdentity(16602, "0x3333333333333333333333333333333333333333", "attestor", "", rdb, chain, resolve).IsAppSigner
 	if ok, err := check(ctx, signer.Hex()); ok || err == nil {
 		t.Fatal("re-registration inherited persisted authority")
+	}
+}
+
+// ATTESTOR_INSTANCE is the operator's re-authorization: it replaces the stored
+// instance, persists once the setting is removed, and authorizes only the
+// instance it names.
+func TestAttestorInstanceReauthorization(t *testing.T) {
+	ctx := context.Background()
+	rdb := newTestRedis(t)
+	const registry = "0x3333333333333333333333333333333333333333"
+	signer := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	oldOwner := common.HexToAddress("0x4444444444444444444444444444444444444444")
+	newOwner := common.HexToAddress("0x5555555555555555555555555555555555555555")
+	chain := &instanceStub{epoch: 100, owner: oldOwner}
+	resolve := func(context.Context, uint64, string, string) (*tee.AppIdentity, error) {
+		return &tee.AppIdentity{AppID: "attestor", Signer: signer, TLSPins: []string{"aa"},
+			RegisteredAt: chain.epoch, ExpiresAt: time.Now().Add(time.Minute)}, nil
+	}
+	start := func(authorized string) *attestorIdentity {
+		identity := newAttestorIdentity(16602, registry, "attestor", authorized, rdb, chain, resolve)
+		if err := identity.storeAuthorized(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return identity
+	}
+	if _, _, err := start("").TLSPins(ctx, 0); err != nil {
+		t.Fatalf("first instance: %v", err)
+	}
+
+	// An ownership transfer keeps registeredAt but is a new authorization.
+	chain.owner = newOwner
+	newInstance := "100:" + strings.ToLower(newOwner.Hex())
+	_, _, err := start("").TLSPins(ctx, 0)
+	if err == nil {
+		t.Fatal("ownership transfer inherited the stored authorization")
+	}
+	if !strings.Contains(err.Error(), newInstance) || !strings.Contains(err.Error(), "ATTESTOR_INSTANCE") {
+		t.Fatalf("refusal does not name the instance to authorize: %v", err)
+	}
+	// A setting naming another instance authorizes nothing.
+	if _, _, err := start("100:"+strings.ToLower(oldOwner.Hex())).TLSPins(ctx, 0); err == nil {
+		t.Fatal("configured instance other than the live one accepted")
+	}
+	if _, _, err := start(newInstance).TLSPins(ctx, 0); err != nil {
+		t.Fatalf("configured instance refused: %v", err)
+	}
+	// It stays authorized once the setting is removed.
+	if ok, err := start("").IsAppSigner(ctx, signer.Hex()); !ok || err != nil {
+		t.Fatalf("stored re-authorization lost: %v", err)
+	}
+	// Transferring the app back to the stored owner needs a setting again.
+	chain.owner = oldOwner
+	if _, _, err := start("").TLSPins(ctx, 0); err == nil {
+		t.Fatal("earlier owner kept its authorization after re-authorization")
 	}
 }
 
@@ -83,7 +138,7 @@ func TestAttestorIdentityTLSPins(t *testing.T) {
 		return &tee.AppIdentity{AppID: "attestor", Signer: common.HexToAddress("0x1111111111111111111111111111111111111111"),
 			TLSPins: pins, RegisteredAt: chain.epoch, ExpiresAt: time.Now().Add(lease)}, nil
 	}
-	identity := newAttestorIdentity(16602, "0x3333333333333333333333333333333333333333", "attestor", newTestRedis(t), chain, resolve)
+	identity := newAttestorIdentity(16602, "0x3333333333333333333333333333333333333333", "attestor", "", newTestRedis(t), chain, resolve)
 
 	got, expiresAt, err := identity.TLSPins(ctx, 30*time.Second)
 	if err != nil || len(got) != 2 || got[0] != "bb" || got[1] != "aa" || time.Until(expiresAt) <= 30*time.Second {
@@ -114,7 +169,7 @@ func TestAttestorIdentitySharesConcurrentDiscovery(t *testing.T) {
 		return &tee.AppIdentity{AppID: "attestor", Signer: common.HexToAddress("0x1111111111111111111111111111111111111111"),
 			TLSPins: []string{"aa"}, RegisteredAt: chain.epoch, ExpiresAt: time.Now().Add(time.Minute)}, nil
 	}
-	identity := newAttestorIdentity(16602, "0x3333333333333333333333333333333333333333", "attestor", newTestRedis(t), chain, resolve)
+	identity := newAttestorIdentity(16602, "0x3333333333333333333333333333333333333333", "attestor", "", newTestRedis(t), chain, resolve)
 	var wg sync.WaitGroup
 	errs := make(chan error, 8)
 	for i := 0; i < 8; i++ {
@@ -160,7 +215,7 @@ func TestAttestorIdentityLookupKeepsEachCallersDeadline(t *testing.T) {
 		return &tee.AppIdentity{AppID: "attestor", Signer: common.HexToAddress("0x1111111111111111111111111111111111111111"),
 			TLSPins: []string{"aa"}, RegisteredAt: chain.epoch, ExpiresAt: time.Now().Add(time.Minute)}, nil
 	}
-	identity := newAttestorIdentity(16602, "0x3333333333333333333333333333333333333333", "attestor", newTestRedis(t), chain, resolve)
+	identity := newAttestorIdentity(16602, "0x3333333333333333333333333333333333333333", "attestor", "", newTestRedis(t), chain, resolve)
 
 	// A short-deadline caller starts the lookup and gives up on its own deadline.
 	short, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)

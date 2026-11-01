@@ -2,8 +2,10 @@ package config
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/spf13/viper"
 )
 
@@ -81,7 +83,13 @@ type ChainConfig struct {
 	// Operator wallets in AdminAddresses remain separate from application
 	// identities.
 	AttestorAppID string `mapstructure:"attestor_app_id"`
-	ChainID       int64  `mapstructure:"chain_id"`
+	// AttestorInstance (ATTESTOR_INSTANCE, "<registeredAt>:<owner>") is the
+	// operator's explicit authorization of the attestor app's registration
+	// instance. It replaces the instance the provider stored on its first
+	// verified lookup; Load normalizes it to the stored form. Empty keeps the
+	// stored instance.
+	AttestorInstance string `mapstructure:"attestor_instance"`
+	ChainID          int64  `mapstructure:"chain_id"`
 }
 
 // AdminList returns the parsed extra admin wallet addresses (lowercased hex).
@@ -173,6 +181,7 @@ func Load() (*Config, error) {
 		"chain.tapp_registry":              "TAPP_REGISTRY",
 		"chain.admin_addresses":            "ADMIN_ADDRESSES",
 		"chain.attestor_app_id":            "ATTESTOR_APP_ID",
+		"chain.attestor_instance":          "ATTESTOR_INSTANCE",
 		"chain.chain_id":                   "CHAIN_ID",
 		"chain.provider_key_source":        "PROVIDER_KEY_SOURCE",
 		"server.port":                      "PORT",
@@ -288,7 +297,28 @@ func (c *Config) validate() error {
 	if c.Chain.ProviderKeySource != "local" && c.Chain.ProviderKeySource != "kms" {
 		return fmt.Errorf("PROVIDER_KEY_SOURCE must be \"local\" or \"kms\", got %q", c.Chain.ProviderKeySource)
 	}
+	if c.Chain.AttestorInstance != "" {
+		instance, err := NormalizeAttestorInstance(c.Chain.AttestorInstance)
+		if err != nil {
+			return err
+		}
+		c.Chain.AttestorInstance = instance
+	}
 	return nil
+}
+
+// NormalizeAttestorInstance parses "<registeredAt>:<owner>" (the attestor
+// app's getAppInfo registeredAt in decimal and its owner address) into the
+// form the provider stores: the decimal epoch, a colon and the lowercase
+// 0x-prefixed owner.
+func NormalizeAttestorInstance(value string) (string, error) {
+	epoch, owner, ok := strings.Cut(strings.TrimSpace(value), ":")
+	registeredAt, err := strconv.ParseUint(epoch, 10, 64)
+	if !ok || err != nil || registeredAt == 0 || !strings.HasPrefix(owner, "0x") ||
+		!common.IsHexAddress(owner) || common.HexToAddress(owner) == (common.Address{}) {
+		return "", fmt.Errorf("ATTESTOR_INSTANCE must be \"<registeredAt>:<0x owner>\" from the attestor app's getAppInfo, got %q", value)
+	}
+	return strconv.FormatUint(registeredAt, 10) + ":" + strings.ToLower(common.HexToAddress(owner).Hex()), nil
 }
 
 // Warnings lists settings that start the server with a feature unavailable.
@@ -299,6 +329,9 @@ func (c *Config) Warnings() []string {
 	}
 	if c.Chain.AttestorAppID != "" && !c.Server.TLSEnabled {
 		out = append(out, "ATTESTOR_APP_ID is set without TLS_ENABLED=true: callers cannot pin this provider's attested app TLS")
+	}
+	if c.Chain.AttestorInstance != "" && c.Chain.AttestorAppID == "" {
+		out = append(out, "ATTESTOR_INSTANCE is set without ATTESTOR_APP_ID: it has no effect")
 	}
 	return out
 }
