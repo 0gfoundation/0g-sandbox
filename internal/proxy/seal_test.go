@@ -541,6 +541,11 @@ func TestInjectSealStripsCallerTrustEnv(t *testing.T) {
 		"TEE_SIGNER_ADDRESS":          "0x0000000000000000000000000000000000000001",
 		"SSL_CERT_FILE":               "/proc/self/environ",
 		"SSL_CERT_DIR":                "/proc/self",
+		"BASH_ENV":                    "$(cat /proc/self/environ)",
+		"ENV":                         "/proc/self/environ",
+		"SHELLOPTS":                   "xtrace",
+		"BASHOPTS":                    "extdebug",
+		"PS4":                         "$(cat /proc/self/environ)",
 		"SANDBOX_SEAL_KEY":            "0x" + strings.Repeat("22", 32),
 		"SANDBOX_SEAL_ATTESTATION":    "caller",
 		"SANDBOX_PROXY_DOMAIN":        "caller.example",
@@ -549,6 +554,11 @@ func TestInjectSealStripsCallerTrustEnv(t *testing.T) {
 	}
 	for k, v := range kept {
 		callerEnv[k] = v
+	}
+	for _, k := range strippedSealEnv {
+		if _, ok := callerEnv[k]; !ok {
+			t.Fatalf("test env does not set stripped key %s", k)
+		}
 	}
 	for _, proxyDomain := range []string{"", "proxy.example:4000"} {
 		t.Run("proxy_domain="+proxyDomain, func(t *testing.T) {

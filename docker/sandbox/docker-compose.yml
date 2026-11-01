@@ -228,6 +228,10 @@ services:
     # Set RUNNER_RUNTIME=sysbox-runc to enable (needs host kernel >=5.12 for
     # shiftfs/idmapped-mounts; on 5.10 sysbox can't write resolv.conf). Default runc.
     runtime: ${RUNNER_RUNTIME:-runc}
+    # Daemon mode: the Daytona daemon is PID 1 in each sandbox and starts the image
+    # entrypoint from a shell holding the container env. That is not safe for sealed
+    # creates (PROVIDER_KEY_SOURCE=kms): a sealed provider needs the 0g-daytona runner
+    # with USE_SNAPSHOT_ENTRYPOINT=true, and SEALED_ONLY=true. See docs/APP_IDENTITY.md.
     environment:
       - ENVIRONMENT=production
       - API_PORT=3003

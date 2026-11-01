@@ -344,7 +344,7 @@ body 只能包含以下顶层字段(任意大小写):`snapshot`、`name`、`env`
 - 拒绝(**400**)runner 镜像(记录的 `ref`,即 Daytona 实际启动的副本)的镜像 config digest 与被认证 manifest 不同的 snapshot,或尚无 `ref` 的 snapshot;任一镜像无法读取时返回 **422**。见 [APP_IDENTITY.zh.md](APP_IDENTITY.zh.md#sealed-容器证书v3)
 - 生成一个临时 secp256k1 密钥对作为容器的签名身份
 - 调用者 `env` 中有键不是合法变量名(`[A-Za-z_][A-Za-z0-9_]*`)时 **400** 拒绝:运行时按 `KEY=VALUE` 拼接条目,含 `=` 的键可能给另一个变量多加一条
-- 删除调用者 `env` 中所有以 `SANDBOX_` 开头的键,以及 `ATTESTOR_TLS_DESCRIPTOR`、`ATTESTOR_ALLOW_UNPINNED_DEV`、`TEE_SIGNER_ADDRESS`、`SSL_CERT_FILE` 和 `SSL_CERT_DIR`(容器只信任其镜像中的 CA);其余 `env` 键原样透传
+- 删除调用者 `env` 中所有以 `SANDBOX_` 开头的键,以及 `ATTESTOR_TLS_DESCRIPTOR`、`ATTESTOR_ALLOW_UNPINNED_DEV`、`TEE_SIGNER_ADDRESS`、`SSL_CERT_FILE` 和 `SSL_CERT_DIR`(容器只信任其镜像中的 CA),以及 shell 启动相关的 `BASH_ENV`、`ENV`、`SHELLOPTS`、`BASHOPTS` 和 `PS4`;其余 `env` 键原样透传。provider 的 runner 必须不经 Daytona daemon 直接启动镜像 entrypoint(`USE_SNAPSHOT_ENTRYPOINT=true`);见 [APP_IDENTITY.zh.md](APP_IDENTITY.zh.md#sealed-容器证书v3)
 - 注入 `SANDBOX_SEAL_KEY`(私钥;从响应中剥除)、`SANDBOX_SEAL_ATTESTATION`(v3 证书:`version`、`chain_id`、`registry_address`、`app_id`、`registered_at`、`seal_id`、`pubkey`、`image_hash`、`ts`,以及 provider key 的 EIP-712 `signature`;见 [APP_IDENTITY.zh.md](APP_IDENTITY.zh.md#sealed-容器证书v3)),并在 provider 设置了 `PROXY_DOMAIN` 时注入 `SANDBOX_PROXY_DOMAIN`
 - 设置标签 `0g-sealed: "true"` 和 `0g-seal-id: <64-char hex>`
 - 在沙箱整个生命周期内**阻断 SSH 和 toolbox 访问**

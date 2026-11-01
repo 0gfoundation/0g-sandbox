@@ -117,13 +117,25 @@ sealed 创建时，调用者 env 中有键不是合法变量名（`[A-Za-z_][A-Z
 拒绝创建，因为运行时按 `KEY=VALUE` 拼接条目。随后从调用者 env 中删除所有以 `SANDBOX_` 开头的键，以及
 `ATTESTOR_TLS_DESCRIPTOR`、`ATTESTOR_ALLOW_UNPINNED_DEV`、`TEE_SIGNER_ADDRESS`、`SSL_CERT_FILE`
 和 `SSL_CERT_DIR`。后两个会给容器的 TLS 客户端增加 CA 根证书，且可以指向内容由调用者 env
-决定的文件（如 `/proc/self/environ`），因此容器只信任其镜像中的 CA。
+决定的文件（如 `/proc/self/environ`），因此容器只信任其镜像中的 CA。还会删除 shell 启动相关的
+`BASH_ENV`、`ENV`、`SHELLOPTS`、`BASHOPTS` 和 `PS4`（见下文对 runner 的要求）。
 再写入 `SANDBOX_SEAL_KEY`、`SANDBOX_SEAL_ATTESTATION`，以及在其 `PROXY_DOMAIN` 已设置时
 写入 `SANDBOX_PROXY_DOMAIN`。其余调用者 env（如 `ATTESTOR_URL`、`SEAL_BOOT_TICKET`、
 `SEAL_SECRET_ENV`）原样透传：provider 无法区分 attestor 的 create 与其他调用者的 create。
 所有返回 sandbox 的响应都会从其 env 中删除 `SANDBOX_SEAL_KEY` 和 `SEAL_BOOT_TICKET`，
 owner 与其他调用者都读不回私钥或 attestor 的启动票据；`SANDBOX_SEAL_ATTESTATION` 保留，
 attestor 把首次 provision 绑定到其中认证的公钥。
+
+提供 sealed 创建的 provider，其 runner 必须直接启动镜像 entrypoint：即设置了
+`USE_SNAPSHOT_ENTRYPOINT=true` 的 0g-daytona runner，由 docker-init 启动 entrypoint。这种
+runner 不在沙箱中运行 Daytona daemon，因此其上的非 sealed 沙箱没有 exec、toolbox 和 SSH；
+应同时设置 `SEALED_ONLY=true`。未设置 `USE_SNAPSHOT_ENTRYPOINT=true` 时 Daytona daemon 是
+PID 1，并通过一个继承容器 env（包括 `SANDBOX_SEAL_KEY`、`SANDBOX_SEAL_ATTESTATION` 和
+`SEAL_BOOT_TICKET`）的 shell 启动镜像 entrypoint。改变该 shell 启动方式的调用者 env 就能在 sealed runtime 启动前以 root
+身份、带着容器私钥执行命令。删除上述 shell 启动相关的键封堵了已知路径，但不能替代 runner
+设置。provider 无法观察 runner 的模式，因此这是部署要求，由验证方在 attested compose 中
+核对。参考的 `docker/sandbox/docker-compose.yml` 中 runner 处于 daemon 模式，不适用于
+sealed 创建。attestor 也应只转发其 sealed runtime 从 owner 读取的 env 键。
 
 证书只证明镜像 digest，因此容器必须运行镜像自身的 entrypoint。sealed 创建时从镜像自身
 的 config 读取 entrypoint，Daytona 记录中的 entrypoint 与之不同，或 snapshot 由 Dockerfile

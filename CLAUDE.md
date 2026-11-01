@@ -215,7 +215,8 @@ When a sandbox create request includes `"sealed": true`, the proxy:
 4. Refuses (400) a caller env key that is not a variable name (`[A-Za-z_][A-Za-z0-9_]*`).
    Removes every caller-supplied `SANDBOX_*` env key plus `ATTESTOR_TLS_DESCRIPTOR`,
    `ATTESTOR_ALLOW_UNPINNED_DEV`, `TEE_SIGNER_ADDRESS`, `SSL_CERT_FILE` and `SSL_CERT_DIR`
-   (the container's trusted CAs come from its image only), then injects:
+   (the container's trusted CAs come from its image only) and the shell startup keys
+   `BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS` and `PS4`, then injects:
    - `SANDBOX_SEAL_KEY` — hex private key; the container's signing identity.
      Never returned through the API; stripped from the create response.
    - `SANDBOX_SEAL_ATTESTATION` — compact JSON in this order: `{version, chain_id, registry_address, app_id, registered_at, seal_id, pubkey, image_hash, ts, signature}`
@@ -230,6 +231,15 @@ When a sandbox create request includes `"sealed": true`, the proxy:
 6. Sets label `0g-seal-id: <64-char hex>` → operators can correlate sandbox ↔ certificate
 
 Sealing requires `PROVIDER_KEY_SOURCE=kms` and a valid current KMS service binding.
+It also requires a runner that starts the image's entrypoint directly: the 0g-daytona
+runner with `USE_SNAPSHOT_ENTRYPOINT=true` (no Daytona daemon in the sandbox, so set
+`SEALED_ONLY=true` too). A runner that wraps the entrypoint in the daemon starts it from
+a shell that already holds `SANDBOX_SEAL_KEY`, `SANDBOX_SEAL_ATTESTATION` and
+`SEAL_BOOT_TICKET`, so caller env could act before the sealed runtime does. The provider
+cannot see the runner's mode; it is a deployment requirement, readable in the attested
+compose. The reference `docker/sandbox/docker-compose.yml` leaves its runner in daemon
+mode (no `USE_SNAPSHOT_ENTRYPOINT`) and does not meet it.
+
 The attestor authenticates the certificate's signer and issuer scope through discovery.
 Sealed containers authenticate the attestor's TLS by the pins in `GET /api/attestor-tls`,
 which the attestor relays. Containers holding an earlier certificate version must be

@@ -35,11 +35,18 @@ var imageAttestationTypeHash = crypto.Keccak256Hash([]byte(
 // ATTESTOR_TLS_DESCRIPTOR or TEE_SIGNER_ADDRESS. SSL_CERT_FILE and
 // SSL_CERT_DIR add CA roots to the container's TLS clients, and can name a
 // file whose contents the caller's env controls (such as /proc/self/environ),
-// so the trusted CAs come from the image alone. None of them may come from the
-// caller.
+// so the trusted CAs come from the image alone. BASH_ENV and ENV name a startup
+// file whose name the shell expands, SHELLOPTS and BASHOPTS set options at
+// startup, and with xtrace on the shell expands PS4 before every command. A shell
+// that starts with the container's env (such as the session shell of a runner
+// that wraps the image entrypoint in the Daytona daemon) would run caller
+// commands with SANDBOX_SEAL_KEY in its env. This is defense in depth: a runner
+// that wraps the entrypoint is not supported for sealed creates (see
+// docs/APP_IDENTITY.md). None of these keys may come from the caller.
 var strippedSealEnv = []string{
 	"ATTESTOR_TLS_DESCRIPTOR", "ATTESTOR_ALLOW_UNPINNED_DEV", "TEE_SIGNER_ADDRESS",
 	"SSL_CERT_FILE", "SSL_CERT_DIR",
+	"BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "PS4",
 }
 
 // ErrCallerEnvKey refuses a sealed create whose env has a key that is not a

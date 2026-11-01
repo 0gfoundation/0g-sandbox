@@ -138,7 +138,9 @@ On a sealed create the provider refuses a caller env key that is not a variable 
 every caller env key that starts with `SANDBOX_`, plus `ATTESTOR_TLS_DESCRIPTOR`, `ATTESTOR_ALLOW_UNPINNED_DEV`,
 `TEE_SIGNER_ADDRESS`, `SSL_CERT_FILE` and `SSL_CERT_DIR`. The last two would add CA roots to the
 container's TLS clients, and could name a file whose contents the caller's env sets (such as
-`/proc/self/environ`), so the container trusts only the CAs in its image. It then writes `SANDBOX_SEAL_KEY`, `SANDBOX_SEAL_ATTESTATION` and,
+`/proc/self/environ`), so the container trusts only the CAs in its image. It also removes
+the shell startup keys `BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS` and `PS4` (see the runner
+requirement below). It then writes `SANDBOX_SEAL_KEY`, `SANDBOX_SEAL_ATTESTATION` and,
 when its `PROXY_DOMAIN` is set, `SANDBOX_PROXY_DOMAIN`. Other caller env, such as
 `ATTESTOR_URL`, `SEAL_BOOT_TICKET` and `SEAL_SECRET_ENV`, passes through unchanged:
 the provider cannot tell an attestor's create from any other. Every response that
@@ -146,6 +148,20 @@ returns a sandbox drops `SANDBOX_SEAL_KEY` and `SEAL_BOOT_TICKET` from its env, 
 neither the owner nor any other caller reads the key or an attestor's boot ticket back;
 `SANDBOX_SEAL_ATTESTATION` stays, and an attestor binds the first provision to the key
 it certifies.
+
+A provider that serves sealed creates must have its runner start the image entrypoint
+directly: the 0g-daytona runner with `USE_SNAPSHOT_ENTRYPOINT=true`, where docker-init
+starts the entrypoint. That runner puts no Daytona daemon in the sandbox, so unsealed
+sandboxes there have no exec, toolbox or SSH; set `SEALED_ONLY=true` as well. Without
+`USE_SNAPSHOT_ENTRYPOINT=true` the Daytona daemon is PID 1 and starts the image entrypoint from a shell that
+inherits the container env, `SANDBOX_SEAL_KEY`, `SANDBOX_SEAL_ATTESTATION` and
+`SEAL_BOOT_TICKET` included. Caller env that changes how that shell starts can then run
+commands as root with the container key before the sealed runtime starts. Removing the
+shell startup keys above closes the known paths but does not replace the runner setting.
+The provider cannot observe the runner's mode, so this is a deployment requirement that
+a verifier reads in the attested compose. The reference `docker/sandbox/docker-compose.yml`
+leaves its runner in daemon mode and is not suitable for sealed creates. An attestor should
+also forward only the env keys its sealed runtime reads from the owner.
 
 The certificate attests only the image digest, so the container must run the image's
 own entrypoint. A sealed create reads the entrypoint from the image's own config and
