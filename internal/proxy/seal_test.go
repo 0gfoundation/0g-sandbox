@@ -539,6 +539,8 @@ func TestInjectSealStripsCallerTrustEnv(t *testing.T) {
 		"ATTESTOR_TLS_DESCRIPTOR":     "caller",
 		"ATTESTOR_ALLOW_UNPINNED_DEV": "1",
 		"TEE_SIGNER_ADDRESS":          "0x0000000000000000000000000000000000000001",
+		"SSL_CERT_FILE":               "/proc/self/environ",
+		"SSL_CERT_DIR":                "/proc/self",
 		"SANDBOX_SEAL_KEY":            "0x" + strings.Repeat("22", 32),
 		"SANDBOX_SEAL_ATTESTATION":    "caller",
 		"SANDBOX_PROXY_DOMAIN":        "caller.example",
@@ -573,6 +575,11 @@ func TestInjectSealStripsCallerTrustEnv(t *testing.T) {
 			}
 			if len(env) != want {
 				t.Fatalf("env keys %v", env)
+			}
+			for _, k := range strippedSealEnv {
+				if _, ok := env[k]; ok {
+					t.Fatalf("caller %s survived", k)
+				}
 			}
 			for k, v := range kept {
 				if env[k] != v {

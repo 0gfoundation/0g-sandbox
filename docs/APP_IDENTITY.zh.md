@@ -115,7 +115,9 @@ KMS provider 背书。
 
 sealed 创建时，调用者 env 中有键不是合法变量名（`[A-Za-z_][A-Za-z0-9_]*`）时 provider
 拒绝创建，因为运行时按 `KEY=VALUE` 拼接条目。随后从调用者 env 中删除所有以 `SANDBOX_` 开头的键，以及
-`ATTESTOR_TLS_DESCRIPTOR`、`ATTESTOR_ALLOW_UNPINNED_DEV` 和 `TEE_SIGNER_ADDRESS`，
+`ATTESTOR_TLS_DESCRIPTOR`、`ATTESTOR_ALLOW_UNPINNED_DEV`、`TEE_SIGNER_ADDRESS`、`SSL_CERT_FILE`
+和 `SSL_CERT_DIR`。后两个会给容器的 TLS 客户端增加 CA 根证书，且可以指向内容由调用者 env
+决定的文件（如 `/proc/self/environ`），因此容器只信任其镜像中的 CA。
 再写入 `SANDBOX_SEAL_KEY`、`SANDBOX_SEAL_ATTESTATION`，以及在其 `PROXY_DOMAIN` 已设置时
 写入 `SANDBOX_PROXY_DOMAIN`。其余调用者 env（如 `ATTESTOR_URL`、`SEAL_BOOT_TICKET`、
 `SEAL_SECRET_ENV`）原样透传：provider 无法区分 attestor 的 create 与其他调用者的 create。

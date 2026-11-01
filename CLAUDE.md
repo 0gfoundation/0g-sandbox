@@ -214,7 +214,8 @@ When a sandbox create request includes `"sealed": true`, the proxy:
    EIP-191 prefix). Signature V is normalised to 27/28.
 4. Refuses (400) a caller env key that is not a variable name (`[A-Za-z_][A-Za-z0-9_]*`).
    Removes every caller-supplied `SANDBOX_*` env key plus `ATTESTOR_TLS_DESCRIPTOR`,
-   `ATTESTOR_ALLOW_UNPINNED_DEV` and `TEE_SIGNER_ADDRESS`, then injects:
+   `ATTESTOR_ALLOW_UNPINNED_DEV`, `TEE_SIGNER_ADDRESS`, `SSL_CERT_FILE` and `SSL_CERT_DIR`
+   (the container's trusted CAs come from its image only), then injects:
    - `SANDBOX_SEAL_KEY` — hex private key; the container's signing identity.
      Never returned through the API; stripped from the create response.
    - `SANDBOX_SEAL_ATTESTATION` — compact JSON in this order: `{version, chain_id, registry_address, app_id, registered_at, seal_id, pubkey, image_hash, ts, signature}`

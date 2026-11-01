@@ -135,8 +135,10 @@ byte-identical with the attestor and the sealed runtime.
 
 On a sealed create the provider refuses a caller env key that is not a variable name
 (`[A-Za-z_][A-Za-z0-9_]*`), since the runtime joins entries as `KEY=VALUE`. It then removes
-every caller env key that starts with `SANDBOX_`, plus `ATTESTOR_TLS_DESCRIPTOR`, `ATTESTOR_ALLOW_UNPINNED_DEV` and
-`TEE_SIGNER_ADDRESS`. It then writes `SANDBOX_SEAL_KEY`, `SANDBOX_SEAL_ATTESTATION` and,
+every caller env key that starts with `SANDBOX_`, plus `ATTESTOR_TLS_DESCRIPTOR`, `ATTESTOR_ALLOW_UNPINNED_DEV`,
+`TEE_SIGNER_ADDRESS`, `SSL_CERT_FILE` and `SSL_CERT_DIR`. The last two would add CA roots to the
+container's TLS clients, and could name a file whose contents the caller's env sets (such as
+`/proc/self/environ`), so the container trusts only the CAs in its image. It then writes `SANDBOX_SEAL_KEY`, `SANDBOX_SEAL_ATTESTATION` and,
 when its `PROXY_DOMAIN` is set, `SANDBOX_PROXY_DOMAIN`. Other caller env, such as
 `ATTESTOR_URL`, `SEAL_BOOT_TICKET` and `SEAL_SECRET_ENV`, passes through unchanged:
 the provider cannot tell an attestor's create from any other. Every response that
