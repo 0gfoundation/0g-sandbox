@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -29,44 +31,47 @@ var imageAttestationTypeHash = crypto.Keccak256Hash([]byte(
 	"ImageAttestation(string appId,uint64 registeredAt,bytes32 sealId,bytes containerPubkey,bytes32 imageHash,uint64 issuedAt)",
 ))
 
-// Caller env keys removed from every sealed create, in addition to every
-// SANDBOX_* key, which only the provider writes. The sealed runtime treats
-// ATTESTOR_ALLOW_UNPINNED_DEV as a dev-only bypass and no longer reads
-// ATTESTOR_TLS_DESCRIPTOR or TEE_SIGNER_ADDRESS. SSL_CERT_FILE and
-// SSL_CERT_DIR add CA roots to the container's TLS clients, and can name a
-// file whose contents the caller's env controls (such as /proc/self/environ),
-// so the trusted CAs come from the image alone. BASH_ENV and ENV name a startup
-// file whose name the shell expands, SHELLOPTS and BASHOPTS set options at
-// startup, and with xtrace on the shell expands PS4 before every command. A shell
-// that starts with the container's env (such as the session shell of a runner
-// that wraps the image entrypoint in the Daytona daemon) would run caller
-// commands with SANDBOX_SEAL_KEY in its env. This is defense in depth: a runner
-// that wraps the entrypoint is not supported for sealed creates (see
-// docs/APP_IDENTITY.md). None of these keys may come from the caller.
-var strippedSealEnv = []string{
-	"ATTESTOR_TLS_DESCRIPTOR", "ATTESTOR_ALLOW_UNPINNED_DEV", "TEE_SIGNER_ADDRESS",
-	"SSL_CERT_FILE", "SSL_CERT_DIR",
-	"BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "PS4",
+// sealedCreateEnv lists the only caller env keys a sealed create may carry:
+// the values the sealed runtime reads from the attestor that creates it. The
+// provider writes its own SANDBOX_* keys and drops a caller's; it refuses any
+// other key (ErrCallerEnvKey). Unsealed creates keep any env.
+//
+// The set is an allowlist rather than a list of keys to remove because the
+// container env is in effect before the sealed runtime runs, and shells,
+// dynamic loaders and TLS libraries act on many variables (BASH_ENV,
+// LD_PRELOAD, SSL_CERT_FILE and others). A runner that wraps the image
+// entrypoint in the Daytona daemon, for example, starts it from a shell that
+// inherits this env, SANDBOX_SEAL_KEY included. Such a runner is still not
+// supported for sealed creates (docs/APP_IDENTITY.md).
+var sealedCreateEnv = []string{
+	"ATTESTOR_URL", "SEAL_BOOT_TICKET", "SEAL_SECRET_ENV", "API_KEY",
+	"CHAIN_RPC_URL", "AGENTIC_ID_ADDR", "VERIFIED_FEEDBACK_ADDR", "INDEXER_URL",
+	"AGENT_FRAMEWORK",
 }
 
-// ErrCallerEnvKey refuses a sealed create whose env has a key that is not a
-// variable name. The runtime joins each entry as KEY=VALUE, so a key such as
-// "CHAIN_RPC_URL=https://x/" would become a second CHAIN_RPC_URL entry beside
-// the one the caller's attestor sets, and either may win.
-var ErrCallerEnvKey = errors.New("env keys must match [A-Za-z_][A-Za-z0-9_]*")
+// ErrCallerEnvKey refuses a sealed create whose env holds a key outside
+// sealedCreateEnv that does not start with SANDBOX_.
+var ErrCallerEnvKey = errors.New("a sealed create's env may hold only " +
+	strings.Join(sealedCreateEnv, ", ") + "; SANDBOX_* keys are set by the provider")
 
-// isEnvName reports whether key matches [A-Za-z_][A-Za-z0-9_]*.
-func isEnvName(key string) bool {
-	if key == "" {
-		return false
+// filterSealedCallerEnv drops every caller SANDBOX_* key from env and refuses
+// any other key outside sealedCreateEnv, naming the first in sorted order.
+func filterSealedCallerEnv(env map[string]any) error {
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		keys = append(keys, key)
 	}
-	for i, c := range key {
-		letter := c == '_' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
-		if !letter && (i == 0 || c < '0' || c > '9') {
-			return false
+	sort.Strings(keys)
+	for _, key := range keys {
+		switch {
+		case slices.Contains(sealedCreateEnv, key):
+		case strings.HasPrefix(key, "SANDBOX_"):
+			delete(env, key)
+		default:
+			return fmt.Errorf("%w (got %q)", ErrCallerEnvKey, key)
 		}
 	}
-	return true
+	return nil
 }
 
 // SealIssuer is authenticated by the server's live chain lookup, never by a
@@ -182,8 +187,9 @@ func issueImageAttestation(issuer SealIssuer, sealID, pubKey, imageHash string, 
 //   - SANDBOX_SEAL_ATTESTATION — the certificate the container presents to other
 //     services to prove which image it runs and which key it holds.
 //
-// Every caller-supplied SANDBOX_* key and the strippedSealEnv keys are removed
-// first, so the container sees only the values written here.
+// The caller's env may hold only the sealedCreateEnv keys: every caller
+// SANDBOX_* key is dropped first, so the container sees only the values
+// written here, and any other key is refused with ErrCallerEnvKey.
 //
 // The sealId is also written to label "0g-seal-id" so operators can correlate
 // a running sandbox with the certificate that was issued for it.
@@ -259,12 +265,9 @@ func InjectSeal(body []byte, appKey *ecdsa.PrivateKey, imageHash string, issuer 
 	if env == nil {
 		env = make(map[string]any)
 	}
-	for key := range env {
-		if !isEnvName(key) {
-			return nil, ErrCallerEnvKey
-		}
+	if err := filterSealedCallerEnv(env); err != nil {
+		return nil, err
 	}
-	stripCallerSealEnv(env)
 	env[sealKeyEnv] = privHex
 	env["SANDBOX_SEAL_ATTESTATION"] = attestation
 
@@ -280,17 +283,6 @@ func InjectSeal(body []byte, appKey *ecdsa.PrivateKey, imageHash string, issuer 
 	m["env"] = env
 
 	return json.Marshal(m)
-}
-
-func stripCallerSealEnv(env map[string]any) {
-	for key := range env {
-		if strings.HasPrefix(key, "SANDBOX_") {
-			delete(env, key)
-		}
-	}
-	for _, key := range strippedSealEnv {
-		delete(env, key)
-	}
 }
 
 // stripSealKey removes SANDBOX_SEAL_KEY and SEAL_BOOT_TICKET (see

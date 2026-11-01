@@ -528,37 +528,32 @@ func TestInjectSealLowercasesCallerSealID(t *testing.T) {
 	}
 }
 
-func TestInjectSealStripsCallerTrustEnv(t *testing.T) {
+// A sealed create keeps the caller's sealedCreateEnv keys and drops its
+// SANDBOX_* keys, so the container sees only the provider's.
+func TestInjectSealKeepsOnlyAllowedCallerEnv(t *testing.T) {
 	kept := map[string]any{
 		"ATTESTOR_URL": "https://attestor.example", "SEAL_BOOT_TICKET": strings.Repeat("11", 32),
 		"SEAL_SECRET_ENV": "0xciphertext", "API_KEY": "k", "CHAIN_RPC_URL": "https://rpc.example",
-		"AGENTIC_ID_ADDR": "0x01", "VERIFIED_FEEDBACK_ADDR": "0x02", "INDEXER_URL": "https://indexer.example",
+		"AGENTIC_ID_ADDR": "0x01", "VERIFIED_FEEDBACK_ADDR": "", "INDEXER_URL": "https://indexer.example",
 		"AGENT_FRAMEWORK": "openclaw",
 	}
+	if len(kept) != len(sealedCreateEnv) {
+		t.Fatalf("test env sets %d keys; sealedCreateEnv has %d", len(kept), len(sealedCreateEnv))
+	}
+	for _, k := range sealedCreateEnv {
+		if _, ok := kept[k]; !ok {
+			t.Fatalf("test env does not set allowed key %s", k)
+		}
+	}
 	callerEnv := map[string]any{
-		"ATTESTOR_TLS_DESCRIPTOR":     "caller",
-		"ATTESTOR_ALLOW_UNPINNED_DEV": "1",
-		"TEE_SIGNER_ADDRESS":          "0x0000000000000000000000000000000000000001",
-		"SSL_CERT_FILE":               "/proc/self/environ",
-		"SSL_CERT_DIR":                "/proc/self",
-		"BASH_ENV":                    "$(cat /proc/self/environ)",
-		"ENV":                         "/proc/self/environ",
-		"SHELLOPTS":                   "xtrace",
-		"BASHOPTS":                    "extdebug",
-		"PS4":                         "$(cat /proc/self/environ)",
-		"SANDBOX_SEAL_KEY":            "0x" + strings.Repeat("22", 32),
-		"SANDBOX_SEAL_ATTESTATION":    "caller",
-		"SANDBOX_PROXY_DOMAIN":        "caller.example",
-		"SANDBOX_ATTESTOR_IDENTITY":   "caller",
-		"SANDBOX_API_URL":             "https://caller.example",
+		"SANDBOX_SEAL_KEY":          "0x" + strings.Repeat("22", 32),
+		"SANDBOX_SEAL_ATTESTATION":  "caller",
+		"SANDBOX_PROXY_DOMAIN":      "caller.example",
+		"SANDBOX_ATTESTOR_IDENTITY": "caller",
+		"SANDBOX_API_URL":           "https://caller.example",
 	}
 	for k, v := range kept {
 		callerEnv[k] = v
-	}
-	for _, k := range strippedSealEnv {
-		if _, ok := callerEnv[k]; !ok {
-			t.Fatalf("test env does not set stripped key %s", k)
-		}
 	}
 	for _, proxyDomain := range []string{"", "proxy.example:4000"} {
 		t.Run("proxy_domain="+proxyDomain, func(t *testing.T) {
@@ -586,11 +581,6 @@ func TestInjectSealStripsCallerTrustEnv(t *testing.T) {
 			if len(env) != want {
 				t.Fatalf("env keys %v", env)
 			}
-			for _, k := range strippedSealEnv {
-				if _, ok := env[k]; ok {
-					t.Fatalf("caller %s survived", k)
-				}
-			}
 			for k, v := range kept {
 				if env[k] != v {
 					t.Fatalf("%s = %v, want caller value", k, env[k])
@@ -614,15 +604,29 @@ func TestInjectSealStripsCallerTrustEnv(t *testing.T) {
 	}
 }
 
-func TestInjectSealRefusesEnvKeysThatAreNotVariableNames(t *testing.T) {
+// Any other caller env key refuses a sealed create, whatever it is: keys the
+// sealed runtime no longer reads or treats as dev-only, keys that shells,
+// loaders, language runtimes or TLS libraries act on, other spellings of an
+// allowed key, and keys that are not variable names.
+func TestInjectSealRefusesOtherCallerEnv(t *testing.T) {
 	key, _ := crypto.GenerateKey()
-	for _, name := range []string{"CHAIN_RPC_URL=https://rpc.example/?x", "", "1A", "A-B", "A B", "A\nB", "Ä"} {
-		body, _ := json.Marshal(map[string]any{"env": map[string]any{"CHAIN_RPC_URL": "https://rpc.example", name: ""}})
-		if _, err := InjectSeal(body, key, testSealImageHash, testSealIssuer()); !errors.Is(err, ErrCallerEnvKey) {
+	for _, name := range []string{
+		"ATTESTOR_TLS_DESCRIPTOR", "ATTESTOR_ALLOW_UNPINNED_DEV", "TEE_SIGNER_ADDRESS",
+		"SSL_CERT_FILE", "SSL_CERT_DIR", "BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "PS4",
+		"BASH_FUNC_ls%%", "LD_PRELOAD", "LD_LIBRARY_PATH", "NODE_OPTIONS", "PYTHONSTARTUP",
+		"GODEBUG", "TZ", "PATH", "HOME", "DAYTONA_SANDBOX_ID", "api_key", "API_KEY ", "_A1", "a",
+		"CHAIN_RPC_URL=https://rpc.example/?x", "", "1A", "A-B", "A B", "A\nB", "Ä",
+	} {
+		body, _ := json.Marshal(map[string]any{"env": map[string]any{"CHAIN_RPC_URL": "https://rpc.example", "SANDBOX_X": "y", name: "v"}})
+		_, err := InjectSeal(body, key, testSealImageHash, testSealIssuer())
+		if !errors.Is(err, ErrCallerEnvKey) {
 			t.Fatalf("%q: got %v", name, err)
 		}
+		if !strings.Contains(err.Error(), fmt.Sprintf("%q", name)) {
+			t.Fatalf("%q: error does not name the key: %v", name, err)
+		}
 	}
-	body, _ := json.Marshal(map[string]any{"env": map[string]any{"_A1": "x", "a": "y", "SEAL_SECRET_ENV": "z"}})
+	body, _ := json.Marshal(map[string]any{"env": map[string]any{"SEAL_SECRET_ENV": "z", "SANDBOX_A": "dropped"}})
 	if _, err := InjectSeal(body, key, testSealImageHash, testSealIssuer()); err != nil {
 		t.Fatal(err)
 	}

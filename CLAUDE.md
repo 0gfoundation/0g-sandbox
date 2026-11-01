@@ -212,17 +212,18 @@ When a sandbox create request includes `"sealed": true`, the proxy:
    `containerPubkey` is the raw 33-byte compressed key; `appId` uses exact UTF-8 bytes.
    `ProviderKey()` signs `keccak256(0x1901 ‖ domainSeparator ‖ structHash)` raw (no
    EIP-191 prefix). Signature V is normalised to 27/28.
-4. Refuses (400) a caller env key that is not a variable name (`[A-Za-z_][A-Za-z0-9_]*`).
-   Removes every caller-supplied `SANDBOX_*` env key plus `ATTESTOR_TLS_DESCRIPTOR`,
-   `ATTESTOR_ALLOW_UNPINNED_DEV`, `TEE_SIGNER_ADDRESS`, `SSL_CERT_FILE` and `SSL_CERT_DIR`
-   (the container's trusted CAs come from its image only) and the shell startup keys
-   `BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS` and `PS4`, then injects:
+4. Accepts only the caller env keys in `sealedCreateEnv` (`seal.go`), the ones the sealed
+   runtime reads from its attestor: `ATTESTOR_URL`, `SEAL_BOOT_TICKET`, `SEAL_SECRET_ENV`,
+   `API_KEY`, `CHAIN_RPC_URL`, `AGENTIC_ID_ADDR`, `VERIFIED_FEEDBACK_ADDR`, `INDEXER_URL`,
+   `AGENT_FRAMEWORK`. Removes every caller-supplied `SANDBOX_*` key and refuses (400) any
+   other key (`ErrCallerEnvKey`): the env is in effect before the sealed runtime starts, so
+   it is an allowlist, not a list of keys to remove. Unsealed creates keep any env. Then injects:
    - `SANDBOX_SEAL_KEY` — hex private key; the container's signing identity.
      Never returned through the API; stripped from the create response.
    - `SANDBOX_SEAL_ATTESTATION` — compact JSON in this order: `{version, chain_id, registry_address, app_id, registered_at, seal_id, pubkey, image_hash, ts, signature}`
    - `SANDBOX_PROXY_DOMAIN` — only when `PROXY_DOMAIN` is set.
 
-   Other caller env (`ATTESTOR_URL`, `SEAL_BOOT_TICKET`, `SEAL_SECRET_ENV`, ...) passes through.
+   The accepted caller keys pass through unchanged.
    Responses drop `SANDBOX_SEAL_KEY` and `SEAL_BOOT_TICKET` from every returned sandbox's env
    (`responsescrub.go`, `stripSealKey`).
 5. Sets label `0g-sealed: "true"` → blocks SSH, toolbox, and the transparent `/api/sandbox/:id/<other>`
@@ -235,7 +236,7 @@ It also requires a runner that starts the image's entrypoint directly: the 0g-da
 runner with `USE_SNAPSHOT_ENTRYPOINT=true` (no Daytona daemon in the sandbox, so set
 `SEALED_ONLY=true` too). A runner that wraps the entrypoint in the daemon starts it from
 a shell that already holds `SANDBOX_SEAL_KEY`, `SANDBOX_SEAL_ATTESTATION` and
-`SEAL_BOOT_TICKET`, so caller env could act before the sealed runtime does. The provider
+`SEAL_BOOT_TICKET`, ahead of the sealed runtime; the env allowlist does not change that. The provider
 cannot see the runner's mode; it is a deployment requirement, readable in the attested
 compose. The reference `docker/sandbox/docker-compose.yml` leaves its runner in daemon
 mode (no `USE_SNAPSHOT_ENTRYPOINT`) and does not meet it.

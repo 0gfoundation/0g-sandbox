@@ -113,15 +113,17 @@ KMS provider 背书。
 `internal/proxy/testdata/image-attestation-v3.json` 是与 attestor、sealed runtime
 逐字节一致的共享 known-answer 向量。
 
-sealed 创建时，调用者 env 中有键不是合法变量名（`[A-Za-z_][A-Za-z0-9_]*`）时 provider
-拒绝创建，因为运行时按 `KEY=VALUE` 拼接条目。随后从调用者 env 中删除所有以 `SANDBOX_` 开头的键，以及
-`ATTESTOR_TLS_DESCRIPTOR`、`ATTESTOR_ALLOW_UNPINNED_DEV`、`TEE_SIGNER_ADDRESS`、`SSL_CERT_FILE`
-和 `SSL_CERT_DIR`。后两个会给容器的 TLS 客户端增加 CA 根证书，且可以指向内容由调用者 env
-决定的文件（如 `/proc/self/environ`），因此容器只信任其镜像中的 CA。还会删除 shell 启动相关的
-`BASH_ENV`、`ENV`、`SHELLOPTS`、`BASHOPTS` 和 `PS4`（见下文对 runner 的要求）。
-再写入 `SANDBOX_SEAL_KEY`、`SANDBOX_SEAL_ATTESTATION`，以及在其 `PROXY_DOMAIN` 已设置时
-写入 `SANDBOX_PROXY_DOMAIN`。其余调用者 env（如 `ATTESTOR_URL`、`SEAL_BOOT_TICKET`、
-`SEAL_SECRET_ENV`）原样透传：provider 无法区分 attestor 的 create 与其他调用者的 create。
+sealed 创建时，provider 只接受 sealed runtime 从创建它的 attestor 读取的调用者 env 键：
+`ATTESTOR_URL`、`SEAL_BOOT_TICKET`、`SEAL_SECRET_ENV`、`API_KEY`、`CHAIN_RPC_URL`、
+`AGENTIC_ID_ADDR`、`VERIFIED_FEEDBACK_ADDR`、`INDEXER_URL` 和 `AGENT_FRAMEWORK`。它删除调用者
+env 中所有以 `SANDBOX_` 开头的键；env 含其他任何键时以 **400** 拒绝创建。容器 env 在 sealed
+runtime 启动前就已生效，而 shell、动态加载器和 TLS 库会读取许多变量（`BASH_ENV`、
+`LD_PRELOAD`、`SSL_CERT_FILE` 等），因此 provider 维护的是允许接受的键，而不是要删除的键。
+sealed runtime 已不再读取的键（`ATTESTOR_TLS_DESCRIPTOR`、`TEE_SIGNER_ADDRESS`）和仅供开发
+使用的绕过开关（`ATTESTOR_ALLOW_UNPINNED_DEV`）同样会被拒绝。非 sealed 创建可携带任意 env。
+provider 随后写入 `SANDBOX_SEAL_KEY`、`SANDBOX_SEAL_ATTESTATION`，以及在其 `PROXY_DOMAIN`
+已设置时写入 `SANDBOX_PROXY_DOMAIN`。被接受的键原样透传：provider 无法区分 attestor 的
+create 与其他调用者的 create。
 所有返回 sandbox 的响应都会从其 env 中删除 `SANDBOX_SEAL_KEY` 和 `SEAL_BOOT_TICKET`，
 owner 与其他调用者都读不回私钥或 attestor 的启动票据；`SANDBOX_SEAL_ATTESTATION` 保留，
 attestor 把首次 provision 绑定到其中认证的公钥。
@@ -131,9 +133,9 @@ attestor 把首次 provision 绑定到其中认证的公钥。
 runner 不在沙箱中运行 Daytona daemon，因此其上的非 sealed 沙箱没有 exec、toolbox 和 SSH；
 应同时设置 `SEALED_ONLY=true`。未设置 `USE_SNAPSHOT_ENTRYPOINT=true` 时 Daytona daemon 是
 PID 1，并通过一个继承容器 env（包括 `SANDBOX_SEAL_KEY`、`SANDBOX_SEAL_ATTESTATION` 和
-`SEAL_BOOT_TICKET`）的 shell 启动镜像 entrypoint。改变该 shell 启动方式的调用者 env 就能在 sealed runtime 启动前以 root
-身份、带着容器私钥执行命令。删除上述 shell 启动相关的键封堵了已知路径，但不能替代 runner
-设置。provider 无法观察 runner 的模式，因此这是部署要求，由验证方在 attested compose 中
+`SEAL_BOOT_TICKET`）的 shell 启动镜像 entrypoint。上述 env 允许列表使调用者 env 无法改变该
+shell 的启动方式，但该 shell 和 daemon 仍先于 sealed runtime 运行，且其 env 中带有容器私钥，
+因此允许列表不能替代 runner 设置。provider 无法观察 runner 的模式，因此这是部署要求，由验证方在 attested compose 中
 核对。参考的 `docker/sandbox/docker-compose.yml` 中 runner 处于 daemon 模式，不适用于
 sealed 创建。attestor 也应只转发其 sealed runtime 从 owner 读取的 env 键。
 

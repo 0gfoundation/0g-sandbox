@@ -269,7 +269,7 @@ func TestSealedCreateRefreshesIssuerAndUsesProviderKey(t *testing.T) {
 		return issuer, nil
 	}
 	for i := uint64(1); i <= 2; i++ {
-		request := httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"sealed","sealed":true,"env":{"SANDBOX_SEAL_ATTESTATION":"caller","ATTESTOR_TLS_DESCRIPTOR":"caller","ATTESTOR_URL":"https://attestor.example"}}`))
+		request := httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"sealed","sealed":true,"env":{"SANDBOX_SEAL_ATTESTATION":"caller","SANDBOX_API_URL":"caller","ATTESTOR_URL":"https://attestor.example"}}`))
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, request)
 		if w.Code != http.StatusOK {
@@ -283,7 +283,7 @@ func TestSealedCreateRefreshesIssuerAndUsesProviderKey(t *testing.T) {
 		if recoverSealSigner(t, a).Hex() != h.providerAddress {
 			t.Fatal("attestation did not use provider app signer")
 		}
-		if _, ok := forwarded.Env["ATTESTOR_TLS_DESCRIPTOR"]; ok || forwarded.Env["ATTESTOR_URL"] != "https://attestor.example" {
+		if _, ok := forwarded.Env["SANDBOX_API_URL"]; ok || forwarded.Env["ATTESTOR_URL"] != "https://attestor.example" {
 			t.Fatalf("forwarded env %v", forwarded.Env)
 		}
 		if strings.Contains(w.Body.String(), sealKeyEnv) {
@@ -292,6 +292,52 @@ func TestSealedCreateRefreshesIssuerAndUsesProviderKey(t *testing.T) {
 	}
 	if lookups != 2 || created.Load() != 2 {
 		t.Fatalf("lookups %d, creates %d", lookups, created.Load())
+	}
+}
+
+// A sealed create whose env holds a key outside sealedCreateEnv is refused
+// with 400 before it reaches Daytona, and releases its reservation. An
+// unsealed create keeps any env.
+func TestSealedCreateRefusesOtherCallerEnv(t *testing.T) {
+	for _, name := range []string{"BASH_ENV", "LD_PRELOAD", "SSL_CERT_FILE", "ATTESTOR_TLS_DESCRIPTOR"} {
+		t.Run(name, func(t *testing.T) {
+			h, r, _, created := newSealedCreateFixture(t)
+			mr := miniredis.RunT(t)
+			rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+			t.Cleanup(func() { _ = rdb.Close() })
+			h.rdb = rdb
+			h.balCheck = &mockBalChecker{bal: big.NewInt(1000)}
+			h.createFee = big.NewInt(11)
+			h.computePricePerSec = new(big.Int)
+			h.SealIssuer = func(context.Context) (SealIssuer, error) { return testSealIssuer(), nil }
+			body := fmt.Sprintf(`{"snapshot":"sealed","sealed":true,"env":{"ATTESTOR_URL":"https://attestor.example","API_KEY":"k",%q:"v"}}`, name)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(body)))
+			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "sealed create's env may hold only") {
+				t.Fatalf("want 400, got %d %s", w.Code, w.Body.String())
+			}
+			if created.Load() != 0 {
+				t.Fatal("refused sealed create reached Daytona")
+			}
+			if got := billing.GetReserved(context.Background(), rdb, "0xOWNER", h.providerAddress); got.Sign() != 0 {
+				t.Fatalf("reservation after refusal %s", got)
+			}
+
+			// Unsealed creates keep any env.
+			h.sealKey = nil
+			w = httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(fmt.Sprintf(`{"snapshot":"sealed","env":{%q:"v"}}`, name))))
+			if w.Code != http.StatusOK || created.Load() != 1 {
+				t.Fatalf("unsealed create: %d %s", w.Code, w.Body.String())
+			}
+			var resp map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatal(err)
+			}
+			if env, _ := resp["env"].(map[string]any); env[name] != "v" {
+				t.Fatalf("unsealed create env %v", resp["env"])
+			}
+		})
 	}
 }
 

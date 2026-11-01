@@ -133,16 +133,18 @@ The signature is EIP-712:
 `internal/proxy/testdata/image-attestation-v3.json` is a known-answer vector shared
 byte-identical with the attestor and the sealed runtime.
 
-On a sealed create the provider refuses a caller env key that is not a variable name
-(`[A-Za-z_][A-Za-z0-9_]*`), since the runtime joins entries as `KEY=VALUE`. It then removes
-every caller env key that starts with `SANDBOX_`, plus `ATTESTOR_TLS_DESCRIPTOR`, `ATTESTOR_ALLOW_UNPINNED_DEV`,
-`TEE_SIGNER_ADDRESS`, `SSL_CERT_FILE` and `SSL_CERT_DIR`. The last two would add CA roots to the
-container's TLS clients, and could name a file whose contents the caller's env sets (such as
-`/proc/self/environ`), so the container trusts only the CAs in its image. It also removes
-the shell startup keys `BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS` and `PS4` (see the runner
-requirement below). It then writes `SANDBOX_SEAL_KEY`, `SANDBOX_SEAL_ATTESTATION` and,
-when its `PROXY_DOMAIN` is set, `SANDBOX_PROXY_DOMAIN`. Other caller env, such as
-`ATTESTOR_URL`, `SEAL_BOOT_TICKET` and `SEAL_SECRET_ENV`, passes through unchanged:
+On a sealed create the provider accepts only the caller env keys the sealed runtime reads
+from the attestor that creates it: `ATTESTOR_URL`, `SEAL_BOOT_TICKET`, `SEAL_SECRET_ENV`,
+`API_KEY`, `CHAIN_RPC_URL`, `AGENTIC_ID_ADDR`, `VERIFIED_FEEDBACK_ADDR`, `INDEXER_URL` and
+`AGENT_FRAMEWORK`. It removes every caller env key that starts with `SANDBOX_` and refuses
+the create with **400** if the env holds any other key. The container env is in effect
+before the sealed runtime starts, and shells, dynamic loaders and TLS libraries act on many
+variables (`BASH_ENV`, `LD_PRELOAD`, `SSL_CERT_FILE` and others), so the provider keeps a
+list of keys to accept rather than keys to remove. Keys the sealed runtime no longer reads
+(`ATTESTOR_TLS_DESCRIPTOR`, `TEE_SIGNER_ADDRESS`) or treats as a development-only bypass
+(`ATTESTOR_ALLOW_UNPINNED_DEV`) are refused as well. Unsealed creates keep any env. The
+provider then writes `SANDBOX_SEAL_KEY`, `SANDBOX_SEAL_ATTESTATION` and, when its
+`PROXY_DOMAIN` is set, `SANDBOX_PROXY_DOMAIN`. The accepted keys pass through unchanged:
 the provider cannot tell an attestor's create from any other. Every response that
 returns a sandbox drops `SANDBOX_SEAL_KEY` and `SEAL_BOOT_TICKET` from its env, so
 neither the owner nor any other caller reads the key or an attestor's boot ticket back;
@@ -155,9 +157,9 @@ starts the entrypoint. That runner puts no Daytona daemon in the sandbox, so uns
 sandboxes there have no exec, toolbox or SSH; set `SEALED_ONLY=true` as well. Without
 `USE_SNAPSHOT_ENTRYPOINT=true` the Daytona daemon is PID 1 and starts the image entrypoint from a shell that
 inherits the container env, `SANDBOX_SEAL_KEY`, `SANDBOX_SEAL_ATTESTATION` and
-`SEAL_BOOT_TICKET` included. Caller env that changes how that shell starts can then run
-commands as root with the container key before the sealed runtime starts. Removing the
-shell startup keys above closes the known paths but does not replace the runner setting.
+`SEAL_BOOT_TICKET` included. The env allowlist above keeps caller env from changing how
+that shell starts, but the shell and the daemon still run ahead of the sealed runtime with
+the container key in their env, so the allowlist does not replace the runner setting.
 The provider cannot observe the runner's mode, so this is a deployment requirement that
 a verifier reads in the attested compose. The reference `docker/sandbox/docker-compose.yml`
 leaves its runner in daemon mode and is not suitable for sealed creates. An attestor should
