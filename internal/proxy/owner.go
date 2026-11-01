@@ -34,7 +34,7 @@ func IsSealedSandbox(sb *daytona.Sandbox) bool {
 }
 
 // InjectOwner sets labels["daytona-owner"] = walletAddr in the request body,
-// forces autostop and autoarchive intervals to 0, and handles two additional
+// pins the autostop, autoarchive and autodelete intervals, and handles two additional
 // fields that are interpreted by the proxy but not forwarded to Daytona:
 //
 //   - "sealed": true  → injects label "0g-sealed"="true", blocking SSH and
@@ -144,8 +144,19 @@ func InjectOwner(body []byte, walletAddr string) ([]byte, error) {
 	// autoArchiveInterval=60: fallback safety net — if billing proxy crashes and
 	// fails to archive the sandbox, Daytona archives it after 60 minutes so it
 	// does not occupy runner resources indefinitely.
+	// autoDeleteInterval=-1: never auto-delete (Daytona's default). Daytona links
+	// a new sandbox to an existing one (linkedSandbox) only when the new one is
+	// ephemeral (autoDeleteInterval=0); requireSnapshotCreate already refuses
+	// linkedSandbox, and pinning this keeps that path closed as well.
+	// Every case variant goes first, so the caller's spelling never survives.
+	for k := range m {
+		if strings.EqualFold(k, "autoStopInterval") || strings.EqualFold(k, "autoArchiveInterval") || strings.EqualFold(k, "autoDeleteInterval") {
+			delete(m, k)
+		}
+	}
 	m["autoStopInterval"] = 0
 	m["autoArchiveInterval"] = 60
+	m["autoDeleteInterval"] = -1
 
 	return json.Marshal(m)
 }

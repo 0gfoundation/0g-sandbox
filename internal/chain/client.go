@@ -61,7 +61,7 @@ type Client struct {
 	tappAddr     common.Address
 	chainID      *big.Int
 	nodeKey      *ecdsa.PrivateKey // the node's TEE signer: registration and KMS provider endorsement
-	providerKey  *ecdsa.PrivateKey // signs vouchers, settlement txs and v2 sealed attestations
+	providerKey  *ecdsa.PrivateKey // signs vouchers, settlement txs, sealed certificates and attestor TLS statements
 	providerAddr common.Address    // = providerKey's address
 	kmsProvider  bool              // providerKey is the app's KMS key, not the node signer
 

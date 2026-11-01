@@ -7,6 +7,7 @@ PROVIDER_KEY_SOURCE=kms
 TLS_ENABLED=true
 BACKEND_TAPP_SOCKET=/run/tapp/tapp.sock
 ATTESTOR_APP_ID=your-attestor-app-id
+# ATTESTOR_INSTANCE=<registeredAt>:<0x owner>   # only to re-authorize; see below
 ```
 
 Claim tapp with the intended Scan URL and TLS SPKI pin. Scan must support typed
@@ -28,11 +29,15 @@ same attested app key, for callers to match the Scan-provided pin. Register the
 HTTPS business URL in SandboxServing; the node's registry `teeUrl` is the
 management endpoint and does not substitute for that URL.
 
-`ATTESTOR_APP_ID` adds the discovered stable app signer as an application admin.
-Human operators may still use `ADMIN_ADDRESSES`; the sandbox app owner retains
-its existing administration rights. An attestor's rotating node signer is not
-automatically an admin. Discovery errors, expired results, or a failed current
-registry-instance check do not grant application-admin permissions.
+`ATTESTOR_APP_ID` adds the discovered stable app signer as an application admin
+and, with `PROVIDER_KEY_SOURCE=kms`, publishes the attestor's TLS pins at
+`GET /api/attestor-tls` (see below). Without a KMS provider the server still
+starts and logs a warning, and the endpoint answers 503; without `TLS_ENABLED=true`
+it also only logs a warning. Human operators may still use `ADMIN_ADDRESSES`; the
+sandbox app owner retains its existing administration rights. An attestor's rotating
+node signer is not automatically an admin. Discovery errors, expired results, or a
+failed current registry-instance check do not grant application-admin permissions
+or produce pins.
 
 A verified current node with only its node identity, or TLS but no `app_signer`, may be a standby. Discovery
 validates its metadata but excludes its TLS pin and lease from service identity.
@@ -40,51 +45,201 @@ At least one current node must declare a valid stable app signer; all nonempty
 signer declarations must agree. Invalid, expired or non-production observations
 still fail discovery, including those from a standby.
 
-The first successful lookup stores the authorized attestor registration epoch
-and owner in Redis under `identity:attestor:<chain>:<registry-lowercase>:<appId>:instance`.
-Both are checked against one live registry read on every application-admin check.
-An app name removed and registered again needs deliberate operator
-re-authorization, even if its KMS key is unchanged. To authorize that new
-instance, verify the intended deployment, remove this one authorization record
-from the provider's Redis, and let a fresh verified lookup establish the new
-epoch. Keep Redis persistence enabled to preserve authorization across restarts.
+The first successful lookup stores the authorized attestor registration instance,
+`<registeredAt>:<owner>` (the app's `getAppInfo` epoch in decimal and its lowercase
+owner), in Redis under `identity:attestor:<chain>:<registry-lowercase>:<appId>:instance`.
+Both are checked against one live registry read on every application-admin check
+and every attestor TLS statement refresh. Keep Redis persistence enabled to preserve
+the authorization across restarts.
+
+Two registry changes need deliberate operator re-authorization, even if the KMS key
+is unchanged:
+
+- The app name is removed and registered again: `registeredAt` changes.
+- The app's ownership is transferred (`transferAppOwnership`, then
+  `acceptAppOwnership`): `registeredAt` stays and the owner changes.
+
+Until then the attestor's app signer has no admin rights and no statement is signed.
+`GET /api/attestor-tls` answers 503 once the cached statement lapses, within about
+300 seconds, so sealed containers can neither provision nor report status. Each
+refusal is logged with both instances and the source of the authorized one:
+`attestor instance requires explicit re-authorization: live <live>, authorized <authorized> (<source>)`.
+`<source>` is `stored; ATTESTOR_INSTANCE is not set in the provider's environment`, or
+`by ATTESTOR_INSTANCE` when the setting names another instance.
+To re-authorize:
+
+1. Verify the intended deployment and read its live instance from that log line or
+   from `getAppInfo(<appId>)` on the TappRegistry.
+2. Set `ATTESTOR_INSTANCE=<registeredAt>:<0x owner>` in the provider's process
+   environment and restart the provider. The provider reads it only from its process
+   environment and never parses a `.env` file. In a compose deployment `.env` only
+   fills the compose's `${...}` values, so the `sandbox` service's `environment:` must
+   forward it (`ATTESTOR_INSTANCE: ${ATTESTOR_INSTANCE:-}`, as
+   `docker/sandbox/docker-compose.yml` does). A compose without that entry ignores the
+   `.env` setting, and adding the entry is a compose change (in a tapp deployment, an
+   app update). Restarting the provider archives the sandboxes running on it; in a tapp
+   deployment, restarting after an `.env` change also rewrites the node's registry
+   record (`updateNode`), after which users acknowledge the app again.
+   At startup the setting replaces the stored instance, so the authorization still
+   holds once the setting is removed. A malformed value refuses startup. A value other
+   than the live instance authorizes nothing.
+3. Confirm the startup log line
+   `attestor registration instance authorized by ATTESTOR_INSTANCE`. Without it the
+   setting did not reach the provider, and refusals still end in
+   `ATTESTOR_INSTANCE is not set in the provider's environment`.
+
+An ownership transfer not yet re-authorized can also be undone by transferring the
+app back to the stored owner. Service resumes at the next statement refresh, with no
+provider restart.
 
 The registry's epoch is a timestamp. A remove/re-register by the same owner in
 the same block is indistinguishable until the registry supplies a unique
 registration counter. A different owner is rejected even with the same timestamp.
 
-The current sandbox does not initiate HTTP calls to attestor. Components that
+The sandbox provider does not initiate HTTP calls to the attestor. Components that
 do call it retain their configured business URL as a locator and authenticate
-TLS using the discovered app pin. No new business-URL registry is introduced.
+TLS using the discovered app pins; sealed containers obtain those pins from the
+signed statement below. No new business-URL registry is introduced.
 
-## Sealed workload attestations (v2)
+## Sealed container certificate (v3)
 
-Creating a sealed workload requires `PROVIDER_KEY_SOURCE=kms`. The stable app signer,
-not the rotating node signer, signs `SANDBOX_SEAL_ATTESTATION`. Each container still
-receives its own random secp256k1 key. Node keys remain node-registration and KMS
-provider-endorsement identities.
+Creating a sealed workload requires `PROVIDER_KEY_SOURCE=kms`. The stable app signer
+(`ProviderKey()`), not the rotating node signer, signs `SANDBOX_SEAL_ATTESTATION`. Each
+container still receives its own random secp256k1 key in `SANDBOX_SEAL_KEY`. Node keys
+remain node-registration and KMS provider-endorsement identities.
 
-The version-2 envelope signs `chain_id`, `registry_address`, exact UTF-8 `app_id`,
-`registered_at`, `seal_id`, compressed container public key, image hash and issue time.
 The provider obtains its registration instance from the chain when creating the
 container and rejects creation if that instance or KMS service binding is unavailable
 or invalid. Caller-supplied issuer fields cannot replace this scope.
 
-The raw signing digest is Keccak-256 of nine ABI-encoded 32-byte words:
-`domainHash, chainId, registry, appIdHash, registeredAt, sealId, containerPubkeyHash,
-imageHash, issuedAt`, where `domainHash = keccak256("0g.sandbox.ImageAttestation.v2")`.
-The two string hashes use exact UTF-8 bytes and the public-key hash uses the raw
-33-byte compressed key. Integers are unsigned big-endian ABI words; the registry
-address is left-padded to one word. No `personal_sign` wrapper is added.
+The certificate is compact JSON in this field order:
 
-The matching attestor and sealed runtime must support v2. The attestor authenticates
-the signer and issuer instance through Scan plus SandboxServing, preserving the
-framework-image allowlist. A normal reboot changes the node signer but retains the
-app signer and registration instance, so the stored v2 proof remains usable.
-Re-registering the same appId creates a different instance even if KMS returns the
-same key; its epoch must not inherit an earlier container proof.
+```json
+{"version":3,"chain_id":16602,"registry_address":"0x<TappRegistry>","app_id":"<provider app id>","registered_at":1792108800,"seal_id":"<64 lowercase hex, no 0x>","pubkey":"0x<33-byte compressed secp256k1>","image_hash":"sha256:<64 lowercase hex>","ts":1793318445,"signature":"0x<65-byte r||s||v>"}
+```
 
-There is no v1/node-signature fallback. Existing v1 containers require an explicit
-owner-authorized reset to receive a new proof. Save runtime state first; reset retains
-the agent identity and committed iData/settings, rather than retaining the original
-container filesystem. Deploy the updated sandbox, attestor and sealed image together.
+The signature is EIP-712:
+
+- Domain: `EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)`
+  with name `0G Sandbox ImageAttestation`, version `3`, `chainId = chain_id` and
+  `verifyingContract = registry_address`.
+- Type: `ImageAttestation(string appId,uint64 registeredAt,bytes32 sealId,bytes containerPubkey,bytes32 imageHash,uint64 issuedAt)`
+  with `appId = app_id` (exact UTF-8 bytes), `registeredAt = registered_at`, `sealId` = the
+  32 `seal_id` bytes, `containerPubkey` = the 33 raw `pubkey` bytes, `imageHash` = the 32
+  bytes after `sha256:` and `issuedAt = ts`.
+- `ProviderKey()` signs `keccak256(0x1901 ‖ domainSeparator ‖ structHash)` raw, with no
+  `personal_sign` prefix. V is 27/28; verifiers accept 27/28 and 0/1.
+
+`internal/proxy/testdata/image-attestation-v3.json` is a known-answer vector shared
+byte-identical with the attestor and the sealed runtime.
+
+On a sealed create the provider accepts only the caller env keys the sealed runtime reads
+from the attestor that creates it: `ATTESTOR_URL`, `SEAL_BOOT_TICKET`, `SEAL_SECRET_ENV`,
+`API_KEY`, `CHAIN_RPC_URL`, `AGENTIC_ID_ADDR`, `VERIFIED_FEEDBACK_ADDR`, `INDEXER_URL` and
+`AGENT_FRAMEWORK`. It removes every caller env key that starts with `SANDBOX_` and refuses
+the create with **400** if the env holds any other key. The container env is in effect
+before the sealed runtime starts, and shells, dynamic loaders and TLS libraries act on many
+variables (`BASH_ENV`, `LD_PRELOAD`, `SSL_CERT_FILE` and others), so the provider keeps a
+list of keys to accept rather than keys to remove. Keys the sealed runtime no longer reads
+(`ATTESTOR_TLS_DESCRIPTOR`, `TEE_SIGNER_ADDRESS`) or treats as a development-only bypass
+(`ATTESTOR_ALLOW_UNPINNED_DEV`) are refused as well. Unsealed creates keep any env. The
+provider then writes `SANDBOX_SEAL_KEY`, `SANDBOX_SEAL_ATTESTATION` and, when its
+`PROXY_DOMAIN` is set, `SANDBOX_PROXY_DOMAIN`. The accepted keys pass through unchanged:
+the provider cannot tell an attestor's create from any other. Every response that
+returns a sandbox drops `SANDBOX_SEAL_KEY` and `SEAL_BOOT_TICKET` from its env, so
+neither the owner nor any other caller reads the key or an attestor's boot ticket back;
+`SANDBOX_SEAL_ATTESTATION` stays, and an attestor binds the first provision to the key
+it certifies.
+
+A provider that serves sealed creates must have its runner start the image entrypoint
+directly: the 0g-daytona runner with `USE_SNAPSHOT_ENTRYPOINT=true`, where docker-init
+starts the entrypoint. That runner puts no Daytona daemon in the sandbox, so unsealed
+sandboxes there have no exec, toolbox or SSH; set `SEALED_ONLY=true` as well. Without
+`USE_SNAPSHOT_ENTRYPOINT=true` the Daytona daemon is PID 1 and starts the image entrypoint from a shell that
+inherits the container env, `SANDBOX_SEAL_KEY`, `SANDBOX_SEAL_ATTESTATION` and
+`SEAL_BOOT_TICKET` included. The env allowlist above keeps caller env from changing how
+that shell starts, but the shell and the daemon still run ahead of the sealed runtime with
+the container key in their env, so the allowlist does not replace the runner setting.
+The provider cannot observe the runner's mode, so this is a deployment requirement that
+a verifier reads in the attested compose. The reference `docker/sandbox/docker-compose.yml`
+leaves its runner in daemon mode and is not suitable for sealed creates. An attestor should
+also forward only the env keys its sealed runtime reads from the owner.
+
+The certificate attests only the image digest, so the container must run the image's
+own entrypoint. A sealed create reads the entrypoint from the image's own config and
+refuses a snapshot whose Daytona record names a different one, or that Daytona builds
+from a Dockerfile (`buildInfo`). Snapshots themselves are not restricted: a non-sealed
+sandbox may still use one that overrides its entrypoint.
+
+The certificate names the image Daytona actually starts. Daytona never runs a
+snapshot's `imageName`: when the snapshot is created it copies that image into its
+internal registry as the record's `ref` (`<registry>/daytona/daytona-<hash>:daytona`),
+and runners start `ref`. A sealed create therefore also reads `ref` and refuses the
+snapshot (**400**) unless `ref` and the certified manifest of `imageName` have the same
+image config digest (for an index, the `linux/amd64` image's). The config lists every
+layer by its uncompressed digest, which Docker checks on pull, so equal config digests
+mean the same filesystem and entrypoint; the manifest digest is not compared because a
+runner's pull and re-push can change it. A snapshot that has no `ref` yet, or whose
+images cannot be read, is refused as well.
+
+Images in the internal registry are immutable through the provider API.
+`POST /api/registry/pull` refuses (**409**) to re-point an existing tag to another
+manifest (importing the same manifest again is a no-op), and refuses (**400**) the
+references Daytona and snapshot registration write: repositories named `daytona-*` and
+tags starting with `d-`.
+
+A normal reboot changes the node signer but retains the app signer and registration
+instance, so a stored certificate remains usable. Re-registering the same appId creates
+a different instance even if KMS returns the same key; its epoch must not inherit an
+earlier certificate.
+
+No earlier certificate version is issued or accepted. Containers that hold one are
+recreated at rollout; deploy the updated sandbox, attestor and sealed image together.
+
+## Attestor TLS statement (`GET /api/attestor-tls`)
+
+Sealed containers authenticate the attestor's TLS endpoint with SPKI pins signed by
+this provider. The endpoint is public and needs no authentication:
+
+- It is served only when `ATTESTOR_APP_ID` is set and `PROVIDER_KEY_SOURCE=kms`.
+  Otherwise every request answers `503 {"error":"attestor tls unavailable"}`.
+- Every response carries `Cache-Control: no-store`.
+- Serving a cached statement takes no rate-limit token. Only requests that wait for a
+  running refresh share one token bucket: 20 requests/s, burst 50. A request beyond it
+  does not wait: it gets the cached statement while that is still servable, and
+  otherwise `429` with `Retry-After: 1`.
+
+The body is compact JSON in this field order, with no trailing newline:
+
+```json
+{"version":3,"chain_id":16602,"registry_address":"0x<TappRegistry>","tls_spki_sha256":["<64 lowercase hex, no 0x>"],"issued_at":1793318460,"expires_at":1793318748,"signature":"0x<65-byte r||s||v>"}
+```
+
+- `tls_spki_sha256` holds 1–16 entries, strictly ascending and unique: the discovered
+  attestor app's pins, after the registration-instance and Redis checks above. Standby
+  pins are excluded, as in discovery.
+- `issued_at < expires_at <= issued_at + 300`. `expires_at` is the discovered lease end,
+  capped at 300 seconds after `issued_at`.
+- EIP-712 domain: name `0G Sandbox AttestorTLS`, version `3`, `chainId = chain_id`,
+  `verifyingContract = registry_address`. Type:
+  `AttestorTLS(bytes32[] tlsSpkiSha256,uint64 issuedAt,uint64 expiresAt)`; the array is
+  encoded as keccak256 of its concatenated 32-byte elements. `ProviderKey()` signs the
+  digest raw, as for the certificate, so the signer recovered from a container's
+  certificate also verifies this statement.
+- `internal/proxy/testdata/attestor-tls-v3.json` is the shared known-answer vector.
+
+The provider signs one statement per identity resolution and serves the same bytes to
+every caller:
+
+- While `now < expires_at - 30` it serves the cached statement at once.
+- From `expires_at - 60` a background refresh signs the next statement. Refreshes run
+  one at a time, at most one attempt every 5 seconds, and re-resolve the attestor
+  identity when less than 60 seconds of its lease remain.
+- From `expires_at - 30`, or while no statement exists, a request waits for the running
+  refresh, within the limit above.
+- If refreshes fail it keeps serving the cached statement until `expires_at - 5`, then
+  answers `503` with `Retry-After: 5`.
+
+The statement carries no attestor app id, signer or URL. The attestor relays it
+unchanged at its own `GET /attestor-tls?provider=<provider address>`; which attestor the
+pins belong to remains this provider's `ATTESTOR_APP_ID` configuration.
