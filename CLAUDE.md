@@ -183,11 +183,19 @@ Signed by the TEE key. Nonce is per `(user, provider)` pair; must be strictly in
 
 When a sandbox create request includes `"sealed": true`, the proxy:
 
-1. Resolves the image/snapshot reference to its content digest via `registry.GetDigest`
-   (uses `crane.Digest`; insecure mode for `registry:` or `localhost:` hosts). The
-   certificate attests only the image digest, so a snapshot that does not run the image's
-   own entrypoint is refused: its record names another entrypoint than the image config
-   (`registry.GetEntrypoint`), or it is built from a Dockerfile (`buildInfo`).
+1. Resolves the image, or the snapshot record's `imageName`, to its content digest via
+   `registry.GetDigest` (uses `crane.Digest`; insecure mode for `registry:` or `localhost:`
+   hosts); an unreadable image is 422. The certificate attests only that digest, so a
+   snapshot create must start exactly that image (`checkSnapshotRunsImage`):
+   - a snapshot built from a Dockerfile (`buildInfo`) is refused (400);
+   - a snapshot without a `ref` (the runner's copy, pushed when the snapshot becomes
+     active) is refused (400, "has no runner image yet");
+   - `ref` and the digest-pinned `imageName` must have the same linux/amd64 image config
+     digest (`registry.GetConfig`), else 400 ("runner image differs from its image"); the
+     runner's pull and re-push can change the manifest digest, never the config;
+   - a recorded entrypoint must equal the certified image config's, else 400;
+   - an image that cannot be read here is 422.
+   The proxy then forwards the snapshot record's id, so Daytona starts the checked record.
 2. Generates an ephemeral secp256k1 keypair for the container's signing identity
 3. Authenticates its KMS provider and current registration instance with bounded,
    block-pinned chain reads. Builds the v3 container certificate, signed with EIP-712:
