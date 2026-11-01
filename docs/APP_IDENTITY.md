@@ -62,17 +62,31 @@ is unchanged:
 Until then the attestor's app signer has no admin rights and no statement is signed.
 `GET /api/attestor-tls` answers 503 once the cached statement lapses, within about
 300 seconds, so sealed containers can neither provision nor report status. Each
-refusal is logged with both instances:
-`attestor instance requires explicit re-authorization: live <live>, authorized <stored>`.
+refusal is logged with both instances and the source of the authorized one:
+`attestor instance requires explicit re-authorization: live <live>, authorized <authorized> (<source>)`.
+`<source>` is `stored; ATTESTOR_INSTANCE is not set in the provider's environment`, or
+`by ATTESTOR_INSTANCE` when the setting names another instance.
 To re-authorize:
 
 1. Verify the intended deployment and read its live instance from that log line or
    from `getAppInfo(<appId>)` on the TappRegistry.
-2. Set `ATTESTOR_INSTANCE=<registeredAt>:<0x owner>` in the provider's environment and
-   restart the provider (in a tapp deployment: the `.env` change and app restart).
-   At startup it replaces the stored instance, so the authorization still holds once
-   the setting is removed. A malformed value refuses startup. A value other than the
-   live instance authorizes nothing.
+2. Set `ATTESTOR_INSTANCE=<registeredAt>:<0x owner>` in the provider's process
+   environment and restart the provider. The provider reads it only from its process
+   environment and never parses a `.env` file. In a compose deployment `.env` only
+   fills the compose's `${...}` values, so the `sandbox` service's `environment:` must
+   forward it (`ATTESTOR_INSTANCE: ${ATTESTOR_INSTANCE:-}`, as
+   `docker/sandbox/docker-compose.yml` does). A compose without that entry ignores the
+   `.env` setting, and adding the entry is a compose change (in a tapp deployment, an
+   app update). Restarting the provider archives the sandboxes running on it; in a tapp
+   deployment, restarting after an `.env` change also rewrites the node's registry
+   record (`updateNode`), after which users acknowledge the app again.
+   At startup the setting replaces the stored instance, so the authorization still
+   holds once the setting is removed. A malformed value refuses startup. A value other
+   than the live instance authorizes nothing.
+3. Confirm the startup log line
+   `attestor registration instance authorized by ATTESTOR_INSTANCE`. Without it the
+   setting did not reach the provider, and refusals still end in
+   `ATTESTOR_INSTANCE is not set in the provider's environment`.
 
 An ownership transfer not yet re-authorized can also be undone by transferring the
 app back to the stored owner. Service resumes at the next statement refresh, with no

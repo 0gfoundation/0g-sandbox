@@ -106,14 +106,21 @@ func TestAttestorInstanceReauthorization(t *testing.T) {
 	if err == nil {
 		t.Fatal("ownership transfer inherited the stored authorization")
 	}
-	// Operators' runbooks search for the first phrase.
-	if !strings.Contains(err.Error(), "attestor instance requires explicit re-authorization") ||
-		!strings.Contains(err.Error(), newInstance) || !strings.Contains(err.Error(), "ATTESTOR_INSTANCE") {
+	// Operators' runbooks search for the first phrase. The refusal also says
+	// that no ATTESTOR_INSTANCE reached the process, so a setting the
+	// deployment did not forward is visible.
+	if !strings.Contains(err.Error(), "attestor instance requires explicit re-authorization: live "+newInstance) ||
+		!strings.Contains(err.Error(), "ATTESTOR_INSTANCE is not set in the provider's environment") {
 		t.Fatalf("refusal does not name the instance to authorize: %v", err)
 	}
-	// A setting naming another instance authorizes nothing.
-	if _, _, err := start("100:"+strings.ToLower(oldOwner.Hex())).TLSPins(ctx, 0); err == nil {
+	// A setting naming another instance authorizes nothing, and the refusal
+	// says the setting is what authorized the other instance.
+	_, _, err = start("100:"+strings.ToLower(oldOwner.Hex())).TLSPins(ctx, 0)
+	if err == nil {
 		t.Fatal("configured instance other than the live one accepted")
+	}
+	if !strings.Contains(err.Error(), "authorized 100:"+strings.ToLower(oldOwner.Hex())+" (by ATTESTOR_INSTANCE)") {
+		t.Fatalf("refusal does not name the configured instance: %v", err)
 	}
 	if _, _, err := start(newInstance).TLSPins(ctx, 0); err != nil {
 		t.Fatalf("configured instance refused: %v", err)

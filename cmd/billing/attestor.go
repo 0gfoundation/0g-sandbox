@@ -101,8 +101,14 @@ func (s *attestorIdentity) Current(ctx context.Context, minLease time.Duration) 
 		return nil, err
 	}
 	if pinned != instance {
-		// Both values are public registry data; the log names what to authorize.
-		return nil, fmt.Errorf("attestor instance requires explicit re-authorization: live %s, authorized %s; see ATTESTOR_INSTANCE", instance, pinned)
+		// Both values are public registry data; the log names what to authorize
+		// and whether ATTESTOR_INSTANCE reached this process, since a deployment
+		// whose compose does not forward it would otherwise fail silently.
+		source := "stored; ATTESTOR_INSTANCE is not set in the provider's environment"
+		if s.authorized != "" {
+			source = "by ATTESTOR_INSTANCE"
+		}
+		return nil, fmt.Errorf("attestor instance requires explicit re-authorization: live %s, authorized %s (%s)", instance, pinned, source)
 	}
 	if !time.Now().Before(identity.ExpiresAt) {
 		return nil, fmt.Errorf("attestor identity expired during authorization")

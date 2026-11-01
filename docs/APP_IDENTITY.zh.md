@@ -51,14 +51,26 @@ Redis 应启用持久化，以保留跨进程重启的授权状态。
 
 重新授权之前，attestor 的 app signer 没有管理权限，也不会签发声明。缓存的声明失效后
 （约 300 秒内），`GET /api/attestor-tls` 返回 503，sealed 容器既无法 provision，也无法
-上报状态。每次拒绝都会记录日志，并写明两个实例：
-`attestor instance requires explicit re-authorization: live <live>, authorized <stored>`。
+上报状态。每次拒绝都会记录日志，写明两个实例以及已授权实例的来源：
+`attestor instance requires explicit re-authorization: live <live>, authorized <authorized> (<source>)`。
+`<source>` 为 `stored; ATTESTOR_INSTANCE is not set in the provider's environment`；
+若该设置指定了另一实例，则为 `by ATTESTOR_INSTANCE`。
 重新授权步骤：
 
 1. 核实目标部署，从上述日志或 TappRegistry 的 `getAppInfo(<appId>)` 读取当前实例。
-2. 在 provider 的环境变量中设置 `ATTESTOR_INSTANCE=<registeredAt>:<0x owner>`，然后重启
-   provider（tapp 部署中即修改 `.env` 并重启 app）。启动时它会替换已保存的实例，因此之后
-   移除该设置，授权依然有效。格式错误时拒绝启动；与当前实例不一致的值不授权任何实例。
+2. 在 provider 的进程环境变量中设置 `ATTESTOR_INSTANCE=<registeredAt>:<0x owner>`，然后
+   重启 provider。provider 只从进程环境变量读取该值，从不解析 `.env` 文件。compose 部署中
+   `.env` 只用于填充 compose 里的 `${...}`，因此 `sandbox` 服务的 `environment:` 必须转发它
+   （`ATTESTOR_INSTANCE: ${ATTESTOR_INSTANCE:-}`，与 `docker/sandbox/docker-compose.yml`
+   一致）。缺少该条目的 compose 会忽略 `.env` 中的设置，而补上该条目属于 compose 变更
+   （tapp 部署中即一次 app 更新）。重启 provider 会归档其上正在运行的 sandbox；tapp 部署中，
+   修改 `.env` 后重启还会改写节点的 Registry 记录（`updateNode`），之后用户需要重新确认该
+   app。启动时该设置会替换已保存的实例，因此之后移除该设置，授权依然有效。格式错误时拒绝
+   启动；与当前实例不一致的值不授权任何实例。
+3. 确认启动日志中出现
+   `attestor registration instance authorized by ATTESTOR_INSTANCE`。没有这一行说明该设置
+   未到达 provider，此时拒绝日志仍以 `ATTESTOR_INSTANCE is not set in the provider's environment`
+   结尾。
 
 尚未重新授权的所有权转移，也可以通过把 app 转回已保存的 owner 来撤销。下一次刷新声明时
 即恢复服务，无需重启 provider。

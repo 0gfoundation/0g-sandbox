@@ -132,6 +132,8 @@ contracts/
   The attestor app's registration instance (`registeredAt:owner`) is pinned in Redis on
   first use; a re-registration or ownership transfer stops admin rights and the
   statement until the operator sets `ATTESTOR_INSTANCE` (or transfers the app back).
+  It is read only from the process environment, so a compose must forward it; the
+  refusal log says whether it reached the process.
 - **Prerequisites:** the KMS must run attested admission. Without it, the
   owner could register a plain key as a node and take the provider key
   outside any TEE.
