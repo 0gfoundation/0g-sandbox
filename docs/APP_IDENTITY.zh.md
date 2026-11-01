@@ -52,7 +52,7 @@ Redis 应启用持久化，以保留跨进程重启的授权状态。
 重新授权之前，attestor 的 app signer 没有管理权限，也不会签发声明。缓存的声明失效后
 （约 300 秒内），`GET /api/attestor-tls` 返回 503，sealed 容器既无法 provision，也无法
 上报状态。每次拒绝都会记录日志，并写明两个实例：
-`attestor instance <live> requires explicit re-authorization (authorized: <stored>)`。
+`attestor instance requires explicit re-authorization: live <live>, authorized <stored>`。
 重新授权步骤：
 
 1. 核实目标部署，从上述日志或 TappRegistry 的 `getAppInfo(<appId>)` 读取当前实例。

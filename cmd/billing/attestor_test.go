@@ -106,7 +106,9 @@ func TestAttestorInstanceReauthorization(t *testing.T) {
 	if err == nil {
 		t.Fatal("ownership transfer inherited the stored authorization")
 	}
-	if !strings.Contains(err.Error(), newInstance) || !strings.Contains(err.Error(), "ATTESTOR_INSTANCE") {
+	// Operators' runbooks search for the first phrase.
+	if !strings.Contains(err.Error(), "attestor instance requires explicit re-authorization") ||
+		!strings.Contains(err.Error(), newInstance) || !strings.Contains(err.Error(), "ATTESTOR_INSTANCE") {
 		t.Fatalf("refusal does not name the instance to authorize: %v", err)
 	}
 	// A setting naming another instance authorizes nothing.

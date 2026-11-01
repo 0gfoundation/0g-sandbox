@@ -63,7 +63,7 @@ Until then the attestor's app signer has no admin rights and no statement is sig
 `GET /api/attestor-tls` answers 503 once the cached statement lapses, within about
 300 seconds, so sealed containers can neither provision nor report status. Each
 refusal is logged with both instances:
-`attestor instance <live> requires explicit re-authorization (authorized: <stored>)`.
+`attestor instance requires explicit re-authorization: live <live>, authorized <stored>`.
 To re-authorize:
 
 1. Verify the intended deployment and read its live instance from that log line or

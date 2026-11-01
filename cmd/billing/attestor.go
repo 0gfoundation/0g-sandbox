@@ -102,7 +102,7 @@ func (s *attestorIdentity) Current(ctx context.Context, minLease time.Duration) 
 	}
 	if pinned != instance {
 		// Both values are public registry data; the log names what to authorize.
-		return nil, fmt.Errorf("attestor instance %s requires explicit re-authorization (authorized: %s); see ATTESTOR_INSTANCE", instance, pinned)
+		return nil, fmt.Errorf("attestor instance requires explicit re-authorization: live %s, authorized %s; see ATTESTOR_INSTANCE", instance, pinned)
 	}
 	if !time.Now().Before(identity.ExpiresAt) {
 		return nil, fmt.Errorf("attestor identity expired during authorization")
