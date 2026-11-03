@@ -1,7 +1,7 @@
 # 0G Sandbox — 合约注册表
 
 网络:**0G 主网**(chain ID 16661)· **0G Galileo 测试网**(chain ID 16602,dev + testnet 用)。各段自述网络/浏览器/RPC。
-所有者(合约 + beacon,2026-10-28 链上读取):主网 = `0xc0603224dE8c3B910a4487368E476e19dC6127cF`(Fordefi MPC vault,2026-10-16 起;部署者为 `0x73443d…`);testnet = `0x9C58F839451EBf3e7f82442bC48E4088746380Bb`(2026-10-14 起);dev = `0x2AB7F05bA6560ef2B21Aa1b52FCc96DB51Cfa0B3`(2026-10-19 起)。
+所有者(合约 + beacon,2026-10-28 链上读取;主网 2026-11-03 再次读取):主网 = `0xc0603224dE8c3B910a4487368E476e19dC6127cF`(Fordefi MPC vault,2026-10-16 起;部署者为 `0x73443d…`);testnet = `0x9C58F839451EBf3e7f82442bC48E4088746380Bb`(2026-10-14 起);dev = `0x2AB7F05bA6560ef2B21Aa1b52FCc96DB51Cfa0B3`(2026-10-19 起)。
 
 
 > English version: [CONTRACTS.md](README.md)
@@ -26,8 +26,7 @@
 | 2026-09-09 | `0x90a0f1BcaCE1A516CF4D1918178EB99E08c16f24` | 主网首次部署(v2):provider 即 TEE signer;注册/注销/提现归 owner;结算要求收款人本人签名。绑定 TappRegistry `0x5487…e612`。Owner = 部署者 `0x7344…431b`。 |
 | 2026-10-04 | (实现未变) | **所有权转移** —— 合约 `owner` 与 beacon owner 设为 `0x87605Ec8E10Eb373C1d070e15E5d78FAC4D7621d`(原 `0x7344…431b`)。实现未变。 |
 | 2026-10-16 | (实现未变) | **所有权转移** —— 合约 `owner` 与 beacon owner 设为 Fordefi MPC vault `0xc0603224dE8c3B910a4487368E476e19dC6127cF`(原 `0x8760…621d`):合约 tx `0xcf7fce1484530133dacc873d6e75b728de9c049b8005d737cb6c06ca333e243c`,beacon tx `0xa903456f00729094ba82f11823a1c1c741d50c3828b83f2e71d00d5538dca2da`。实现未变。 |
-
-KMS provider 实现(dev 2026-10-26、testnet 2026-10-27)尚未上主网;主网的 beacon 升级由 vault 发起。
+| 2026-11-02 | `0x0261f07b9223c70ee03e9577e1ca2590fe579cee` | KMS provider 实现(与 dev 2026-10-26 那行同一份源码,单独部署;runtime 与 testnet 的 `0x950A…180c` 相同):**KMS provider 密钥**(#144,内容见 dev 那行)。部署 tx `0x5b30ef2c5f00d7ad9236b49805be487bf34bdfaefcbcb29b39215f793a48d230`(部署者 `0x9C58…80Bb` 在本合约上没有任何角色),beacon `upgradeTo` tx `0xd04a4d124e980b776f24bbbeba2b1c4a5a4dad6c2a506cd6667958b81f9f2a4d`(vault,13:22 UTC)。尚未在 chainscan verify。同日主网沙盒注册了 KMS provider `0x1b03…c334`(tx `0x8012aa2ccb5a1b03b749b6d41f3da802eb3e71e434afdf90796acb961d8b9e59`);旧的节点 signer 型服务 `0x9814…9617` 于 2026-11-03 移除(tx `0x83e4e954901f0347ef86b247b9a3fb9b2eb5f5c0aff953c019ff3892f7b1f710`)。 |
 
 ```env
 SETTLEMENT_CONTRACT=0x650C16a491ad52dB6b7f3053bCaD650cb43d2206

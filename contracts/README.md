@@ -2,7 +2,7 @@
 
 Networks: **0G Mainnet** (chain ID 16661) · **0G Galileo Testnet** (chain ID 16602, used by dev + testnet). Each section below states its network, explorer, and RPC.
 
-Owner (contract + beacon, read on chain 2026-10-28): mainnet = `0xc0603224dE8c3B910a4487368E476e19dC6127cF` (Fordefi MPC vault, since 2026-10-16; deployed by `0x73443d…`); testnet = `0x9C58F839451EBf3e7f82442bC48E4088746380Bb` (since 2026-10-14); dev = `0x2AB7F05bA6560ef2B21Aa1b52FCc96DB51Cfa0B3` (since 2026-10-19).
+Owner (contract + beacon, read on chain 2026-10-28; mainnet re-read 2026-11-03): mainnet = `0xc0603224dE8c3B910a4487368E476e19dC6127cF` (Fordefi MPC vault, since 2026-10-16; deployed by `0x73443d…`); testnet = `0x9C58F839451EBf3e7f82442bC48E4088746380Bb` (since 2026-10-14); dev = `0x2AB7F05bA6560ef2B21Aa1b52FCc96DB51Cfa0B3` (since 2026-10-19).
 
 
 > Chinese version: [CONTRACTS.zh.md](README.zh.md)
@@ -27,8 +27,7 @@ Owner (contract + beacon, read on chain 2026-10-28): mainnet = `0xc0603224dE8c3B
 | 2026-09-09 | `0x90a0f1BcaCE1A516CF4D1918178EB99E08c16f24` | Initial mainnet deploy (v2): provider IS the TEE signer; owner-managed register/remove/withdraw; payee-must-sign settlement. Bound to TappRegistry `0x5487…e612`. Owner = deployer `0x7344…431b`. |
 | 2026-10-04 | (no impl change) | **Ownership transferred** — contract `owner` + beacon owner set to `0x87605Ec8E10Eb373C1d070e15E5d78FAC4D7621d` (previously `0x7344…431b`). No implementation change. |
 | 2026-10-16 | (no impl change) | **Ownership transferred** — contract `owner` + beacon owner set to the Fordefi MPC vault `0xc0603224dE8c3B910a4487368E476e19dC6127cF` (previously `0x8760…621d`): contract tx `0xcf7fce1484530133dacc873d6e75b728de9c049b8005d737cb6c06ca333e243c`, beacon tx `0xa903456f00729094ba82f11823a1c1c741d50c3828b83f2e71d00d5538dca2da`. No implementation change. |
-
-The KMS-provider implementation (dev 2026-10-26, testnet 2026-10-27) is not on mainnet yet; its beacon upgrade is a vault transaction.
+| 2026-11-02 | `0x0261f07b9223c70ee03e9577e1ca2590fe579cee` | The KMS-provider implementation (same source as dev's 2026-10-26 row, deployed separately; runtime equal to testnet's `0x950A…180c`): **KMS provider key** (#144; what it adds: the dev row). Deploy tx `0x5b30ef2c5f00d7ad9236b49805be487bf34bdfaefcbcb29b39215f793a48d230` (by `0x9C58…80Bb`, which holds no role on this contract), beacon `upgradeTo` tx `0xd04a4d124e980b776f24bbbeba2b1c4a5a4dad6c2a506cd6667958b81f9f2a4d` (the vault, 13:22 UTC). Not yet verified on chainscan. The same day the mainnet sandbox's KMS provider `0x1b03…c334` was registered (tx `0x8012aa2ccb5a1b03b749b6d41f3da802eb3e71e434afdf90796acb961d8b9e59`); its old node-signer service `0x9814…9617` was removed on 2026-11-03 (tx `0x83e4e954901f0347ef86b247b9a3fb9b2eb5f5c0aff953c019ff3892f7b1f710`). |
 
 ```env
 SETTLEMENT_CONTRACT=0x650C16a491ad52dB6b7f3053bCaD650cb43d2206
