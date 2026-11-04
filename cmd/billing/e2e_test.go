@@ -209,7 +209,7 @@ func setupE2E(teeKeyHex string) (*e2eEnv, error) {
 	r := gin.New()
 	dtona := daytona.NewClient(daytonaURL, daytonaKey)
 	minBalance := new(big.Int).Add(createFee, new(big.Int).Mul(computePrice, big.NewInt(cfg.Billing.VoucherIntervalSec)))
-	proxy.NewHandler(dtona, bh, onchain, onchain, onchain, minBalance, computePrice, providerAddr.Hex(), "", rdb, zap.NewNop(), "", nil, 0).Register(r.Group("/api", auth.Middleware(rdb)))
+	proxy.NewHandler(dtona, bh, onchain, onchain, onchain, minBalance, computePrice, providerAddr.Hex(), "", rdb, zap.NewNop(), "", nil, nil, 0).Register(r.Group("/api", auth.Middleware(rdb)))
 	srv := httptest.NewServer(r)
 
 	// Settler + generator (run for the lifetime of the test suite)

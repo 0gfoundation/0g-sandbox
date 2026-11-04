@@ -45,6 +45,12 @@ export type Amount = bigint | { og: number | string };
 
 export interface ProviderReview {
   provider: Address;
+  /**
+   * The provider is the app's KMS key (bound to this instance of the app),
+   * not a node's TEE signer. Verify it in a node's attestation evidence:
+   * runtime_data.kms_keys, material 70726f7669646572 ("provider").
+   */
+  kmsProvider: boolean;
   url: string;
   appId: string;
   createFee: bigint;
@@ -127,8 +133,10 @@ export class ChainApi {
   /**
    * Read-only review of a provider before acknowledging: commercial terms
    * (SandboxServing.services) + trust root (TappRegistry). Throws
-   * TRUST_MISMATCH when the provider is not an active node of its appId —
-   * an ack against it would be meaningless (same guard as cmd/user).
+   * TRUST_MISMATCH when the provider's own key cannot settle — a node-signer
+   * provider that is not an active node of its appId, or a KMS provider bound
+   * to an earlier instance of the app — since an ack against it would be
+   * meaningless (same guard as cmd/user).
    */
   async reviewProvider(provider?: Address): Promise<ProviderReview> {
     const prov = provider ?? (await this.providerAddress());
@@ -151,16 +159,32 @@ export class ChainApi {
     if (appInfo.owner === '0x0000000000000000000000000000000000000000') {
       throw new SandboxSDKError('TRUST_MISMATCH', `app ${appId} is not registered in TappRegistry`);
     }
-    const provNode = await this.publicClient.readContract({
-      address: registry,
-      abi: tappRegistryAbi,
-      functionName: 'getNode',
-      args: [appId, prov],
-    });
-    if (provNode.addedAt === 0n) {
+    const settlement = await this.settlementAddress();
+    const [kmsEpoch] = await this.publicClient
+      .readContract({ address: settlement, abi: sandboxServingAbi, functionName: 'kmsBindings', args: [prov] })
+      .catch(() => [0n] as const);
+    let active: boolean;
+    try {
+      active = await this.publicClient.readContract({
+        address: settlement,
+        abi: sandboxServingAbi,
+        functionName: 'isActiveProvider',
+        args: [prov],
+      });
+    } catch {
+      // A SandboxServing that predates isActiveProvider has only node-signer providers.
+      const provNode = await this.publicClient.readContract({
+        address: registry,
+        abi: tappRegistryAbi,
+        functionName: 'getNode',
+        args: [appId, prov],
+      });
+      active = provNode.addedAt !== 0n;
+    }
+    if (!active) {
       throw new SandboxSDKError(
         'TRUST_MISMATCH',
-        `provider ${prov} is not an active TappRegistry node of app ${appId} — refusing to acknowledge`,
+        `provider ${prov} cannot settle for app ${appId} (not an active TappRegistry node, or a KMS provider bound to an earlier instance of the app) — refusing to acknowledge`,
       );
     }
     const [nodeAddrs, ackVersion] = await Promise.all([
@@ -180,6 +204,7 @@ export class ChainApi {
     );
     return {
       provider: prov,
+      kmsProvider: kmsEpoch !== 0n,
       url,
       appId,
       createFee,

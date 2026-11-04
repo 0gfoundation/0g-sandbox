@@ -48,7 +48,7 @@ type mockSessionChain struct {
 	balanceAfterDeposit *big.Int // if set, returned on 2nd+ GetProviderBalance calls
 	balCallCount        int
 	balErr              error
-	expectedTEEAddr     common.Address // signer must match for IsActiveNode → true
+	expectedTEEAddr     common.Address // signer must match for IsActiveProvider → true
 	nodeErr             error
 }
 
@@ -69,7 +69,7 @@ func (m *mockSessionChain) GetProviderBalance(_ context.Context, _, _ common.Add
 	return bal, big.NewInt(0), big.NewInt(0), m.balErr
 }
 
-func (m *mockSessionChain) IsActiveNode(_ context.Context, _ string, signer common.Address) (bool, error) {
+func (m *mockSessionChain) IsActiveProvider(_ context.Context, signer common.Address) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.nodeErr != nil {
@@ -131,7 +131,7 @@ func newSessionRouter(h *SessionHandler) *gin.Engine {
 }
 
 // defaultChain returns a mock chain with cpu=10/sec, mem=5/sec, given balance.
-// expectedTEEAddr left zero so IsActiveNode accepts any signer (the
+// expectedTEEAddr left zero so IsActiveProvider accepts any signer (the
 // signature-validity tests configure it explicitly when needed).
 func defaultChain(balance int64) *mockSessionChain {
 	return &mockSessionChain{
@@ -484,13 +484,13 @@ func TestHandleDelete_success(t *testing.T) {
 	}
 }
 
-// Finding #16: a SIBLING node of the same app passes IsActiveNode but must not
+// Finding #16: a SIBLING node of the same app passes IsActiveProvider but must not
 // act on another provider's (user, provider) bucket — deposits or session
 // deletes for a provider you are not are refused.
 func TestHandlePost_SiblingNodeCannotActForOtherProvider(t *testing.T) {
 	providerKey, _ := crypto.GenerateKey()
 	siblingKey, _ := crypto.GenerateKey()
-	chain := defaultChain(0) // expectedTEEAddr zero → IsActiveNode accepts ANY signer
+	chain := defaultChain(0) // expectedTEEAddr zero → IsActiveProvider accepts ANY signer
 	h, _ := newSessionSetup(t, providerKey, chain, &mockPaymentLayer{})
 	router := newSessionRouter(h)
 

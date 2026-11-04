@@ -33,6 +33,7 @@ export function validateCreateOptions(opts: CreateOptions): void {
 }
 
 export interface CreateOptions {
+  /** Display name. Must not contain "." (the server refuses it). */
   name?: string;
   /**
    * Snapshot name — REQUIRED. cpu/memory/disk come from the snapshot's spec;

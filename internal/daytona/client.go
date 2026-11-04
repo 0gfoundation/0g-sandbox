@@ -27,10 +27,25 @@ type Snapshot struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	ImageName string `json:"imageName"`
-	State     string `json:"state"`
-	CPU       int    `json:"cpu"`
-	Mem       int    `json:"mem"`
-	Disk      int    `json:"disk"`
+	// Ref is the copy of ImageName that Daytona pushed to its internal
+	// registry when the snapshot was created; runners start this, not
+	// ImageName. Empty until the snapshot has been pulled.
+	Ref   string `json:"ref,omitempty"`
+	State string `json:"state"`
+	CPU   int    `json:"cpu"`
+	Mem   int    `json:"mem"`
+	Disk  int    `json:"disk"`
+	// Entrypoint is what Daytona starts; it copies the image's own when the
+	// snapshot was created without one. BuildInfo marks a snapshot Daytona
+	// builds from a Dockerfile, so it runs something other than ImageName.
+	Entrypoint []string           `json:"entrypoint,omitempty"`
+	BuildInfo  *SnapshotBuildInfo `json:"buildInfo,omitempty"`
+}
+
+// SnapshotBuildInfo marks a snapshot built from a Dockerfile. Only the build
+// reference is kept.
+type SnapshotBuildInfo struct {
+	SnapshotRef string `json:"snapshotRef,omitempty"`
 }
 
 // Client is an authenticated Daytona REST client.

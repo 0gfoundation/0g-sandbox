@@ -115,23 +115,23 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 			lastSweep = time.Now()
 		}
 
-		// Rotation gate: while our signer is not a registered TappRegistry
-		// node (fresh machine, add-node-onchain not run yet), hold the queue
-		// instead of submitting — every voucher would settle
-		// INVALID_SIGNATURE and dead-letter real revenue. Fail open on RPC
-		// errors: a flaky RPC must not stall settlement.
+		// Rotation gate: while our provider key cannot settle (a node signer
+		// on a fresh machine before add-node-onchain; a KMS provider not yet
+		// registered), hold the queue instead of submitting — every voucher
+		// would settle INVALID_SIGNATURE and dead-letter real revenue. Fail
+		// open on RPC errors: a flaky RPC must not stall settlement.
 		if time.Since(lastNodeCheck) > 30*time.Second {
 			firstCheck := lastNodeCheck.IsZero()
-			active, err := onchain.IsLocalTEEActiveNode(ctx)
+			active, err := onchain.IsProviderActive(ctx)
 			if err != nil {
-				log.Warn("settler: node-membership check failed; assuming active", zap.Error(err))
+				log.Warn("settler: provider readiness check failed; assuming active", zap.Error(err))
 				active = true
 			}
 			if !active && (firstCheck || nodeActive) {
-				log.Warn("settler: local TEE signer is not an active TappRegistry node — holding voucher queue until add-node-onchain lands")
+				log.Warn("settler: provider key cannot settle yet (node signer not an active TappRegistry node, or KMS provider not registered) — holding voucher queue")
 			}
 			if active && !nodeActive && !firstCheck {
-				log.Info("settler: local TEE signer registered on-chain — resuming settlement")
+				log.Info("settler: provider key can settle — resuming settlement")
 			}
 			nodeActive = active
 			lastNodeCheck = time.Now()

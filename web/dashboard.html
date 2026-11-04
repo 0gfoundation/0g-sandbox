@@ -445,6 +445,7 @@ const ABI = [
   "function serviceExists(address) view returns (bool)",
   "function providerEarnings(address) view returns (uint256)",
   "function addOrUpdateService(address signer, string url, string appId, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin)",
+  "function addOrUpdateKmsService(address provider, string url, string appId, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin, bytes endorsement)",
   "function withdrawEarnings(address signer)",
   "function removeService(address signer)",
   "function owner() view returns (address)",
@@ -585,8 +586,9 @@ async function logout() {
 }
 
 // ── Provider Data ─────────────────────────────────────────────────────────────
-// v2 identity model: the provider address is this node's TEE signer, taken
-// from /api/info — NEVER the connected wallet. The wallet is the appId owner
+// The provider address is this node's TEE signer, or with
+// PROVIDER_KEY_SOURCE=kms the app's KMS key, taken from /api/info — NEVER the
+// connected wallet. The wallet is the appId owner
 // (or an extra admin): it signs admin API requests and owner-only txs
 // (register / withdraw), but is not a ledger identity.
 function nodeProviderAddr() {
@@ -620,7 +622,7 @@ async function loadProviderData() {
     // endpoint (no signing required — all data is derivable from on-chain).
     try {
       const infoFresh = await fetch('/api/info').then(r => r.json());
-      renderSignerHealth(infoFresh.signer || {});
+      renderSignerHealth(infoFresh.signer || {}, infoFresh.provider_key_source);
       renderBalanceHealth(infoFresh.settler || {}, (infoFresh.signer || {}).status);
     } catch (_) {}
   } catch (e) { console.error(e); }
@@ -633,8 +635,14 @@ async function doRegisterService() {
   const memPrice = document.getElementById('svcMemPriceInput').value;
   const fee      = document.getElementById('svcFeeInput').value;
   if (!url || !appId) { setErr('serviceErr', 'URL and AppId are required'); return; }
+  // A KMS provider registers with this node's endorsement, which is for the
+  // node's own appId only.
+  const kms = info && info.provider_key_source === 'kms';
+  if (kms && appId !== info.app_id) { setErr('serviceErr', 'This node endorses its KMS provider for AppId ' + info.app_id + ' only'); return; }
   setErr('serviceErr', '');
-  await sendTx('Service update', () => contract.addOrUpdateService(nodeProviderAddr(), url, appId, BigInt(cpuPrice), BigInt(fee), BigInt(memPrice)), {
+  await sendTx('Service update', () => kms
+    ? contract.addOrUpdateKmsService(nodeProviderAddr(), url, appId, BigInt(cpuPrice), BigInt(fee), BigInt(memPrice), info.provider_endorsement)
+    : contract.addOrUpdateService(nodeProviderAddr(), url, appId, BigInt(cpuPrice), BigInt(fee), BigInt(memPrice)), {
     onSuccess: async () => { closeModal('serviceModal'); await loadProviderData(); },
     errEl: 'serviceErr',
   });
@@ -948,7 +956,7 @@ function statusPill(status) {
   const c = colors[status] || '#888';
   return '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:' + c + ';color:#fff">' + esc(status) + '</span>';
 }
-function renderSignerHealth(s) {
+function renderSignerHealth(s, keySource) {
   const box = document.getElementById('signerHealth');
   const badge = document.getElementById('signerHealthBadge');
   const detail = document.getElementById('signerHealthDetail');
@@ -956,8 +964,11 @@ function renderSignerHealth(s) {
   box.style.display = '';
   badge.innerHTML = statusPill(s.status || 'unknown');
   let html = 'Local TEE: <span class="mono">' + esc(s.local) + '</span>';
+  if (s.node_active === false) html += '<br><strong style="color:#c33">This node is not an active TappRegistry node:</strong> the KMS will not serve the provider key after a restart, and sealed sandboxes\' attestations are rejected. Run tapp-cli add-node-onchain / update-node-onchain.';
   if (s.onchain) html += '<br>On-chain: <span class="mono">' + esc(s.onchain) + '</span>';
-  if (s.status === 'mismatch') {
+  if (s.status === 'mismatch' && keySource === 'kms') {
+    html += '<br><strong style="color:#c33">Every voucher fails INVALID_SIGNATURE.</strong> The KMS provider is not bound to the app\'s current TappRegistry instance (the AppId was re-registered, or TappRegistry redeployed: the contract owner runs repinKmsProvider).';
+  } else if (s.status === 'mismatch') {
     html += '<br><strong style="color:#c33">Every voucher fails INVALID_SIGNATURE.</strong> Fix: click Register/Update and set TEE Signer to <span class="mono">' + esc(s.local) + '</span>.';
   } else if (s.status === 'unregistered') {
     html += '<br>Service not registered yet. Click Register/Update.';

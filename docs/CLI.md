@@ -51,7 +51,9 @@ OWNER_KEY=0x<hex> go run ./cmd/provider/ register \
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--key` | `OWNER_KEY` env | App owner private key (hex). Must be the appId's TappRegistry owner. |
-| `--signer` | (required) | The node's TEE signer address = the provider address. From the node's `/api/info` (`provider_address`) or `tapp-cli get-app-key`. |
+| `--signer` | (required without `--kms`) | The node's TEE signer address = the provider address. From the node's `/api/info` (`provider_address`) or `tapp-cli get-app-key`. |
+| `--kms` | `false` | Register the node's **KMS provider** instead (the node runs `PROVIDER_KEY_SOURCE=kms`). The provider address and the node's endorsement are read from `<info>/api/info`; `--signer` is not used. |
+| `--info` | `--url` | With `--kms`: base URL to read `/api/info` from. |
 | `--app-id` | (required) | TappRegistry appId. The signer must already be an active node of it, and this contract must be an authorized invalidator. |
 | `--url` | (required) | Public URL of the billing proxy (e.g. `http://1.2.3.4:8080`) |
 | `--price-per-cpu` | `1000000000000000` | Price per CPU core per minute (neuron) |
@@ -74,6 +76,21 @@ service entry: separate URL/prices, user balances, voucher nonces, earnings.
 > **After calling `register`**: just (re)deploy the billing service — it
 > derives its provider identity from the TEE key and resolves the app owner
 > from `getAppInfo(BACKEND_APP_NAME).owner` automatically; nothing to configure.
+
+**KMS provider (`--kms`).** With `PROVIDER_KEY_SOURCE=kms`, the provider is the app's
+KMS key, not the node signer, so it survives reboots and needs no `rotate`.
+
+```bash
+OWNER_KEY=0x<hex> go run ./cmd/provider/ register --kms \
+  --app-id <tapp-app-id> --url <0g-sandbox-url> [--price-per-cpu …] [--price-per-mem …] [--fee …]
+```
+
+The CLI first checks the node's `/api/info`: the key source is `kms`, the node serves
+this appId on this contract and chain, and the endorsement is signed by the node's
+`node_address`. Then it calls `addOrUpdateKmsService`. The contract checks the
+endorsement comes from an active node of the appId. The first registration binds the
+provider to the app's current TappRegistry instance, permanently. Fund the printed
+provider address for settlement gas.
 
 ---
 
@@ -265,6 +282,11 @@ curl -X POST http://<provider-host>:8080/api/registry/pull \
 
 > The pull runs synchronously and may take several minutes for large images.
 > After import, use `snapshot` to register the image as a named snapshot.
+>
+> Imported tags are immutable: importing another image under an existing tag is
+> refused with **409** (the same image again is a no-op), so import each build under
+> a new tag. Repository names starting with `daytona-` and tags starting with `d-`
+> are reserved for Daytona and snapshot registration (**400**).
 
 ---
 
@@ -288,7 +310,7 @@ PROVIDER_KEY=0x<hex> go run ./cmd/provider/ snapshot \
 |------|---------|-------------|
 | `--api` | `http://localhost:8080` | 0G Sandbox service URL |
 | `--image` | (required) | Full registry image path |
-| `--name` | derived from `--image` | Snapshot name shown to users |
+| `--name` | derived from `--image` | Snapshot name shown to users. A UUID-shaped name is refused: Daytona matches those against snapshot ids |
 | `--cpu` | `1` | CPU cores for sandboxes using this snapshot |
 | `--memory` | `1` | Memory in GB |
 | `--disk` | `3` | Disk in GB |

@@ -42,14 +42,14 @@ type ProviderRecord struct {
 type chainClient interface {
 	GetServiceUpdatedEvents(ctx context.Context, fromBlock uint64) ([]chain.ProviderEvent, uint64, error)
 	GetServiceInfo(ctx context.Context, provider common.Address) (*chain.ServiceInfo, error)
-	// IsActiveNode reports whether `signer` is an active TappRegistry node of
-	// appId. Used to drop stale providers: in the v2 identity model the
-	// provider address IS the node's TEE signer (not the app owner), so a
-	// provider is only "live" while its address is still in the appId's node
-	// list — the real source of truth for (de)registration. removeService in
+	// IsActiveProvider reports whether `provider` has a service whose own key
+	// may sign vouchers now (SandboxServing isActiveProvider). Used to drop
+	// stale providers: a node-signer provider is only "live" while its
+	// address is still in the appId's node list, a KMS provider while its
+	// service is bound to the app's current instance. removeService in
 	// SandboxServing also clears entries, but node membership catches the
 	// rotation window before the owner has cleaned up.
-	IsActiveNode(ctx context.Context, appId string, signer common.Address) (bool, error)
+	IsActiveProvider(ctx context.Context, provider common.Address) (bool, error)
 }
 
 // Indexer maintains a live in-memory index of all providers registered on-chain,
@@ -94,20 +94,21 @@ func (idx *Indexer) Run(ctx context.Context) {
 	}
 }
 
-// isLiveProvider reports whether provider `addr` is still an active
-// TappRegistry node of `appId` — the source of truth for (de)registration.
-// v2 identity model: the provider address is the node's TEE signer, NOT the
-// app owner, so owner comparison would drop every live provider. Returns
-// true on RPC error (fail-open: a transient lookup failure must not drop a
-// provider; revalidate rechecks next cycle). False when no appId is bound or
-// the address is no longer in the appId's node list (rotated-out/stale).
+// isLiveProvider reports whether provider `addr` may still settle by the
+// contract's rule (IsActiveProvider) — the source of truth for
+// (de)registration. The provider address is the node's TEE signer or the
+// app's KMS key, never the app owner, so owner comparison would drop every
+// live provider. Returns true on RPC error (fail-open: a transient lookup
+// failure must not drop a provider; revalidate rechecks next cycle). False
+// when no appId is bound or the provider's key no longer counts
+// (rotated-out node, re-registered app).
 func (idx *Indexer) isLiveProvider(ctx context.Context, addrKey, appId string, provider common.Address) bool {
 	if appId == "" {
 		return false
 	}
-	live, err := idx.chain.IsActiveNode(ctx, appId, provider)
+	live, err := idx.chain.IsActiveProvider(ctx, provider)
 	if err != nil {
-		idx.log.Warn("indexer: IsActiveNode failed; keeping provider this round",
+		idx.log.Warn("indexer: IsActiveProvider failed; keeping provider this round",
 			zap.String("provider", addrKey), zap.String("app_id", appId), zap.Error(err))
 		return true
 	}

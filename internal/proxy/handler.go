@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -12,6 +13,8 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -110,7 +113,7 @@ type Handler struct {
 	sshGatewayHost      string   // if set, replaces localhost in SSH commands
 	computePricePerSec  *big.Int
 	rdb                 *redis.Client
-	teeKey              *ecdsa.PrivateKey // TEE signing key; nil = sealed containers disabled
+	sealKey             *ecdsa.PrivateKey // stable KMS app signer; nil = sealed containers disabled
 	broker              *brokerClient     // nil = broker integration disabled
 	log                 *zap.Logger
 
@@ -126,9 +129,16 @@ type Handler struct {
 	// top of adminAddresses — resolved live so it can never drift from the
 	// on-chain truth. nil (tests, mock setups) = static admin list only.
 	AppOwner func(ctx context.Context) (string, error)
+	// AppAdmin authenticates the stable app signer of a configured attestor
+	// appId, with current registration-instance checks. It does not authorize
+	// arbitrary node signers or change the owner-only workload routes.
+	AppAdmin func(ctx context.Context, wallet string) (bool, error)
+	// SealIssuer authenticates this provider's current app instance on each
+	// sealed create. No issuer scope is accepted from the create request.
+	SealIssuer func(ctx context.Context) (SealIssuer, error)
 }
 
-func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec *big.Int, providerAddress string, adminAddresses []string, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, teeKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
+func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec *big.Int, providerAddress string, adminAddresses []string, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, providerKey, sealKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
 	target, _ := url.Parse(dtona.BaseURL())
 	rp := httputil.NewSingleHostReverseProxy(target)
 
@@ -193,8 +203,8 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 	}
 
 	var broker *brokerClient
-	if brokerURL != "" && teeKey != nil {
-		broker = newBrokerClient(brokerURL, teeKey, providerAddress, voucherIntervalSec, log)
+	if brokerURL != "" && providerKey != nil {
+		broker = newBrokerClient(brokerURL, providerKey, providerAddress, voucherIntervalSec, log)
 	}
 	admins := make([]string, 0, len(adminAddresses))
 	for _, a := range adminAddresses {
@@ -203,7 +213,7 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 			admins = append(admins, strings.ToLower(a))
 		}
 	}
-	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, ackCheck: ackCheck, eventFetcher: eventFetcher, createFee: createFee, pricePerCPUPerSec: pricePerCPUPerSec, pricePerMemGBPerSec: pricePerMemGBPerSec, voucherIntervalSec: voucherIntervalSec, computePricePerSec: computePricePerSec, providerAddress: providerAddress, adminAddresses: admins, sshGatewayHost: sshGatewayHost, rdb: rdb, teeKey: teeKey, broker: broker, log: log}
+	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, ackCheck: ackCheck, eventFetcher: eventFetcher, createFee: createFee, pricePerCPUPerSec: pricePerCPUPerSec, pricePerMemGBPerSec: pricePerMemGBPerSec, voucherIntervalSec: voucherIntervalSec, computePricePerSec: computePricePerSec, providerAddress: providerAddress, adminAddresses: admins, sshGatewayHost: sshGatewayHost, rdb: rdb, sealKey: sealKey, broker: broker, log: log}
 }
 
 // IsAdmin is the exported admin check for routes registered outside this
@@ -230,9 +240,21 @@ func (h *Handler) isAdmin(wallet string) bool {
 		if owner, err := h.AppOwner(ctx); err == nil && owner == target {
 			return true
 		} else if err != nil {
-			h.log.Warn("isAdmin: app owner lookup failed; falling back to static admin list", zap.Error(err))
+			h.log.Warn("isAdmin: app owner lookup failed", zap.Error(err))
 		}
 	}
+	if h.AppAdmin != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 125*time.Second)
+		allowed, err := h.AppAdmin(ctx, target)
+		cancel()
+		if err == nil && allowed {
+			return true
+		}
+		if err != nil {
+			h.log.Warn("isAdmin: attestor identity lookup failed", zap.Error(err))
+		}
+	}
+
 	return false
 }
 
@@ -447,8 +469,21 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		}
 	}
 
-	// Sealed containers: resolve image hash and inject TEE attestation + keypair
-	// before forwarding to Daytona.
+	// An issuer refusal must release only this request's reservation. The
+	// caller may already be cancelled; cleanup has its own bounded context and
+	// Redis I/O timeout. Clearing the flag first makes this cleanup idempotent.
+	releaseRejectedSeal := func() {
+		if !createReserved {
+			return
+		}
+		createReserved = false
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 2*time.Second)
+		defer cancel()
+		billing.Release(ctx, h.rdb.WithTimeout(2*time.Second), wallet, h.providerAddress, createRequired)
+	}
+
+	// Sealed containers: resolve image hash and inject the container
+	// certificate + keypair before forwarding to Daytona.
 	sealed := extractSealed(body)
 	if err := ValidatePublicPorts(body, sealed); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -460,24 +495,58 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		})
 		return
 	}
-	if sealed && h.teeKey == nil {
-		c.JSON(http.StatusNotImplemented, gin.H{"error": "sealed containers not available: TEE key not configured"})
+	if sealed && h.sealKey == nil {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "sealed containers not available: KMS app signer not configured"})
 		return
 	}
-	var imageHash string
+	if sealed && h.SealIssuer == nil {
+		releaseRejectedSeal()
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sealed issuer authentication not configured"})
+		return
+	}
+	var imageHash, snapshotID string
 	if sealed {
-		imageRef, err := h.resolveImageRef(c.Request.Context(), body)
+		src, err := h.resolveImageRef(c.Request.Context(), body)
 		if err != nil {
+			releaseRejectedSeal()
+			if errors.Is(err, errSnapshotOverridesImage) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": "sealed containers require an image or snapshot: " + err.Error()})
+			return
+		}
+		snapshotID = src.snapshotID
+		imageRef := src.image
+		// The billed spec came from GET /api/snapshots/<name>, which resolves
+		// ids before names. It must be the record the certificate covers.
+		if snapshotID != "" && snap != nil && snap.ID != snapshotID {
+			releaseRejectedSeal()
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("snapshot %q matches more than one snapshot record", snapName)})
 			return
 		}
 		imageHash, err = registry.GetDigest(c.Request.Context(), imageRef)
 		if err != nil {
+			releaseRejectedSeal()
 			c.JSON(http.StatusUnprocessableEntity, gin.H{
 				"error":  "sealed containers require the image to be present in the registry",
 				"detail": err.Error(),
 			})
 			return
+		}
+		if snapshotID != "" {
+			if status, err := checkSnapshotRunsImage(c.Request.Context(), src, imageHash); err != nil {
+				releaseRejectedSeal()
+				if status == http.StatusBadRequest {
+					c.JSON(status, gin.H{"error": err.Error()})
+				} else {
+					c.JSON(status, gin.H{
+						"error":  "sealed containers require the snapshot's images to be readable",
+						"detail": err.Error(),
+					})
+				}
+				return
+			}
 		}
 		// Pin the forwarded image to the attested digest. The attestation is
 		// signed over imageHash, but a mutable TAG forwarded to Daytona can be
@@ -511,11 +580,34 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
+	// Forward the certified snapshot record by id, so Daytona cannot resolve
+	// the name to another record. The 0g-image label keeps the name.
+	if snapshotID != "" {
+		modified, err = setCreateField(modified, "snapshot", snapshotID)
+		if err != nil {
+			releaseRejectedSeal()
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
+	}
 
 	if sealed {
-		modified, err = InjectSeal(modified, h.teeKey, imageHash)
+		// Resolve immediately before signing, after potentially slow image
+		// resolution. A failed lookup never creates a new sealed workload.
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		issuer, issuerErr := h.SealIssuer(ctx)
+		ctxErr := ctx.Err()
+		cancel()
+		if issuerErr != nil || ctxErr != nil {
+			releaseRejectedSeal()
+			h.log.Warn("sealed issuer authentication failed", zap.Error(issuerErr), zap.Error(ctxErr))
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sealed issuer authentication unavailable"})
+			return
+		}
+		modified, err = InjectSeal(modified, h.sealKey, imageHash, issuer)
 		if err != nil {
-			if strings.HasPrefix(err.Error(), "seal_id must be") {
+			releaseRejectedSeal()
+			if strings.HasPrefix(err.Error(), "seal_id must be") || errors.Is(err, ErrCallerEnvKey) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -1218,10 +1310,15 @@ func (h *Handler) handleSnapshotCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
 		return
 	}
-
 	imageName, _ := m["imageName"].(string)
 	if imageName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "imageName required"})
+		return
+	}
+	// Daytona matches a UUID-shaped create reference against snapshot ids as
+	// well as names, so such a name could stand for another snapshot.
+	if name, _ := m["name"].(string); uuidShaped.MatchString(name) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "snapshot names must not be UUID-shaped"})
 		return
 	}
 
@@ -1606,13 +1703,22 @@ func (h *Handler) outstandingDebt(ctx context.Context, wallet string) (held, pen
 	return held, pending
 }
 
+// createField returns the string value of a top-level create field, read by
+// its exact name as Daytona reads it. A struct decode would also match folded
+// spellings ("Snapshot", "ſnapshot") that Daytona ignores.
+func createField(body []byte, key string) string {
+	var m map[string]json.RawMessage
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&m); err != nil {
+		return ""
+	}
+	var v string
+	json.Unmarshal(m[key], &v) //nolint:errcheck
+	return v
+}
+
 // extractSnapshotName parses the "snapshot" field from a sandbox create request body.
 func extractSnapshotName(body []byte) string {
-	var m struct {
-		Snapshot string `json:"snapshot"`
-	}
-	json.NewDecoder(bytes.NewReader(body)).Decode(&m) //nolint:errcheck
-	return m.Snapshot
+	return createField(body, "snapshot")
 }
 
 // extractSealed parses the "sealed" boolean from a sandbox create request body.
@@ -1624,50 +1730,137 @@ func extractSealed(body []byte) bool {
 	return m.Sealed
 }
 
-// resolveImageRef extracts the image reference from a create request body and,
-// for snapshot-based sandboxes, resolves the snapshot name to its ImageName.
 // hasDirectImage reports whether the create body names an image directly
 // (as opposed to a snapshot) — only direct refs are caller-controlled and
 // need digest pinning.
 func hasDirectImage(body []byte) bool {
-	var m struct {
-		Image string `json:"image"`
-	}
-	json.NewDecoder(bytes.NewReader(body)).Decode(&m) //nolint:errcheck
-	return m.Image != ""
+	return createField(body, "image") != ""
 }
 
 // rewriteImage replaces the body's image field with the pinned reference.
 func rewriteImage(body []byte, pinned string) ([]byte, error) {
+	return setCreateField(body, "image", pinned)
+}
+
+// setCreateField sets one top-level field of a create body.
+func setCreateField(body []byte, key, value string) ([]byte, error) {
 	var m map[string]any
 	if err := json.Unmarshal(body, &m); err != nil {
 		return nil, err
 	}
-	m["image"] = pinned
+	m[key] = value
 	return json.Marshal(m)
 }
 
-func (h *Handler) resolveImageRef(ctx context.Context, body []byte) (string, error) {
-	var m struct {
-		Image    string `json:"image"`
-		Snapshot string `json:"snapshot"`
-	}
-	json.NewDecoder(bytes.NewReader(body)).Decode(&m) //nolint:errcheck
+// errSnapshotOverridesImage refuses a sealed create from a snapshot that does
+// not run its image's own entrypoint: the certificate attests only the image.
+var errSnapshotOverridesImage = errors.New("sealed containers must run their image's own entrypoint; this snapshot overrides it or is built from a Dockerfile")
 
-	if m.Image != "" {
-		return m.Image, nil
-	}
-	if m.Snapshot != "" {
-		snaps, err := h.dtona.ListSnapshots(ctx)
-		if err != nil {
-			return "", fmt.Errorf("list snapshots: %w", err)
-		}
-		for _, s := range snaps {
-			if s.Name == m.Snapshot {
-				return s.ImageName, nil
-			}
-		}
-		return "", fmt.Errorf("snapshot %q not found", m.Snapshot)
-	}
-	return "", fmt.Errorf("no image or snapshot specified")
+// errSnapshotRunsOtherImage refuses a sealed create from a snapshot whose
+// runner image (the copy Daytona made when the snapshot was created, which is
+// what the runner starts) is not the image the certificate would name.
+var errSnapshotRunsOtherImage = errors.New("sealed containers must run the image their certificate names; this snapshot's runner image differs from its image")
+
+// sealedSource is what a sealed create starts.
+type sealedSource struct {
+	// image is the reference the certificate's image_hash is read from.
+	image string
+	// The rest describe a snapshot create and are empty for a direct image.
+	// runRef is the snapshot record's ref: Daytona never runs imageName but
+	// this copy of it, pushed to the internal registry at snapshot creation.
+	// entrypoint is the record's entrypoint and snapshotID its id, which the
+	// caller forwards so Daytona starts the record whose image was certified.
+	runRef     string
+	entrypoint []string
+	snapshotID string
 }
+
+// resolveImageRef returns what a sealed create starts.
+func (h *Handler) resolveImageRef(ctx context.Context, body []byte) (sealedSource, error) {
+	if img := createField(body, "image"); img != "" {
+		return sealedSource{image: img}, nil
+	}
+	ref := createField(body, "snapshot")
+	if ref == "" {
+		return sealedSource{}, fmt.Errorf("no image or snapshot specified")
+	}
+	snaps, err := h.dtona.ListSnapshots(ctx)
+	if err != nil {
+		return sealedSource{}, fmt.Errorf("list snapshots: %w", err)
+	}
+	s, err := resolveSnapshot(snaps, ref)
+	if err != nil {
+		return sealedSource{}, err
+	}
+	if s.BuildInfo != nil {
+		return sealedSource{}, errSnapshotOverridesImage
+	}
+	return sealedSource{image: s.ImageName, runRef: s.Ref, entrypoint: s.Entrypoint, snapshotID: s.ID}, nil
+}
+
+// checkSnapshotRunsImage refuses (400) a snapshot whose runner would start
+// anything other than the certified manifest of its image: a runner image
+// with another image config, or a recorded entrypoint other than the image's
+// own. Other statuses mean an image could not be read. Image configs are
+// compared because the runner's pull and re-push can change the manifest
+// digest but not the config, which names every layer by content.
+func checkSnapshotRunsImage(ctx context.Context, src sealedSource, imageHash string) (int, error) {
+	if src.runRef == "" {
+		return http.StatusBadRequest, fmt.Errorf("snapshot %s has no runner image yet; wait until it is active", src.snapshotID)
+	}
+	pinned, err := registry.PinRef(src.image, imageHash)
+	if err != nil {
+		return http.StatusUnprocessableEntity, err
+	}
+	certified, err := registry.GetConfig(ctx, pinned)
+	if err != nil {
+		return http.StatusUnprocessableEntity, err
+	}
+	runs, err := registry.GetConfig(ctx, src.runRef)
+	if err != nil {
+		return http.StatusUnprocessableEntity, err
+	}
+	if runs.Digest != certified.Digest {
+		return http.StatusBadRequest, errSnapshotRunsOtherImage
+	}
+	if len(src.entrypoint) > 0 && !slices.Equal(certified.Entrypoint, src.entrypoint) {
+		return http.StatusBadRequest, errSnapshotOverridesImage
+	}
+	return 0, nil
+}
+
+// resolveSnapshot finds the one snapshot record a create reference names.
+// Daytona matches the reference against record names and, when it is
+// UUID-shaped, against record ids, then takes the first active match. A
+// reference that matches more than one record is refused, as is a record whose
+// id is also another record's name: the proxy forwards the id, and Daytona must
+// not be able to resolve it to a different record.
+func resolveSnapshot(snaps []daytona.Snapshot, ref string) (*daytona.Snapshot, error) {
+	var match *daytona.Snapshot
+	for i := range snaps {
+		s := &snaps[i]
+		if s.Name != ref && s.ID != ref {
+			continue
+		}
+		if s.ID == "" {
+			return nil, fmt.Errorf("snapshot %q has no id", ref)
+		}
+		if match != nil && match.ID != s.ID {
+			return nil, fmt.Errorf("snapshot %q matches more than one snapshot record", ref)
+		}
+		match = s
+	}
+	if match == nil {
+		return nil, fmt.Errorf("snapshot %q not found", ref)
+	}
+	for _, s := range snaps {
+		if s.ID != match.ID && s.Name == match.ID {
+			return nil, fmt.Errorf("snapshot %q matches more than one snapshot record", ref)
+		}
+	}
+	return match, nil
+}
+
+// uuidShaped matches what Daytona treats as a snapshot id
+// (apps/api/src/common/utils/uuid.ts).
+var uuidShaped = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)

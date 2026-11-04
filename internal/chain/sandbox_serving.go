@@ -41,7 +41,7 @@ type SandboxServingSandboxVoucher struct {
 
 // SandboxServingMetaData contains all meta data concerning the SandboxServing contract.
 var SandboxServingMetaData = &bind.MetaData{
-	ABI: "[{\"type\":\"constructor\",\"inputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"LOCK_TIME\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"addOrUpdateService\",\"inputs\":[{\"name\":\"signer\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"url\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"appId\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"pricePerCPUPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"createFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pricePerMemGBPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"balanceOfBatch\",\"inputs\":[{\"name\":\"users\",\"type\":\"address[]\",\"internalType\":\"address[]\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"balances\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"deposit\",\"inputs\":[{\"name\":\"recipient\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"payable\"},{\"type\":\"function\",\"name\":\"domainSeparator\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getBalance\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"balance\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pendingRefund\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"refundUnlockAt\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getLastNonce\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getProviderEarnings\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"initialize\",\"inputs\":[{\"name\":\"tappRegistry_\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"isTEEAcknowledged\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"owner\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"previewSettlementResults\",\"inputs\":[{\"name\":\"vouchers\",\"type\":\"tuple[]\",\"internalType\":\"structSandboxServing.SandboxVoucher[]\",\"components\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"signature\",\"type\":\"bytes\",\"internalType\":\"bytes\"}]}],\"outputs\":[{\"name\":\"statuses\",\"type\":\"uint8[]\",\"internalType\":\"enumSandboxServing.SettlementStatus[]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"providerEarnings\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"removeService\",\"inputs\":[{\"name\":\"signer\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"requestRefund\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"serviceExists\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"services\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"url\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"appId\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"pricePerCPUPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pricePerMemGBPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"createFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"setTappRegistry\",\"inputs\":[{\"name\":\"newRegistry\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"settleFeesWithTEE\",\"inputs\":[{\"name\":\"vouchers\",\"type\":\"tuple[]\",\"internalType\":\"structSandboxServing.SandboxVoucher[]\",\"components\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"signature\",\"type\":\"bytes\",\"internalType\":\"bytes\"}]}],\"outputs\":[{\"name\":\"statuses\",\"type\":\"uint8[]\",\"internalType\":\"enumSandboxServing.SettlementStatus[]\"}],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"tappRegistry\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"contractITappRegistry\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"transferOwnership\",\"inputs\":[{\"name\":\"newOwner\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"withdrawEarnings\",\"inputs\":[{\"name\":\"signer\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"withdrawRefund\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"event\",\"name\":\"Deposited\",\"inputs\":[{\"name\":\"recipient\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"EarningsWithdrawn\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"to\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"OwnershipTransferred\",\"inputs\":[{\"name\":\"previousOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"newOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RefundRequested\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"unlockAt\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RefundWithdrawn\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ServiceRemoved\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"appOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ServiceUpdated\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"appId\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"},{\"name\":\"url\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"TappRegistryUpdated\",\"inputs\":[{\"name\":\"previousRegistry\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"newRegistry\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"VoucherSettled\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"indexed\":false,\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"status\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumSandboxServing.SettlementStatus\"}],\"anonymous\":false}]",
+	ABI: "[{\"type\":\"constructor\",\"inputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"LOCK_TIME\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"addOrUpdateKmsService\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"url\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"appId\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"pricePerCPUPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"createFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pricePerMemGBPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"endorsement\",\"type\":\"bytes\",\"internalType\":\"bytes\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"addOrUpdateService\",\"inputs\":[{\"name\":\"signer\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"url\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"appId\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"pricePerCPUPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"createFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pricePerMemGBPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"balanceOfBatch\",\"inputs\":[{\"name\":\"users\",\"type\":\"address[]\",\"internalType\":\"address[]\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"balances\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"deposit\",\"inputs\":[{\"name\":\"recipient\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"payable\"},{\"type\":\"function\",\"name\":\"domainSeparator\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getBalance\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"balance\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pendingRefund\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"refundUnlockAt\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getLastNonce\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getProviderEarnings\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"initialize\",\"inputs\":[{\"name\":\"tappRegistry_\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"isActiveProvider\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"isTEEAcknowledged\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"kmsBindings\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"epoch\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"appIdHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"kmsProviderDigest\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"appId\",\"type\":\"string\",\"internalType\":\"string\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"owner\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"previewSettlementResults\",\"inputs\":[{\"name\":\"vouchers\",\"type\":\"tuple[]\",\"internalType\":\"structSandboxServing.SandboxVoucher[]\",\"components\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"signature\",\"type\":\"bytes\",\"internalType\":\"bytes\"}]}],\"outputs\":[{\"name\":\"statuses\",\"type\":\"uint8[]\",\"internalType\":\"enumSandboxServing.SettlementStatus[]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"providerEarnings\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"removeService\",\"inputs\":[{\"name\":\"signer\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"repinKmsProvider\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"requestRefund\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"serviceExists\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"services\",\"inputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"url\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"appId\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"pricePerCPUPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pricePerMemGBPerMin\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"createFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"setTappRegistry\",\"inputs\":[{\"name\":\"newRegistry\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"settleFeesWithTEE\",\"inputs\":[{\"name\":\"vouchers\",\"type\":\"tuple[]\",\"internalType\":\"structSandboxServing.SandboxVoucher[]\",\"components\":[{\"name\":\"user\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"signature\",\"type\":\"bytes\",\"internalType\":\"bytes\"}]}],\"outputs\":[{\"name\":\"statuses\",\"type\":\"uint8[]\",\"internalType\":\"enumSandboxServing.SettlementStatus[]\"}],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"tappRegistry\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"contractITappRegistry\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"transferOwnership\",\"inputs\":[{\"name\":\"newOwner\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"withdrawEarnings\",\"inputs\":[{\"name\":\"signer\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"withdrawRefund\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"event\",\"name\":\"Deposited\",\"inputs\":[{\"name\":\"recipient\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"EarningsWithdrawn\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"to\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"KmsProviderBound\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"appId\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"},{\"name\":\"endorsingNode\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"epoch\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"KmsProviderRepinned\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"previousEpoch\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"epoch\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"OwnershipTransferred\",\"inputs\":[{\"name\":\"previousOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"newOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RefundRequested\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"unlockAt\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RefundWithdrawn\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ServiceRemoved\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"appOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ServiceUpdated\",\"inputs\":[{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"appId\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"},{\"name\":\"url\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"TappRegistryUpdated\",\"inputs\":[{\"name\":\"previousRegistry\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"newRegistry\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"VoucherSettled\",\"inputs\":[{\"name\":\"user\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"provider\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"totalFee\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"usageHash\",\"type\":\"bytes32\",\"indexed\":false,\"internalType\":\"bytes32\"},{\"name\":\"nonce\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"status\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumSandboxServing.SettlementStatus\"}],\"anonymous\":false}]",
 }
 
 // SandboxServingABI is the input ABI used to generate the binding from.
@@ -395,6 +395,37 @@ func (_SandboxServing *SandboxServingCallerSession) GetProviderEarnings(provider
 	return _SandboxServing.Contract.GetProviderEarnings(&_SandboxServing.CallOpts, provider)
 }
 
+// IsActiveProvider is a free data retrieval call binding the contract method 0x9b5e1a3b.
+//
+// Solidity: function isActiveProvider(address provider) view returns(bool)
+func (_SandboxServing *SandboxServingCaller) IsActiveProvider(opts *bind.CallOpts, provider common.Address) (bool, error) {
+	var out []interface{}
+	err := _SandboxServing.contract.Call(opts, &out, "isActiveProvider", provider)
+
+	if err != nil {
+		return *new(bool), err
+	}
+
+	out0 := *abi.ConvertType(out[0], new(bool)).(*bool)
+
+	return out0, err
+
+}
+
+// IsActiveProvider is a free data retrieval call binding the contract method 0x9b5e1a3b.
+//
+// Solidity: function isActiveProvider(address provider) view returns(bool)
+func (_SandboxServing *SandboxServingSession) IsActiveProvider(provider common.Address) (bool, error) {
+	return _SandboxServing.Contract.IsActiveProvider(&_SandboxServing.CallOpts, provider)
+}
+
+// IsActiveProvider is a free data retrieval call binding the contract method 0x9b5e1a3b.
+//
+// Solidity: function isActiveProvider(address provider) view returns(bool)
+func (_SandboxServing *SandboxServingCallerSession) IsActiveProvider(provider common.Address) (bool, error) {
+	return _SandboxServing.Contract.IsActiveProvider(&_SandboxServing.CallOpts, provider)
+}
+
 // IsTEEAcknowledged is a free data retrieval call binding the contract method 0xec4e8f2b.
 //
 // Solidity: function isTEEAcknowledged(address user, address provider) view returns(bool)
@@ -424,6 +455,82 @@ func (_SandboxServing *SandboxServingSession) IsTEEAcknowledged(user common.Addr
 // Solidity: function isTEEAcknowledged(address user, address provider) view returns(bool)
 func (_SandboxServing *SandboxServingCallerSession) IsTEEAcknowledged(user common.Address, provider common.Address) (bool, error) {
 	return _SandboxServing.Contract.IsTEEAcknowledged(&_SandboxServing.CallOpts, user, provider)
+}
+
+// KmsBindings is a free data retrieval call binding the contract method 0x66e7e891.
+//
+// Solidity: function kmsBindings(address ) view returns(uint256 epoch, bytes32 appIdHash)
+func (_SandboxServing *SandboxServingCaller) KmsBindings(opts *bind.CallOpts, arg0 common.Address) (struct {
+	Epoch     *big.Int
+	AppIdHash [32]byte
+}, error) {
+	var out []interface{}
+	err := _SandboxServing.contract.Call(opts, &out, "kmsBindings", arg0)
+
+	outstruct := new(struct {
+		Epoch     *big.Int
+		AppIdHash [32]byte
+	})
+	if err != nil {
+		return *outstruct, err
+	}
+
+	outstruct.Epoch = *abi.ConvertType(out[0], new(*big.Int)).(**big.Int)
+	outstruct.AppIdHash = *abi.ConvertType(out[1], new([32]byte)).(*[32]byte)
+
+	return *outstruct, err
+
+}
+
+// KmsBindings is a free data retrieval call binding the contract method 0x66e7e891.
+//
+// Solidity: function kmsBindings(address ) view returns(uint256 epoch, bytes32 appIdHash)
+func (_SandboxServing *SandboxServingSession) KmsBindings(arg0 common.Address) (struct {
+	Epoch     *big.Int
+	AppIdHash [32]byte
+}, error) {
+	return _SandboxServing.Contract.KmsBindings(&_SandboxServing.CallOpts, arg0)
+}
+
+// KmsBindings is a free data retrieval call binding the contract method 0x66e7e891.
+//
+// Solidity: function kmsBindings(address ) view returns(uint256 epoch, bytes32 appIdHash)
+func (_SandboxServing *SandboxServingCallerSession) KmsBindings(arg0 common.Address) (struct {
+	Epoch     *big.Int
+	AppIdHash [32]byte
+}, error) {
+	return _SandboxServing.Contract.KmsBindings(&_SandboxServing.CallOpts, arg0)
+}
+
+// KmsProviderDigest is a free data retrieval call binding the contract method 0x29572b75.
+//
+// Solidity: function kmsProviderDigest(address provider, string appId) view returns(bytes32)
+func (_SandboxServing *SandboxServingCaller) KmsProviderDigest(opts *bind.CallOpts, provider common.Address, appId string) ([32]byte, error) {
+	var out []interface{}
+	err := _SandboxServing.contract.Call(opts, &out, "kmsProviderDigest", provider, appId)
+
+	if err != nil {
+		return *new([32]byte), err
+	}
+
+	out0 := *abi.ConvertType(out[0], new([32]byte)).(*[32]byte)
+
+	return out0, err
+
+}
+
+// KmsProviderDigest is a free data retrieval call binding the contract method 0x29572b75.
+//
+// Solidity: function kmsProviderDigest(address provider, string appId) view returns(bytes32)
+func (_SandboxServing *SandboxServingSession) KmsProviderDigest(provider common.Address, appId string) ([32]byte, error) {
+	return _SandboxServing.Contract.KmsProviderDigest(&_SandboxServing.CallOpts, provider, appId)
+}
+
+// KmsProviderDigest is a free data retrieval call binding the contract method 0x29572b75.
+//
+// Solidity: function kmsProviderDigest(address provider, string appId) view returns(bytes32)
+func (_SandboxServing *SandboxServingCallerSession) KmsProviderDigest(provider common.Address, appId string) ([32]byte, error) {
+	return _SandboxServing.Contract.KmsProviderDigest(&_SandboxServing.CallOpts, provider, appId)
 }
 
 // Owner is a free data retrieval call binding the contract method 0x8da5cb5b.
@@ -641,6 +748,27 @@ func (_SandboxServing *SandboxServingCallerSession) TappRegistry() (common.Addre
 	return _SandboxServing.Contract.TappRegistry(&_SandboxServing.CallOpts)
 }
 
+// AddOrUpdateKmsService is a paid mutator transaction binding the contract method 0xc5a32ed0.
+//
+// Solidity: function addOrUpdateKmsService(address provider, string url, string appId, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin, bytes endorsement) returns()
+func (_SandboxServing *SandboxServingTransactor) AddOrUpdateKmsService(opts *bind.TransactOpts, provider common.Address, url string, appId string, pricePerCPUPerMin *big.Int, createFee *big.Int, pricePerMemGBPerMin *big.Int, endorsement []byte) (*types.Transaction, error) {
+	return _SandboxServing.contract.Transact(opts, "addOrUpdateKmsService", provider, url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin, endorsement)
+}
+
+// AddOrUpdateKmsService is a paid mutator transaction binding the contract method 0xc5a32ed0.
+//
+// Solidity: function addOrUpdateKmsService(address provider, string url, string appId, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin, bytes endorsement) returns()
+func (_SandboxServing *SandboxServingSession) AddOrUpdateKmsService(provider common.Address, url string, appId string, pricePerCPUPerMin *big.Int, createFee *big.Int, pricePerMemGBPerMin *big.Int, endorsement []byte) (*types.Transaction, error) {
+	return _SandboxServing.Contract.AddOrUpdateKmsService(&_SandboxServing.TransactOpts, provider, url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin, endorsement)
+}
+
+// AddOrUpdateKmsService is a paid mutator transaction binding the contract method 0xc5a32ed0.
+//
+// Solidity: function addOrUpdateKmsService(address provider, string url, string appId, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin, bytes endorsement) returns()
+func (_SandboxServing *SandboxServingTransactorSession) AddOrUpdateKmsService(provider common.Address, url string, appId string, pricePerCPUPerMin *big.Int, createFee *big.Int, pricePerMemGBPerMin *big.Int, endorsement []byte) (*types.Transaction, error) {
+	return _SandboxServing.Contract.AddOrUpdateKmsService(&_SandboxServing.TransactOpts, provider, url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin, endorsement)
+}
+
 // AddOrUpdateService is a paid mutator transaction binding the contract method 0x1b5da3c4.
 //
 // Solidity: function addOrUpdateService(address signer, string url, string appId, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin) returns()
@@ -723,6 +851,27 @@ func (_SandboxServing *SandboxServingSession) RemoveService(signer common.Addres
 // Solidity: function removeService(address signer) returns()
 func (_SandboxServing *SandboxServingTransactorSession) RemoveService(signer common.Address) (*types.Transaction, error) {
 	return _SandboxServing.Contract.RemoveService(&_SandboxServing.TransactOpts, signer)
+}
+
+// RepinKmsProvider is a paid mutator transaction binding the contract method 0x4a6f88b1.
+//
+// Solidity: function repinKmsProvider(address provider) returns()
+func (_SandboxServing *SandboxServingTransactor) RepinKmsProvider(opts *bind.TransactOpts, provider common.Address) (*types.Transaction, error) {
+	return _SandboxServing.contract.Transact(opts, "repinKmsProvider", provider)
+}
+
+// RepinKmsProvider is a paid mutator transaction binding the contract method 0x4a6f88b1.
+//
+// Solidity: function repinKmsProvider(address provider) returns()
+func (_SandboxServing *SandboxServingSession) RepinKmsProvider(provider common.Address) (*types.Transaction, error) {
+	return _SandboxServing.Contract.RepinKmsProvider(&_SandboxServing.TransactOpts, provider)
+}
+
+// RepinKmsProvider is a paid mutator transaction binding the contract method 0x4a6f88b1.
+//
+// Solidity: function repinKmsProvider(address provider) returns()
+func (_SandboxServing *SandboxServingTransactorSession) RepinKmsProvider(provider common.Address) (*types.Transaction, error) {
+	return _SandboxServing.Contract.RepinKmsProvider(&_SandboxServing.TransactOpts, provider)
 }
 
 // RequestRefund is a paid mutator transaction binding the contract method 0x99652de7.
@@ -1162,6 +1311,309 @@ func (_SandboxServing *SandboxServingFilterer) WatchEarningsWithdrawn(opts *bind
 func (_SandboxServing *SandboxServingFilterer) ParseEarningsWithdrawn(log types.Log) (*SandboxServingEarningsWithdrawn, error) {
 	event := new(SandboxServingEarningsWithdrawn)
 	if err := _SandboxServing.contract.UnpackLog(event, "EarningsWithdrawn", log); err != nil {
+		return nil, err
+	}
+	event.Raw = log
+	return event, nil
+}
+
+// SandboxServingKmsProviderBoundIterator is returned from FilterKmsProviderBound and is used to iterate over the raw logs and unpacked data for KmsProviderBound events raised by the SandboxServing contract.
+type SandboxServingKmsProviderBoundIterator struct {
+	Event *SandboxServingKmsProviderBound // Event containing the contract specifics and raw log
+
+	contract *bind.BoundContract // Generic contract to use for unpacking event data
+	event    string              // Event name to use for unpacking event data
+
+	logs chan types.Log        // Log channel receiving the found contract events
+	sub  ethereum.Subscription // Subscription for errors, completion and termination
+	done bool                  // Whether the subscription completed delivering logs
+	fail error                 // Occurred error to stop iteration
+}
+
+// Next advances the iterator to the subsequent event, returning whether there
+// are any more events found. In case of a retrieval or parsing error, false is
+// returned and Error() can be queried for the exact failure.
+func (it *SandboxServingKmsProviderBoundIterator) Next() bool {
+	// If the iterator failed, stop iterating
+	if it.fail != nil {
+		return false
+	}
+	// If the iterator completed, deliver directly whatever's available
+	if it.done {
+		select {
+		case log := <-it.logs:
+			it.Event = new(SandboxServingKmsProviderBound)
+			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+				it.fail = err
+				return false
+			}
+			it.Event.Raw = log
+			return true
+
+		default:
+			return false
+		}
+	}
+	// Iterator still in progress, wait for either a data or an error event
+	select {
+	case log := <-it.logs:
+		it.Event = new(SandboxServingKmsProviderBound)
+		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+			it.fail = err
+			return false
+		}
+		it.Event.Raw = log
+		return true
+
+	case err := <-it.sub.Err():
+		it.done = true
+		it.fail = err
+		return it.Next()
+	}
+}
+
+// Error returns any retrieval or parsing error occurred during filtering.
+func (it *SandboxServingKmsProviderBoundIterator) Error() error {
+	return it.fail
+}
+
+// Close terminates the iteration process, releasing any pending underlying
+// resources.
+func (it *SandboxServingKmsProviderBoundIterator) Close() error {
+	it.sub.Unsubscribe()
+	return nil
+}
+
+// SandboxServingKmsProviderBound represents a KmsProviderBound event raised by the SandboxServing contract.
+type SandboxServingKmsProviderBound struct {
+	Provider      common.Address
+	AppId         string
+	EndorsingNode common.Address
+	Epoch         *big.Int
+	Raw           types.Log // Blockchain specific contextual infos
+}
+
+// FilterKmsProviderBound is a free log retrieval operation binding the contract event 0x6cc3c9c6fa0d7cb191be3a5f47936b876e8a09bd360fe9d036f3ebd7c7f3b61e.
+//
+// Solidity: event KmsProviderBound(address indexed provider, string appId, address indexed endorsingNode, uint256 epoch)
+func (_SandboxServing *SandboxServingFilterer) FilterKmsProviderBound(opts *bind.FilterOpts, provider []common.Address, endorsingNode []common.Address) (*SandboxServingKmsProviderBoundIterator, error) {
+
+	var providerRule []interface{}
+	for _, providerItem := range provider {
+		providerRule = append(providerRule, providerItem)
+	}
+
+	var endorsingNodeRule []interface{}
+	for _, endorsingNodeItem := range endorsingNode {
+		endorsingNodeRule = append(endorsingNodeRule, endorsingNodeItem)
+	}
+
+	logs, sub, err := _SandboxServing.contract.FilterLogs(opts, "KmsProviderBound", providerRule, endorsingNodeRule)
+	if err != nil {
+		return nil, err
+	}
+	return &SandboxServingKmsProviderBoundIterator{contract: _SandboxServing.contract, event: "KmsProviderBound", logs: logs, sub: sub}, nil
+}
+
+// WatchKmsProviderBound is a free log subscription operation binding the contract event 0x6cc3c9c6fa0d7cb191be3a5f47936b876e8a09bd360fe9d036f3ebd7c7f3b61e.
+//
+// Solidity: event KmsProviderBound(address indexed provider, string appId, address indexed endorsingNode, uint256 epoch)
+func (_SandboxServing *SandboxServingFilterer) WatchKmsProviderBound(opts *bind.WatchOpts, sink chan<- *SandboxServingKmsProviderBound, provider []common.Address, endorsingNode []common.Address) (event.Subscription, error) {
+
+	var providerRule []interface{}
+	for _, providerItem := range provider {
+		providerRule = append(providerRule, providerItem)
+	}
+
+	var endorsingNodeRule []interface{}
+	for _, endorsingNodeItem := range endorsingNode {
+		endorsingNodeRule = append(endorsingNodeRule, endorsingNodeItem)
+	}
+
+	logs, sub, err := _SandboxServing.contract.WatchLogs(opts, "KmsProviderBound", providerRule, endorsingNodeRule)
+	if err != nil {
+		return nil, err
+	}
+	return event.NewSubscription(func(quit <-chan struct{}) error {
+		defer sub.Unsubscribe()
+		for {
+			select {
+			case log := <-logs:
+				// New log arrived, parse the event and forward to the user
+				event := new(SandboxServingKmsProviderBound)
+				if err := _SandboxServing.contract.UnpackLog(event, "KmsProviderBound", log); err != nil {
+					return err
+				}
+				event.Raw = log
+
+				select {
+				case sink <- event:
+				case err := <-sub.Err():
+					return err
+				case <-quit:
+					return nil
+				}
+			case err := <-sub.Err():
+				return err
+			case <-quit:
+				return nil
+			}
+		}
+	}), nil
+}
+
+// ParseKmsProviderBound is a log parse operation binding the contract event 0x6cc3c9c6fa0d7cb191be3a5f47936b876e8a09bd360fe9d036f3ebd7c7f3b61e.
+//
+// Solidity: event KmsProviderBound(address indexed provider, string appId, address indexed endorsingNode, uint256 epoch)
+func (_SandboxServing *SandboxServingFilterer) ParseKmsProviderBound(log types.Log) (*SandboxServingKmsProviderBound, error) {
+	event := new(SandboxServingKmsProviderBound)
+	if err := _SandboxServing.contract.UnpackLog(event, "KmsProviderBound", log); err != nil {
+		return nil, err
+	}
+	event.Raw = log
+	return event, nil
+}
+
+// SandboxServingKmsProviderRepinnedIterator is returned from FilterKmsProviderRepinned and is used to iterate over the raw logs and unpacked data for KmsProviderRepinned events raised by the SandboxServing contract.
+type SandboxServingKmsProviderRepinnedIterator struct {
+	Event *SandboxServingKmsProviderRepinned // Event containing the contract specifics and raw log
+
+	contract *bind.BoundContract // Generic contract to use for unpacking event data
+	event    string              // Event name to use for unpacking event data
+
+	logs chan types.Log        // Log channel receiving the found contract events
+	sub  ethereum.Subscription // Subscription for errors, completion and termination
+	done bool                  // Whether the subscription completed delivering logs
+	fail error                 // Occurred error to stop iteration
+}
+
+// Next advances the iterator to the subsequent event, returning whether there
+// are any more events found. In case of a retrieval or parsing error, false is
+// returned and Error() can be queried for the exact failure.
+func (it *SandboxServingKmsProviderRepinnedIterator) Next() bool {
+	// If the iterator failed, stop iterating
+	if it.fail != nil {
+		return false
+	}
+	// If the iterator completed, deliver directly whatever's available
+	if it.done {
+		select {
+		case log := <-it.logs:
+			it.Event = new(SandboxServingKmsProviderRepinned)
+			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+				it.fail = err
+				return false
+			}
+			it.Event.Raw = log
+			return true
+
+		default:
+			return false
+		}
+	}
+	// Iterator still in progress, wait for either a data or an error event
+	select {
+	case log := <-it.logs:
+		it.Event = new(SandboxServingKmsProviderRepinned)
+		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+			it.fail = err
+			return false
+		}
+		it.Event.Raw = log
+		return true
+
+	case err := <-it.sub.Err():
+		it.done = true
+		it.fail = err
+		return it.Next()
+	}
+}
+
+// Error returns any retrieval or parsing error occurred during filtering.
+func (it *SandboxServingKmsProviderRepinnedIterator) Error() error {
+	return it.fail
+}
+
+// Close terminates the iteration process, releasing any pending underlying
+// resources.
+func (it *SandboxServingKmsProviderRepinnedIterator) Close() error {
+	it.sub.Unsubscribe()
+	return nil
+}
+
+// SandboxServingKmsProviderRepinned represents a KmsProviderRepinned event raised by the SandboxServing contract.
+type SandboxServingKmsProviderRepinned struct {
+	Provider      common.Address
+	PreviousEpoch *big.Int
+	Epoch         *big.Int
+	Raw           types.Log // Blockchain specific contextual infos
+}
+
+// FilterKmsProviderRepinned is a free log retrieval operation binding the contract event 0x01a70480252f96cdcddcd58cad8a3d4cfb656608380d92057158ccdcd5ab4701.
+//
+// Solidity: event KmsProviderRepinned(address indexed provider, uint256 previousEpoch, uint256 epoch)
+func (_SandboxServing *SandboxServingFilterer) FilterKmsProviderRepinned(opts *bind.FilterOpts, provider []common.Address) (*SandboxServingKmsProviderRepinnedIterator, error) {
+
+	var providerRule []interface{}
+	for _, providerItem := range provider {
+		providerRule = append(providerRule, providerItem)
+	}
+
+	logs, sub, err := _SandboxServing.contract.FilterLogs(opts, "KmsProviderRepinned", providerRule)
+	if err != nil {
+		return nil, err
+	}
+	return &SandboxServingKmsProviderRepinnedIterator{contract: _SandboxServing.contract, event: "KmsProviderRepinned", logs: logs, sub: sub}, nil
+}
+
+// WatchKmsProviderRepinned is a free log subscription operation binding the contract event 0x01a70480252f96cdcddcd58cad8a3d4cfb656608380d92057158ccdcd5ab4701.
+//
+// Solidity: event KmsProviderRepinned(address indexed provider, uint256 previousEpoch, uint256 epoch)
+func (_SandboxServing *SandboxServingFilterer) WatchKmsProviderRepinned(opts *bind.WatchOpts, sink chan<- *SandboxServingKmsProviderRepinned, provider []common.Address) (event.Subscription, error) {
+
+	var providerRule []interface{}
+	for _, providerItem := range provider {
+		providerRule = append(providerRule, providerItem)
+	}
+
+	logs, sub, err := _SandboxServing.contract.WatchLogs(opts, "KmsProviderRepinned", providerRule)
+	if err != nil {
+		return nil, err
+	}
+	return event.NewSubscription(func(quit <-chan struct{}) error {
+		defer sub.Unsubscribe()
+		for {
+			select {
+			case log := <-logs:
+				// New log arrived, parse the event and forward to the user
+				event := new(SandboxServingKmsProviderRepinned)
+				if err := _SandboxServing.contract.UnpackLog(event, "KmsProviderRepinned", log); err != nil {
+					return err
+				}
+				event.Raw = log
+
+				select {
+				case sink <- event:
+				case err := <-sub.Err():
+					return err
+				case <-quit:
+					return nil
+				}
+			case err := <-sub.Err():
+				return err
+			case <-quit:
+				return nil
+			}
+		}
+	}), nil
+}
+
+// ParseKmsProviderRepinned is a log parse operation binding the contract event 0x01a70480252f96cdcddcd58cad8a3d4cfb656608380d92057158ccdcd5ab4701.
+//
+// Solidity: event KmsProviderRepinned(address indexed provider, uint256 previousEpoch, uint256 epoch)
+func (_SandboxServing *SandboxServingFilterer) ParseKmsProviderRepinned(log types.Log) (*SandboxServingKmsProviderRepinned, error) {
+	event := new(SandboxServingKmsProviderRepinned)
+	if err := _SandboxServing.contract.UnpackLog(event, "KmsProviderRepinned", log); err != nil {
 		return nil, err
 	}
 	event.Raw = log

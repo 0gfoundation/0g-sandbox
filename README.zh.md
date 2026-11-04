@@ -1,5 +1,8 @@
 # 0G Sandbox
 
+基于 appId 的 attestor 授权、稳定 app signer、attested TLS、sealed 容器证书与
+attestor TLS 声明：[应用身份配置](docs/APP_IDENTITY.zh.md)。
+
 专为 Vibe Coding 打造的私有隔离沙盒，由 0G Network 提供支持。
 
 > English version: [README.md](README.md)
@@ -120,6 +123,7 @@ go run ./cmd/billing/
 | `SETTLEMENT_CONTRACT` | （必填）| BeaconProxy 合约地址 |
 | `RPC_URL` | （必填）| EVM RPC 地址 |
 | `CHAIN_ID` | （必填）| 链 ID（如 16602）|
+| `PROVIDER_KEY_SOURCE` | `local` | provider 身份。`local`：节点的 TEE signer，每次 tapp-server 重启都会换，重启后余额、service 和 gas 都要迁到新地址。`kms`：稳定的 app signer（`GetAppSigner`，material `provider`），每次启动、每个节点都一样；需要开启 attested admission 的 KMS，以及支持度量类型化身份的 tapp-server ≥ 0.12.0。用 `cmd/provider register --kms` 注册 |
 | `REDIS_ADDR` | `redis:6379` | Redis 地址 |
 | `COMPUTE_PRICE_PER_SEC` | `16667` | 计算费用 fallback（链上 Provider 注册后以链上值为准）|
 | `CREATE_FEE` | `5000000` | 创建沙盒固定费用 fallback（链上注册后以链上值为准）|
@@ -127,8 +131,12 @@ go run ./cmd/billing/
 | `SSH_GATEWAY_HOST` | — | SSH 命令中重写的网关主机（如 `<provider-ip>`）；未设置时退回到浏览器 hostname |
 | `PROXY_DOMAIN` | — | 沙盒服务端口 URL 的域名模板：`http://<port>-<id>.<PROXY_DOMAIN>/<path>`。可用 `<your-ip>.nip.io:4000`（nip.io）或 `sandbox.yourdomain.com`（配合 nginx 的真实域名）。|
 | `PORT` | `8080` | HTTP 服务端口 |
+| `TLS_ENABLED` | `false` | `true`：使用 tapp 返回的 attested app 证书（`GetAppTlsCert`）直接终止 TLS，供调用方 pin |
+| `ATTESTOR_APP_ID` | — | attestor 的 tapp appId。其发现的稳定 app signer 成为应用管理员；在 `PROVIDER_KEY_SOURCE=kms` 时，其 TLS pin 经签名后由 `GET /api/attestor-tls` 提供。需要 `BACKEND_TAPP_SOCKET`。未设置 `PROVIDER_KEY_SOURCE=kms` 时服务仍会启动并记录警告，该端点返回 503；未设置 `TLS_ENABLED=true` 时同样只记录警告 |
+| `ATTESTOR_INSTANCE` | — | attestor app 重新注册或转移所有权后，重新授权其注册实例：取自其 `getAppInfo` 的 `<registeredAt>:<0x owner>`。替换首次使用时保存的实例；格式错误时拒绝启动。只从进程环境变量读取，从不读取 `.env` 文件：compose 必须转发它，与 `docker/sandbox/docker-compose.yml` 一致。见 [docs/APP_IDENTITY.zh.md](docs/APP_IDENTITY.zh.md) |
 | `MOCK_TEE` | — | 设为 `true` 用于本地开发（使用 `MOCK_APP_PRIVATE_KEY` 代替 TDX gRPC）|
 | `MOCK_APP_PRIVATE_KEY` | — | `MOCK_TEE=true` 时使用的十六进制私钥 |
+| `MOCK_PROVIDER_PRIVATE_KEY` | — | `MOCK_TEE=true` 且 `PROVIDER_KEY_SOURCE=kms` 时用作 KMS provider key 的十六进制私钥 |
 
 ### SSH 网关密钥生成
 

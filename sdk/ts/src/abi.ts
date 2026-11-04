@@ -57,6 +57,23 @@ export const sandboxServingAbi = [
   },
   {
     type: 'function',
+    name: 'isActiveProvider',
+    stateMutability: 'view',
+    inputs: [{ name: 'provider', type: 'address' }],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    type: 'function',
+    name: 'kmsBindings',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'address' }],
+    outputs: [
+      { name: 'epoch', type: 'uint256' },
+      { name: 'appIdHash', type: 'bytes32' },
+    ],
+  },
+  {
+    type: 'function',
     name: 'getLastNonce',
     stateMutability: 'view',
     inputs: [

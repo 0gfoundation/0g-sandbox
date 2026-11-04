@@ -4,6 +4,10 @@ Private, isolated sandboxes for vibe coding — powered by 0G Network.
 
 > 中文版：[README.zh.md](README.zh.md)
 
+AppId-based attestor authorization, stable app signers, attested app TLS, sealed
+container certificates and the attestor TLS statement:
+[application identity setup](docs/APP_IDENTITY.md).
+
 ---
 
 ## Problem
@@ -148,7 +152,8 @@ go run ./cmd/billing/
 | `SETTLEMENT_CONTRACT` | (required) | BeaconProxy address |
 | `RPC_URL` | (required) | EVM RPC endpoint |
 | `CHAIN_ID` | (required) | Chain ID (e.g. 16602) |
-| `BACKEND_APP_NAME` | (required) | tapp app-id = TappRegistry appId; the app owner (standing admin) and provider identity (TEE signer) are both derived from it at runtime |
+| `BACKEND_APP_NAME` | (required) | tapp app-id = TappRegistry appId; the app owner (standing admin) and provider identity are both derived from it at runtime |
+| `PROVIDER_KEY_SOURCE` | `local` | Provider identity. `local`: the node's TEE signer, new on every tapp-server restart, so a reboot moves balances, the service and gas to a new address. `kms`: the stable app signer (`GetAppSigner`, material `provider`), the same on every boot and node; requires KMS with attested admission and tapp-server ≥ 0.12.0 with measured typed identities. Register it with `cmd/provider register --kms` |
 | `REDIS_ADDR` | `redis:6379` | Redis address |
 | `COMPUTE_PRICE_PER_SEC` | `16667` | neuron/sec fallback (used only when per-resource on-chain pricing is not set) |
 | `CREATE_FEE` | `5000000` | neuron flat fee fallback (on-chain value takes priority after provider registration) |
@@ -156,8 +161,12 @@ go run ./cmd/billing/
 | `SSH_GATEWAY_HOST` | — | SSH gateway host rewritten in SSH commands (e.g. `<provider-ip>`); falls back to browser hostname if unset |
 | `PROXY_DOMAIN` | — | Domain template for sandbox service-port URLs: `http://<port>-<id>.<PROXY_DOMAIN>/<path>`. Use `<your-ip>.nip.io:4000` (nip.io) or `sandbox.yourdomain.com` (real domain with nginx). |
 | `PORT` | `8080` | HTTP server port |
+| `TLS_ENABLED` | `false` | `true`: terminate TLS with the attested app certificate from tapp (`GetAppTlsCert`) so callers can pin it |
+| `ATTESTOR_APP_ID` | — | Attestor tapp appId. Its discovered stable app signer becomes an application admin; with `PROVIDER_KEY_SOURCE=kms` its TLS pins are served, signed, at `GET /api/attestor-tls`. Needs `BACKEND_TAPP_SOCKET`. Without `PROVIDER_KEY_SOURCE=kms` the server starts with a warning and that endpoint answers 503; without `TLS_ENABLED=true` it also starts with a warning |
+| `ATTESTOR_INSTANCE` | — | Re-authorizes the attestor app's registration instance after a re-registration or ownership transfer: `<registeredAt>:<0x owner>` from its `getAppInfo`. Replaces the instance stored on first use; a malformed value refuses startup. Read only from the process environment, never from a `.env` file: a compose must forward it, as `docker/sandbox/docker-compose.yml` does. See [docs/APP_IDENTITY.md](docs/APP_IDENTITY.md) |
 | `MOCK_TEE` | — | Set to `true` for local dev (uses `MOCK_APP_PRIVATE_KEY` instead of TDX gRPC) |
 | `MOCK_APP_PRIVATE_KEY` | — | Hex private key used when `MOCK_TEE=true` |
+| `MOCK_PROVIDER_PRIVATE_KEY` | — | Hex private key used as the KMS provider key when `MOCK_TEE=true` and `PROVIDER_KEY_SOURCE=kms` |
 
 ### SSH Gateway Key Generation
 

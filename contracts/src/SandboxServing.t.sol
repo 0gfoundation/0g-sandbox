@@ -16,10 +16,25 @@ contract MockTappRegistry is ITappRegistry {
     mapping(string => mapping(address => uint256)) public nodeAddedAt;   // appId => signer => addedAt
     mapping(address => mapping(string => bool)) public userAcked;        // user => appId => acked
     mapping(string => mapping(address => bool)) public invalidators;     // appId => contract => authorized
+    mapping(string => uint256) public appRegisteredAt;                   // appId => registeredAt
+    mapping(string => bytes[]) internal appImageHashes;                  // appId => imageHashes
     uint256 public invalidateCount;
 
     function setAppOwner(string calldata appId, address ownerAddr) external {
         appOwner[appId] = ownerAddr;
+        if (appRegisteredAt[appId] == 0) appRegisteredAt[appId] = block.timestamp;
+    }
+    /// The app's last node removed and the appId registered again — by
+    /// `newOwner`, as a new TappRegistry instance (new registeredAt).
+    function reRegister(string calldata appId, address newOwner) external {
+        appOwner[appId] = newOwner;
+        appRegisteredAt[appId] += 1;
+    }
+    function setImageHashes(string calldata appId, uint256 n) external {
+        delete appImageHashes[appId];
+        for (uint256 i = 0; i < n; i++) {
+            appImageHashes[appId].push(abi.encodePacked(keccak256(abi.encode(appId, i))));
+        }
     }
     function addNode(string calldata appId, address signer) external {
         nodeAddedAt[appId][signer] = block.timestamp;
@@ -36,8 +51,13 @@ contract MockTappRegistry is ITappRegistry {
 
     // ── ITappRegistry impl ──────────────────────────────────────────────────
     function getAppInfo(string calldata appId) external view returns (AppInfo memory) {
-        bytes[] memory empty;
-        return AppInfo({composeHash: "", volumesHash: "", imageHashes: empty, owner: appOwner[appId], registeredAt: 0});
+        return AppInfo({
+            composeHash:  "",
+            volumesHash:  "",
+            imageHashes:  appImageHashes[appId],
+            owner:        appOwner[appId],
+            registeredAt: appRegisteredAt[appId]
+        });
     }
     function getNode(string calldata appId, address signer) external view returns (NodeInfo memory) {
         return NodeInfo({teeUrl: "", addedAt: nodeAddedAt[appId][signer], stakeAmount: 0});
@@ -565,6 +585,280 @@ contract SandboxServingTest is Test {
     function test_IsTEEAcknowledged_UnknownProviderReturnsFalse() public {
         address unknown = makeAddr("unknown");
         assertFalse(serving.isTEEAcknowledged(user, unknown));
+    }
+
+    // ── KMS providers ────────────────────────────────────────────────────────
+
+    // The app's KMS key (GetSecretResource): the same on every boot, never a node.
+    uint256 constant KMS_PRIV = 0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a;
+
+    function _kmsProvider() internal pure returns (address) {
+        return vm.addr(KMS_PRIV);
+    }
+
+    function _endorse(uint256 nodePriv, address kmsProvider, string memory appId) internal view returns (bytes memory) {
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(nodePriv, serving.kmsProviderDigest(kmsProvider, appId));
+        return abi.encodePacked(r, s, v);
+    }
+
+    /// Owner registers the KMS provider, endorsed by node #1, and a user funds it.
+    function _registerKms() internal returns (address kmsProvider) {
+        kmsProvider = _kmsProvider();
+        bytes memory endorsement = _endorse(TEE_PRIV, kmsProvider, APP_ID); // before the prank: it calls serving
+        vm.prank(appOwner);
+        serving.addOrUpdateKmsService(
+            kmsProvider, "https://provider.example.com", APP_ID, 1000, 5000, 500, endorsement
+        );
+        vm.prank(user);
+        serving.deposit{value: 1 ether}(user, kmsProvider);
+        tap.setAck(user, APP_ID, true);
+    }
+
+    function test_Kms_RegisterAndSettle() public {
+        address kmsProvider = _registerKms();
+        (uint256 epoch, bytes32 appIdHash) = serving.kmsBindings(kmsProvider);
+        assertEq(epoch, tap.appRegisteredAt(APP_ID));
+        assertEq(appIdHash, keccak256(bytes(APP_ID)));
+        assertTrue(serving.isActiveProvider(kmsProvider));
+
+        SandboxServing.SandboxVoucher memory v =
+            _makeVoucherSignedBy(KMS_PRIV, user, kmsProvider, 1000, keccak256("k1"), 1);
+        assertEq(uint8(_settle(v)), uint8(SandboxServing.SettlementStatus.SUCCESS));
+        assertEq(serving.getProviderEarnings(kmsProvider), 1000);
+    }
+
+    /// The point of a KMS provider: the node that endorsed it reboots into a
+    /// new signer, and the provider — its balances, nonces, service — carries on.
+    function test_Kms_SurvivesNodeRotation() public {
+        address kmsProvider = _registerKms();
+        tap.addNode(APP_ID, provider2);
+        tap.removeNode(APP_ID, provider);
+
+        SandboxServing.SandboxVoucher memory v =
+            _makeVoucherSignedBy(KMS_PRIV, user, kmsProvider, 1000, keccak256("after-reboot"), 1);
+        assertEq(uint8(_settle(v)), uint8(SandboxServing.SettlementStatus.SUCCESS));
+        assertTrue(serving.isActiveProvider(kmsProvider));
+    }
+
+    function test_Kms_VoucherSignedByNodeRejected() public {
+        address kmsProvider = _registerKms();
+        // An active node signing for the KMS provider is not the provider.
+        SandboxServing.SandboxVoucher memory v =
+            _makeVoucherSignedBy(TEE_PRIV, user, kmsProvider, 1000, keccak256("node-signs"), 1);
+        assertEq(uint8(_settle(v)), uint8(SandboxServing.SettlementStatus.INVALID_SIGNATURE));
+    }
+
+    function test_Kms_EndorsementFromNonNodeRejected() public {
+        address kmsProvider = _kmsProvider();
+        uint256 strangerPriv = 0x1111111111111111111111111111111111111111111111111111111111111111;
+        bytes memory endorsement = _endorse(strangerPriv, kmsProvider, APP_ID);
+        vm.expectRevert("endorsement not from an active node");
+        vm.prank(appOwner);
+        serving.addOrUpdateKmsService(kmsProvider, "u", APP_ID, 1000, 5000, 500, endorsement);
+    }
+
+    function test_Kms_EndorsementForAnotherProviderRejected() public {
+        // A node's endorsement of one key does not register another.
+        address other = makeAddr("other");
+        bytes memory endorsement = _endorse(TEE_PRIV, _kmsProvider(), APP_ID);
+        vm.expectRevert("endorsement not from an active node");
+        vm.prank(appOwner);
+        serving.addOrUpdateKmsService(other, "u", APP_ID, 1000, 5000, 500, endorsement);
+    }
+
+    function test_Kms_RejectsNonAppOwner() public {
+        address kmsProvider = _kmsProvider();
+        bytes memory endorsement = _endorse(TEE_PRIV, kmsProvider, APP_ID);
+        vm.expectRevert("not app owner");
+        vm.prank(makeAddr("impostor"));
+        serving.addOrUpdateKmsService(kmsProvider, "u", APP_ID, 1000, 5000, 500, endorsement);
+    }
+
+    function test_Kms_PathsDoNotMix() public {
+        address kmsProvider = _registerKms();
+        // A KMS provider cannot be updated through the node-signer path, which
+        // skips the endorsement and the app-instance check.
+        vm.expectRevert("kms provider; use addOrUpdateKmsService");
+        vm.prank(appOwner);
+        serving.addOrUpdateService(kmsProvider, "u", APP_ID, 1000, 5000, 500);
+
+        // A node-signer service cannot be turned into a KMS one in place.
+        bytes memory endorsement = _endorse(TEE_PRIV, provider, APP_ID);
+        vm.expectRevert("node-signer service; remove it first");
+        vm.prank(appOwner);
+        serving.addOrUpdateKmsService(provider, "u", APP_ID, 1000, 5000, 500, endorsement);
+    }
+
+    function test_Kms_PriceChangeInvalidatesAcks() public {
+        address kmsProvider = _registerKms();
+        uint256 before = tap.invalidateCount();
+        bytes memory endorsement = _endorse(TEE_PRIV, kmsProvider, APP_ID);
+        vm.prank(appOwner);
+        serving.addOrUpdateKmsService(kmsProvider, "u2", APP_ID, 2000, 5000, 500, endorsement);
+        assertEq(tap.invalidateCount(), before + 1);
+    }
+
+    /// The appId's last node removed, someone registers it again and gets the
+    /// same KMS key. The provider bound to the earlier instance stays theirs to
+    /// neither settle against nor manage.
+    function test_Kms_ReRegisteredAppLockedOut() public {
+        address kmsProvider = _registerKms();
+        _settle(_makeVoucherSignedBy(KMS_PRIV, user, kmsProvider, 1000, keccak256("k1"), 1));
+
+        address squatter = makeAddr("squatter");
+        uint256 squatterNodePriv = 0x2222222222222222222222222222222222222222222222222222222222222222;
+        tap.removeNode(APP_ID, provider);
+        tap.reRegister(APP_ID, squatter);
+        tap.addNode(APP_ID, vm.addr(squatterNodePriv));
+        tap.setAck(user, APP_ID, true); // even with the user's ack
+
+        SandboxServing.SandboxVoucher memory v =
+            _makeVoucherSignedBy(KMS_PRIV, user, kmsProvider, 1000, keccak256("squat"), 2);
+        assertEq(uint8(_settle(v)), uint8(SandboxServing.SettlementStatus.INVALID_SIGNATURE));
+        assertFalse(serving.isActiveProvider(kmsProvider));
+
+        vm.startPrank(squatter);
+        vm.expectRevert("not app owner");
+        serving.withdrawEarnings(kmsProvider);
+        vm.expectRevert("not app owner");
+        serving.removeService(kmsProvider);
+        bytes memory endorsement = _endorse(squatterNodePriv, kmsProvider, APP_ID);
+        vm.expectRevert("app re-registered since the provider was bound");
+        serving.addOrUpdateKmsService(kmsProvider, "u", APP_ID, 1, 1, 1, endorsement);
+        vm.stopPrank();
+
+        (uint256 bal,,) = serving.getBalance(user, kmsProvider);
+        assertEq(bal, 1 ether - 1000);
+        assertEq(serving.getProviderEarnings(kmsProvider), 1000);
+    }
+
+    function test_Kms_RemoveKeepsBinding() public {
+        address kmsProvider = _registerKms();
+        vm.prank(appOwner);
+        serving.removeService(kmsProvider);
+        (uint256 epoch,) = serving.kmsBindings(kmsProvider);
+        assertEq(epoch, tap.appRegisteredAt(APP_ID));
+
+        // Same instance: the owner can bring it back.
+        bytes memory endorsement = _endorse(TEE_PRIV, kmsProvider, APP_ID);
+        vm.prank(appOwner);
+        serving.addOrUpdateKmsService(kmsProvider, "u", APP_ID, 1000, 5000, 500, endorsement);
+        assertTrue(serving.isActiveProvider(kmsProvider));
+
+        // Under another appId: no.
+        string memory otherApp = "other-app";
+        tap.setAppOwner(otherApp, appOwner);
+        tap.addNode(otherApp, provider);
+        tap.authorize(otherApp, address(serving));
+        vm.prank(appOwner);
+        serving.removeService(kmsProvider);
+        bytes memory otherEndorsement = _endorse(TEE_PRIV, kmsProvider, otherApp);
+        vm.expectRevert("kms provider bound to another app");
+        vm.prank(appOwner);
+        serving.addOrUpdateKmsService(kmsProvider, "u", otherApp, 1000, 5000, 500, otherEndorsement);
+    }
+
+    /// TappRegistry redeployed: the app's new instance has a new registeredAt,
+    /// and only the contract owner can move the binding to it.
+    function test_Kms_RepinAfterRegistryRedeploy() public {
+        address kmsProvider = _registerKms();
+        MockTappRegistry tap2 = new MockTappRegistry();
+        vm.warp(block.timestamp + 100);
+        tap2.setAppOwner(APP_ID, appOwner);
+        tap2.addNode(APP_ID, provider);
+        tap2.setAck(user, APP_ID, true);
+        serving.setTappRegistry(address(tap2));
+        assertFalse(serving.isActiveProvider(kmsProvider));
+
+        vm.expectRevert("not owner");
+        vm.prank(appOwner);
+        serving.repinKmsProvider(kmsProvider);
+
+        serving.repinKmsProvider(kmsProvider);
+        assertTrue(serving.isActiveProvider(kmsProvider));
+        SandboxServing.SandboxVoucher memory v =
+            _makeVoucherSignedBy(KMS_PRIV, user, kmsProvider, 1000, keccak256("repinned"), 1);
+        assertEq(uint8(_settle(v)), uint8(SandboxServing.SettlementStatus.SUCCESS));
+
+        vm.expectRevert("not a kms provider");
+        serving.repinKmsProvider(provider);
+    }
+
+    /// The per-batch provider memo must key on the provider: a batch mixing a
+    /// node-signer provider and a KMS provider checks each by its own rule.
+    function test_Kms_MixedBatch() public {
+        address kmsProvider = _registerKms();
+        vm.prank(user);
+        serving.deposit{value: 1 ether}(user, provider);
+
+        SandboxServing.SandboxVoucher[] memory vs = new SandboxServing.SandboxVoucher[](4);
+        vs[0] = _makeVoucherSignedBy(KMS_PRIV, user, kmsProvider, 100, keccak256("a"), 1);
+        vs[1] = _makeVoucher(user, provider, 100, keccak256("b"), 1);
+        vs[2] = _makeVoucherSignedBy(KMS_PRIV, user, kmsProvider, 100, keccak256("c"), 2);
+        // node #1 signing for the KMS provider, right after a valid one: the memo
+        // must not let it through.
+        vs[3] = _makeVoucherSignedBy(TEE_PRIV, user, kmsProvider, 100, keccak256("d"), 3);
+        SandboxServing.SettlementStatus[] memory st = serving.settleFeesWithTEE(vs);
+        assertEq(uint8(st[0]), uint8(SandboxServing.SettlementStatus.SUCCESS));
+        assertEq(uint8(st[1]), uint8(SandboxServing.SettlementStatus.SUCCESS));
+        assertEq(uint8(st[2]), uint8(SandboxServing.SettlementStatus.SUCCESS));
+        assertEq(uint8(st[3]), uint8(SandboxServing.SettlementStatus.INVALID_SIGNATURE));
+
+        tap.removeNode(APP_ID, provider);
+        SandboxServing.SandboxVoucher[] memory vs2 = new SandboxServing.SandboxVoucher[](2);
+        vs2[0] = _makeVoucherSignedBy(KMS_PRIV, user, kmsProvider, 100, keccak256("e"), 4);
+        vs2[1] = _makeVoucher(user, provider, 100, keccak256("f"), 2);
+        SandboxServing.SettlementStatus[] memory st2 = serving.previewSettlementResults(vs2);
+        assertEq(uint8(st2[0]), uint8(SandboxServing.SettlementStatus.SUCCESS));
+        assertEq(uint8(st2[1]), uint8(SandboxServing.SettlementStatus.INVALID_SIGNATURE));
+    }
+
+    /// Pins the digest Go computes (internal/voucher TestKmsProviderDigestVector)
+    /// for the same chain, contract, provider and appId.
+    function test_Kms_DigestVector() public view {
+        assertEq(block.chainid, 31337);
+        assertEq(address(serving), 0x5991A2dF15A8F6A256D3Ec51E99254Cd3fb576A9);
+        assertEq(_kmsProvider(), 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC);
+        assertEq(
+            serving.kmsProviderDigest(_kmsProvider(), APP_ID),
+            0xf1a05d887d3bfa532429d95d0e9e270da85bc96e28217f12c54518beee1e3cb7
+        );
+    }
+
+    function test_IsActiveProvider_NodeSigner() public {
+        assertTrue(serving.isActiveProvider(provider));
+        tap.removeNode(APP_ID, provider);
+        assertFalse(serving.isActiveProvider(provider));
+        assertFalse(serving.isActiveProvider(makeAddr("unknown")));
+    }
+
+    /// Gas of one KMS-provider settlement against an app with 13 images (the
+    /// sandbox compose), batched vs not — getAppInfo is read once per batch.
+    function test_Kms_SettlementGas() public {
+        address kmsProvider = _registerKms();
+        tap.setImageHashes(APP_ID, 13);
+
+        SandboxServing.SandboxVoucher[] memory one = new SandboxServing.SandboxVoucher[](1);
+        one[0] = _makeVoucherSignedBy(KMS_PRIV, user, kmsProvider, 100, keccak256("g1"), 1);
+        uint256 g = gasleft();
+        serving.settleFeesWithTEE(one);
+        console.log("kms, 1 voucher:   ", g - gasleft());
+
+        SandboxServing.SandboxVoucher[] memory ten = new SandboxServing.SandboxVoucher[](10);
+        for (uint256 i = 0; i < 10; i++) {
+            ten[i] = _makeVoucherSignedBy(KMS_PRIV, user, kmsProvider, 100, keccak256(abi.encode(i)), 2 + i);
+        }
+        g = gasleft();
+        serving.settleFeesWithTEE(ten);
+        console.log("kms, 10 vouchers: ", g - gasleft());
+
+        vm.prank(user);
+        serving.deposit{value: 1 ether}(user, provider);
+        SandboxServing.SandboxVoucher[] memory legacy = new SandboxServing.SandboxVoucher[](1);
+        legacy[0] = _makeVoucher(user, provider, 100, keccak256("g2"), 1);
+        g = gasleft();
+        serving.settleFeesWithTEE(legacy);
+        console.log("node signer, 1:   ", g - gasleft());
     }
 
     // ── Admin ────────────────────────────────────────────────────────────────

@@ -144,7 +144,7 @@ func newTestEngine(dtona *daytona.Client, bh BillingHooks, wallet string) *gin.E
 		c.Set("wallet_address", wallet)
 		c.Next()
 	})
-	NewHandler(dtona, bh, nil, nil, nil, nil, nil, nil, nil, "", nil, "", nil, zap.NewNop(), "", nil, 0).Register(api)
+	NewHandler(dtona, bh, nil, nil, nil, nil, nil, nil, nil, "", nil, "", nil, zap.NewNop(), "", nil, nil, 0).Register(api)
 	return r
 }
 
@@ -441,7 +441,7 @@ func TestSealedOnly_RejectsUnsealedCreate(t *testing.T) {
 		c.Set("wallet_address", "0xWALLET")
 		c.Next()
 	})
-	h := NewHandler(dtona, &mockBilling{}, nil, nil, nil, nil, nil, nil, nil, "", nil, "", nil, zap.NewNop(), "", nil, 0)
+	h := NewHandler(dtona, &mockBilling{}, nil, nil, nil, nil, nil, nil, nil, "", nil, "", nil, zap.NewNop(), "", nil, nil, 0)
 	h.SealedOnly = true
 	h.Register(api)
 
@@ -464,8 +464,8 @@ func TestSealedOnly_RejectsUnsealedCreate(t *testing.T) {
 
 // TestSealedOnly_AcceptsSealedCreate confirms the gate doesn't accidentally
 // block sealed creates when sealed_only=true. Sealed: true must pass the
-// gate (and then hit the existing "TEE key not configured" path because the
-// test handler has teeKey=nil).
+// gate (and then hit the "KMS app signer not configured" path because the
+// test handler has sealKey=nil).
 func TestSealedOnly_AcceptsSealedCreate(t *testing.T) {
 	srv, _ := mockDaytona(t, nil)
 	dtona := daytona.NewClient(srv.URL, "test-key")
@@ -475,7 +475,7 @@ func TestSealedOnly_AcceptsSealedCreate(t *testing.T) {
 		c.Set("wallet_address", "0xWALLET")
 		c.Next()
 	})
-	h := NewHandler(dtona, &mockBilling{}, nil, nil, nil, nil, nil, nil, nil, "", nil, "", nil, zap.NewNop(), "", nil, 0)
+	h := NewHandler(dtona, &mockBilling{}, nil, nil, nil, nil, nil, nil, nil, "", nil, "", nil, zap.NewNop(), "", nil, nil, 0)
 	h.SealedOnly = true
 	h.Register(api)
 
@@ -485,10 +485,10 @@ func TestSealedOnly_AcceptsSealedCreate(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	// teeKey is nil in the test setup, so we expect 501 (not 400 from the
+	// sealKey is nil in the test setup, so we expect 501 (not 400 from the
 	// SealedOnly gate). That confirms the gate let the request through.
 	if w.Code != http.StatusNotImplemented {
-		t.Fatalf("expected 501 (TEE key not configured) after passing sealed gate, got %d: %s",
+		t.Fatalf("expected 501 (KMS app signer not configured) after passing sealed gate, got %d: %s",
 			w.Code, w.Body.String())
 	}
 }
@@ -563,7 +563,7 @@ func TestVolumesList_Admin_Forwarded(t *testing.T) {
 		c.Next()
 	})
 	NewHandler(dtona, &mockBilling{}, nil, nil, nil, nil, nil, nil, nil, "",
-		[]string{"0xadmin"}, "", nil, zap.NewNop(), "", nil, 0).Register(api)
+		[]string{"0xadmin"}, "", nil, zap.NewNop(), "", nil, nil, 0).Register(api)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/volumes", nil)
 	w := httptest.NewRecorder()
@@ -655,7 +655,7 @@ func TestBalanceEndpoint_SubtractsDebtAndReserved(t *testing.T) {
 		c.Next()
 	})
 	NewHandler(dtona, &mockBilling{}, &mockBalChecker{bal: big.NewInt(1000)}, nil, nil,
-		nil, nil, nil, nil, provider, nil, "", rdb, zap.NewNop(), "", nil, 0).Register(api)
+		nil, nil, nil, nil, provider, nil, "", rdb, zap.NewNop(), "", nil, nil, 0).Register(api)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/balance", nil)
@@ -700,7 +700,7 @@ func TestForward_StripsOverrideHeaders(t *testing.T) {
 		c.Next()
 	})
 	NewHandler(dtona, &mockBilling{}, nil, nil, nil, nil, nil, nil, nil, "",
-		[]string{"0xadmin"}, "", nil, zap.NewNop(), "", nil, 0).Register(api)
+		[]string{"0xadmin"}, "", nil, zap.NewNop(), "", nil, nil, 0).Register(api)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/volumes", nil)
 	req.Header.Set("X-Original-URL", "/api/sandbox/victim/start")
@@ -786,7 +786,7 @@ func TestEvents_DefaultSinceIsBounded(t *testing.T) {
 	r := gin.New()
 	api := r.Group("/api", func(c *gin.Context) { c.Set("wallet_address", "0xWALLET"); c.Next() })
 	NewHandler(dtona, &mockBilling{}, nil, nil, fetcher, nil, nil, nil, nil, "",
-		nil, "", nil, zap.NewNop(), "", nil, 0).RegisterPublic(api)
+		nil, "", nil, zap.NewNop(), "", nil, nil, 0).RegisterPublic(api)
 
 	for _, q := range []string{"", "?since=0"} {
 		w := httptest.NewRecorder()
@@ -838,7 +838,7 @@ func TestCreateGate_ConcurrentCreates_OnlyOneAdmitted(t *testing.T) {
 	// Balance 150 covers exactly one create.
 	NewHandler(dtona, &mockBilling{}, &mockBalChecker{bal: big.NewInt(150)}, nil, nil,
 		big.NewInt(100), new(big.Int), new(big.Int), new(big.Int), "0xPROV",
-		nil, "", rdb, zap.NewNop(), "", nil, 60).Register(api)
+		nil, "", rdb, zap.NewNop(), "", nil, nil, 60).Register(api)
 
 	const n = 8
 	codes := make(chan int, n)
@@ -893,7 +893,7 @@ func TestCreateGate_RejectionRollsBackReservation(t *testing.T) {
 	api := r.Group("/api", func(c *gin.Context) { c.Set("wallet_address", "0xW"); c.Next() })
 	NewHandler(dtona, &mockBilling{}, &mockBalChecker{bal: big.NewInt(10)}, nil, nil,
 		big.NewInt(100), new(big.Int), new(big.Int), new(big.Int), "0xPROV",
-		nil, "", rdb, zap.NewNop(), "", nil, 60).Register(api)
+		nil, "", rdb, zap.NewNop(), "", nil, nil, 60).Register(api)
 
 	for i := 0; i < 3; i++ {
 		w := httptest.NewRecorder()
@@ -931,7 +931,7 @@ func TestStartGate_OpenSession_NoReservationTaken(t *testing.T) {
 	api := r.Group("/api", func(c *gin.Context) { c.Set("wallet_address", "0xW"); c.Next() })
 	NewHandler(dtona, &mockBilling{}, &mockBalChecker{bal: big.NewInt(1000)}, nil, nil,
 		big.NewInt(100), big.NewInt(1), new(big.Int), new(big.Int), "0xPROV",
-		nil, "", rdb, zap.NewNop(), "", nil, 60).Register(api)
+		nil, "", rdb, zap.NewNop(), "", nil, nil, 60).Register(api)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/sandbox/sb-open/start", nil)
@@ -965,7 +965,7 @@ func TestSnapshotCreate_BillsSnapshotSpec(t *testing.T) {
 	r := gin.New()
 	api := r.Group("/api", func(c *gin.Context) { c.Set("wallet_address", "0xW"); c.Next() })
 	NewHandler(dtona, mb, nil, nil, nil, big.NewInt(1), new(big.Int), new(big.Int), new(big.Int),
-		"0xPROV", nil, "", nil, zap.NewNop(), "", nil, 60).Register(api)
+		"0xPROV", nil, "", nil, zap.NewNop(), "", nil, nil, 60).Register(api)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"big-4c"}`))

@@ -43,8 +43,8 @@ func (b *batchChain) SettleStatusesFromReceipt(_ context.Context, _ *types.Recei
 func (b *batchChain) GetLastNonce(context.Context, common.Address, common.Address) (*big.Int, error) {
 	return big.NewInt(0), nil
 }
-func (b *batchChain) ProviderAddress() common.Address                    { return b.provider }
-func (b *batchChain) IsLocalTEEActiveNode(context.Context) (bool, error) { return true, nil }
+func (b *batchChain) ProviderAddress() common.Address                { return b.provider }
+func (b *batchChain) IsProviderActive(context.Context) (bool, error) { return true, nil }
 func (b *batchChain) GetBalanceBatch(_ context.Context, users []common.Address, _ common.Address) ([]*big.Int, error) {
 	out := make([]*big.Int, len(users))
 	for i := range out {

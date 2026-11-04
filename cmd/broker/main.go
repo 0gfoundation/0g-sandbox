@@ -59,7 +59,7 @@ func main() {
 	// ── Payment layer ─────────────────────────────────────────────────────────
 	var payment broker.PaymentLayer
 	if cfg.Broker.PaymentLayerURL != "" {
-		payment = broker.NewHTTPPaymentLayer(cfg.Broker.PaymentLayerURL, onchain.PrivateKey(), log, rdb, cfg.Broker.DepositPollIntervalSec, cfg.Broker.DepositPollTimeoutSec, cfg.Broker.MonitorIntervalSec)
+		payment = broker.NewHTTPPaymentLayer(cfg.Broker.PaymentLayerURL, onchain.NodeKey(), log, rdb, cfg.Broker.DepositPollIntervalSec, cfg.Broker.DepositPollTimeoutSec, cfg.Broker.MonitorIntervalSec)
 		log.Info("payment layer configured", zap.String("url", cfg.Broker.PaymentLayerURL))
 	} else {
 		payment = broker.NewNoopPaymentLayer(log)

@@ -378,7 +378,7 @@ func buildServer(t *testing.T, dtona *daytona.Client, bh proxy.BillingHooks, rdb
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	api := r.Group("/api", auth.Middleware(rdb))
-	proxy.NewHandler(dtona, bh, nil, nil, nil, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), "", nil, "", rdb, zap.NewNop(), "", nil, 0).Register(api)
+	proxy.NewHandler(dtona, bh, nil, nil, nil, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), "", nil, "", rdb, zap.NewNop(), "", nil, nil, 0).Register(api)
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
 	return srv
@@ -967,7 +967,7 @@ func buildServerWithBroker(t *testing.T, dtona *daytona.Client, bh proxy.Billing
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	api := r.Group("/api", auth.Middleware(rdb))
-	proxy.NewHandler(dtona, bh, nil, nil, nil, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), "", nil, "", rdb, zap.NewNop(), brokerURL, teeKey, 60).Register(api)
+	proxy.NewHandler(dtona, bh, nil, nil, nil, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), "", nil, "", rdb, zap.NewNop(), brokerURL, teeKey, teeKey, 60).Register(api)
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
 	return srv
@@ -1090,7 +1090,7 @@ func buildServerFull(t *testing.T, dtona *daytona.Client, bh proxy.BillingHooks,
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	api := r.Group("/api", auth.Middleware(rdb))
-	proxy.NewHandler(dtona, bh, balCheck, nil, nil, minBalance, big.NewInt(0), big.NewInt(0), big.NewInt(0), "", nil, "", rdb, zap.NewNop(), brokerURL, teeKey, 60).Register(api)
+	proxy.NewHandler(dtona, bh, balCheck, nil, nil, minBalance, big.NewInt(0), big.NewInt(0), big.NewInt(0), "", nil, "", rdb, zap.NewNop(), brokerURL, teeKey, teeKey, 60).Register(api)
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
 	return srv

@@ -37,12 +37,11 @@ func (m *mockChain) GetServiceInfo(_ context.Context, provider common.Address) (
 	return svc, nil
 }
 
-// IsActiveNode treats every provider whose service declares the appId as an
-// active node of it (v2: provider = the node's TEE signer), so indexed
-// providers stay live unless a test removes their service.
-func (m *mockChain) IsActiveNode(_ context.Context, appId string, signer common.Address) (bool, error) {
-	svc, ok := m.services[signer.Hex()]
-	return ok && svc.AppId == appId, nil
+// IsActiveProvider treats every provider with a service as active, so
+// indexed providers stay live unless a test removes their service.
+func (m *mockChain) IsActiveProvider(_ context.Context, provider common.Address) (bool, error) {
+	svc, ok := m.services[provider.Hex()]
+	return ok && svc.AppId != "", nil
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -229,7 +228,7 @@ func (m *mockChainCapture) GetServiceUpdatedEvents(_ context.Context, fromBlock 
 func (m *mockChainCapture) GetServiceInfo(_ context.Context, _ common.Address) (*chain.ServiceInfo, error) {
 	return nil, nil
 }
-func (m *mockChainCapture) IsActiveNode(_ context.Context, _ string, _ common.Address) (bool, error) {
+func (m *mockChainCapture) IsActiveProvider(_ context.Context, _ common.Address) (bool, error) {
 	return false, nil
 }
 

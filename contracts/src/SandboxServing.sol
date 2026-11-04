@@ -64,6 +64,22 @@ interface ITappRegistry {
 ///      Voucher verification reads from TappRegistry at settle time (no local
 ///      mirror of signer state — prevents the silent-drift incidents that
 ///      caused 348k unsigned vouchers to accumulate in May 2026).
+///
+///      KMS providers
+///      -------------
+///      A node signer is new on every reboot, so every balance keyed by it
+///      has to move. A KMS provider is instead a key the app takes from the
+///      KMS (GetSecretResource, one key per appId and material), the same on
+///      every boot and every node of the app; tapp lists it in the node's
+///      attestation evidence (runtime_data.kms_keys). The owner registers it
+///      with addOrUpdateKmsService, endorsed by an active node of the app.
+///      Its vouchers are valid iff signed by the provider itself, while the
+///      app is still the TappRegistry instance the provider was first bound
+///      to (getAppInfo(appId).registeredAt). The KMS hands the same key to
+///      whoever registers the appId next, should its last node ever be
+///      removed; that pin keeps such a registrant away from the balances and
+///      earnings already held under the provider. Node-signer providers keep
+///      the rules above.
 contract SandboxServing {
 
     // ─── Constants ────────────────────────────────────────────────────────────
@@ -73,6 +89,12 @@ contract SandboxServing {
     /// @dev EIP-712 type hash — field order must match the Go voucher.Sign() implementation.
     bytes32 private constant VOUCHER_TYPEHASH = keccak256(
         "SandboxVoucher(address user,address provider,bytes32 usageHash,uint256 nonce,uint256 totalFee)"
+    );
+
+    /// @dev EIP-712 type of a node's endorsement of a KMS provider key —
+    ///      field order must match the Go voucher.KmsProviderDigest().
+    bytes32 private constant KMS_PROVIDER_TYPEHASH = keccak256(
+        "KmsProvider(address provider,string appId)"
     );
 
     // ─── Structs ──────────────────────────────────────────────────────────────
@@ -90,6 +112,14 @@ contract SandboxServing {
         uint256 pricePerCPUPerMin;
         uint256 pricePerMemGBPerMin;
         uint256 createFee;
+    }
+
+    /// @dev A KMS provider's binding to the app instance it was first
+    ///      registered under. Kept when the service is removed, so the
+    ///      provider can only ever come back under that same instance.
+    struct KmsBinding {
+        uint256 epoch;      // TappRegistry getAppInfo(appId).registeredAt; 0 = not a KMS provider
+        bytes32 appIdHash;  // keccak256(appId)
     }
 
     struct SandboxVoucher {
@@ -128,8 +158,11 @@ contract SandboxServing {
     ///         TappRegistry is itself redeployed.
     ITappRegistry public tappRegistry;
 
+    /// @notice KMS providers: provider → the app instance it is bound to.
+    mapping(address => KmsBinding) public kmsBindings;
+
     // Reserved for future upgrades.
-    uint256[50] private __gap;
+    uint256[49] private __gap;
 
     // ─── Events ───────────────────────────────────────────────────────────────
 
@@ -147,6 +180,8 @@ contract SandboxServing {
     event EarningsWithdrawn(address indexed provider, address indexed to, uint256 amount);
     event ServiceUpdated(address indexed provider, string appId, string url);
     event ServiceRemoved(address indexed provider, address indexed appOwner);
+    event KmsProviderBound(address indexed provider, string appId, address indexed endorsingNode, uint256 epoch);
+    event KmsProviderRepinned(address indexed provider, uint256 previousEpoch, uint256 epoch);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event TappRegistryUpdated(address indexed previousRegistry, address indexed newRegistry);
 
@@ -241,12 +276,23 @@ contract SandboxServing {
         returns (SettlementStatus[] memory statuses)
     {
         statuses = new SettlementStatus[](vouchers.length);
+        ProviderCheck memory check;
         for (uint256 i = 0; i < vouchers.length; i++) {
-            statuses[i] = _settleOne(vouchers[i]);
+            statuses[i] = _settleOne(vouchers[i], check);
         }
     }
 
-    function _settleOne(SandboxVoucher calldata v) internal returns (SettlementStatus) {
+    /// @dev Memo of the last provider whose signing key was checked against
+    ///      TappRegistry. A batch is almost always one provider's (the settler
+    ///      drains one queue per provider), and a KMS provider's check reads
+    ///      the whole getAppInfo — once per batch instead of once per voucher.
+    struct ProviderCheck {
+        address provider;
+        bool    checked;
+        bool    valid;
+    }
+
+    function _settleOne(SandboxVoucher calldata v, ProviderCheck memory check) internal returns (SettlementStatus) {
         if (!serviceExists[v.provider]) {
             return SettlementStatus.PROVIDER_MISMATCH;
         }
@@ -261,7 +307,7 @@ contract SandboxServing {
             return SettlementStatus.INVALID_NONCE;
         }
 
-        if (!_verifySignature(v, appId)) {
+        if (!_verifySignature(v, appId, check)) {
             return SettlementStatus.INVALID_SIGNATURE;
         }
 
@@ -294,12 +340,13 @@ contract SandboxServing {
         returns (SettlementStatus[] memory statuses)
     {
         statuses = new SettlementStatus[](vouchers.length);
+        ProviderCheck memory check;
         for (uint256 i = 0; i < vouchers.length; i++) {
-            statuses[i] = _previewOne(vouchers[i]);
+            statuses[i] = _previewOne(vouchers[i], check);
         }
     }
 
-    function _previewOne(SandboxVoucher calldata v) internal view returns (SettlementStatus) {
+    function _previewOne(SandboxVoucher calldata v, ProviderCheck memory check) internal view returns (SettlementStatus) {
         if (!serviceExists[v.provider]) {
             return SettlementStatus.PROVIDER_MISMATCH;
         }
@@ -311,7 +358,7 @@ contract SandboxServing {
         if (v.nonce <= acct.lastNonce[v.provider]) {
             return SettlementStatus.INVALID_NONCE;
         }
-        if (!_verifySignature(v, appId)) {
+        if (!_verifySignature(v, appId, check)) {
             return SettlementStatus.INVALID_SIGNATURE;
         }
         if (acct.balances[v.provider] >= v.totalFee) {
@@ -321,10 +368,14 @@ contract SandboxServing {
     }
 
     /// @dev ECDSA-recovers the voucher signer locally. Valid iff the voucher
-    ///      was signed by its own payee (provider IS the TEE signer) and that
-    ///      address is an active node of the app in TappRegistry. A node can
-    ///      therefore never settle vouchers naming another node as payee.
-    function _verifySignature(SandboxVoucher calldata v, string memory appId) internal view returns (bool) {
+    ///      was signed by its own payee and that payee's key is still valid
+    ///      for the app (_providerKeyValid). A node can therefore never
+    ///      settle vouchers naming another provider as payee.
+    function _verifySignature(SandboxVoucher calldata v, string memory appId, ProviderCheck memory check)
+        internal
+        view
+        returns (bool)
+    {
         bytes32 structHash = keccak256(abi.encode(
             VOUCHER_TYPEHASH,
             v.user,
@@ -336,7 +387,23 @@ contract SandboxServing {
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _domainSeparator, structHash));
         address recovered = _ecrecover(digest, v.signature);
         if (recovered == address(0) || recovered != v.provider) return false;
-        return tappRegistry.getNode(appId, recovered).addedAt != 0;
+        if (!check.checked || check.provider != v.provider) {
+            check.provider = v.provider;
+            check.valid    = _providerKeyValid(v.provider, appId);
+            check.checked  = true;
+        }
+        return check.valid;
+    }
+
+    /// @dev Whether `provider`'s own key may sign for `appId` right now.
+    ///      KMS provider: the app is still the instance it was bound to.
+    ///      Node-signer provider: the address is an active node of the app.
+    function _providerKeyValid(address provider, string memory appId) internal view returns (bool) {
+        uint256 epoch = kmsBindings[provider].epoch;
+        if (epoch != 0) {
+            return tappRegistry.getAppInfo(appId).registeredAt == epoch;
+        }
+        return tappRegistry.getNode(appId, provider).addedAt != 0;
     }
 
     function _ecrecover(bytes32 digest, bytes memory sig) internal pure returns (address) {
@@ -371,11 +438,17 @@ contract SandboxServing {
     }
 
     /// @dev True iff `caller` is the TappRegistry owner of the appId that
-    ///      `signer`'s service is bound to. Requires an existing service entry.
-    function _isAppOwnerOf(address signer, address caller) internal view returns (bool) {
-        string memory appId = services[signer].appId;
+    ///      `provider`'s service is bound to. Requires an existing service
+    ///      entry. For a KMS provider the app must also still be the instance
+    ///      it was bound to: whoever registers the appId after its last node is
+    ///      removed owns the appId, but not the providers bound before.
+    function _isAppOwnerOf(address provider, address caller) internal view returns (bool) {
+        string memory appId = services[provider].appId;
         if (bytes(appId).length == 0) return false;
-        return tappRegistry.getAppInfo(appId).owner == caller;
+        ITappRegistry.AppInfo memory info = tappRegistry.getAppInfo(appId);
+        uint256 epoch = kmsBindings[provider].epoch;
+        if (epoch != 0 && info.registeredAt != epoch) return false;
+        return info.owner == caller;
     }
 
     // ─── Admin ────────────────────────────────────────────────────────────────
@@ -394,6 +467,21 @@ contract SandboxServing {
         require(newRegistry != address(0), "zero tappRegistry");
         emit TappRegistryUpdated(address(tappRegistry), newRegistry);
         tappRegistry = ITappRegistry(newRegistry);
+    }
+
+    /// @notice Re-pin a KMS provider to its app's current TappRegistry
+    ///         instance. For a registry redeploy (setTappRegistry) only: the
+    ///         new registry gives the app a new registeredAt, and the provider
+    ///         would stop settling. Contract owner only — an app owner able to
+    ///         re-pin would undo exactly what the pin guards against.
+    function repinKmsProvider(address provider) external onlyOwner {
+        KmsBinding storage b = kmsBindings[provider];
+        require(b.epoch != 0, "not a kms provider");
+        require(serviceExists[provider], "no service");
+        uint256 epoch = tappRegistry.getAppInfo(services[provider].appId).registeredAt;
+        require(epoch != 0, "app not registered");
+        emit KmsProviderRepinned(provider, b.epoch, epoch);
+        b.epoch = epoch;
     }
 
     // ─── Provider Management ──────────────────────────────────────────────────
@@ -420,7 +508,71 @@ contract SandboxServing {
         uint256 pricePerMemGBPerMin
     ) external {
         require(tappRegistry.getAppInfo(appId).owner == msg.sender, "not app owner");
+        require(kmsBindings[signer].epoch == 0, "kms provider; use addOrUpdateKmsService");
         require(tappRegistry.getNode(appId, signer).addedAt != 0, "signer not an active node");
+        _upsertService(signer, url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin);
+    }
+
+    /// @notice Register or update a KMS provider's service. Called by the
+    ///         appId's TappRegistry owner; `provider` is the address of the
+    ///         app's KMS key (GetSecretResource), which tapp lists in each
+    ///         node's evidence. `endorsement` is an active node's EIP-712
+    ///         signature over KmsProvider(provider, appId) — see
+    ///         kmsProviderDigest — so the chain checks that a node of the app
+    ///         stands behind the key, as it checks a node-signer provider is a
+    ///         node. Price changes invalidate acks as in addOrUpdateService.
+    /// @dev The first registration binds the provider to the app's current
+    ///      TappRegistry instance (registeredAt); later calls, including after
+    ///      removeService, must find the app still that instance.
+    function addOrUpdateKmsService(
+        address          provider,
+        string  calldata url,
+        string  calldata appId,
+        uint256 pricePerCPUPerMin,
+        uint256 createFee,
+        uint256 pricePerMemGBPerMin,
+        bytes   calldata endorsement
+    ) external {
+        ITappRegistry.AppInfo memory info = tappRegistry.getAppInfo(appId);
+        require(info.owner == msg.sender, "not app owner");
+        require(info.registeredAt != 0, "app not registered");
+
+        address node = _ecrecover(kmsProviderDigest(provider, appId), endorsement);
+        require(
+            node != address(0) && tappRegistry.getNode(appId, node).addedAt != 0,
+            "endorsement not from an active node"
+        );
+
+        KmsBinding storage b = kmsBindings[provider];
+        if (b.epoch == 0) {
+            require(!serviceExists[provider], "node-signer service; remove it first");
+            b.epoch     = info.registeredAt;
+            b.appIdHash = keccak256(bytes(appId));
+            emit KmsProviderBound(provider, appId, node, info.registeredAt);
+        } else {
+            require(b.appIdHash == keccak256(bytes(appId)), "kms provider bound to another app");
+            require(b.epoch == info.registeredAt, "app re-registered since the provider was bound");
+        }
+        _upsertService(provider, url, appId, pricePerCPUPerMin, createFee, pricePerMemGBPerMin);
+    }
+
+    /// @notice The EIP-712 digest a node signs to endorse `provider` as a KMS
+    ///         provider of `appId` (domain: this contract on this chain).
+    function kmsProviderDigest(address provider, string memory appId) public view returns (bytes32) {
+        bytes32 structHash = keccak256(abi.encode(KMS_PROVIDER_TYPEHASH, provider, keccak256(bytes(appId))));
+        return keccak256(abi.encodePacked("\x19\x01", _domainSeparator, structHash));
+    }
+
+    /// @dev Shared tail of both registration paths: the caller has already
+    ///      checked app ownership and the provider's key.
+    function _upsertService(
+        address        signer,
+        string memory  url,
+        string memory  appId,
+        uint256        pricePerCPUPerMin,
+        uint256        createFee,
+        uint256        pricePerMemGBPerMin
+    ) internal {
         require(
             tappRegistry.isAuthorizedInvalidator(appId, address(this)),
             "sandbox not authorized as invalidator"
@@ -466,7 +618,8 @@ contract SandboxServing {
     /// @dev Soft clear otherwise: user balances, pending refunds, and settled
     ///      nonces are keyed elsewhere and preserved — balances remain
     ///      refundable, and nonces stay put so old vouchers can't be replayed
-    ///      after a re-register.
+    ///      after a re-register. A KMS provider's binding stays too, so it can
+    ///      only be re-registered under the app instance it was bound to.
     function removeService(address signer) external nonReentrant {
         require(serviceExists[signer], "no service to remove");
         require(_isAppOwnerOf(signer, msg.sender), "not app owner");
@@ -520,6 +673,15 @@ contract SandboxServing {
         string memory appId = services[provider].appId;
         if (bytes(appId).length == 0) return false;
         return tappRegistry.isAcknowledged(user, appId);
+    }
+
+    /// @notice Whether `provider` has a service whose own key may sign
+    ///         vouchers right now — the check settlement applies, for
+    ///         off-chain callers (the broker's provider index, the settler's
+    ///         hold gate).
+    function isActiveProvider(address provider) external view returns (bool) {
+        if (!serviceExists[provider]) return false;
+        return _providerKeyValid(provider, services[provider].appId);
     }
 
     function domainSeparator() external view returns (bytes32) {

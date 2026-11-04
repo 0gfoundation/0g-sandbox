@@ -24,8 +24,14 @@ services:
       # ADDITIVE comma-separated list of extra operator wallets allowed to
       # call admin-only endpoints. The appId owner (resolved on-chain from
       # BACKEND_APP_NAME) is always an admin on top of this list; the
-      # provider/settlement identity is derived from the TEE key at runtime.
+      # provider/settlement identity is derived at runtime (PROVIDER_KEY_SOURCE).
       ADMIN_ADDRESSES:         ${ADMIN_ADDRESSES:-}
+      # Stable attestor identity comes from appId discovery, not an operator EOA.
+      ATTESTOR_APP_ID:         ${ATTESTOR_APP_ID:-}
+      # Re-authorizes the attestor app after a re-registration or ownership
+      # transfer: "<registeredAt>:<0x owner>". See docs/APP_IDENTITY.md.
+      ATTESTOR_INSTANCE:       ${ATTESTOR_INSTANCE:-}
+      TLS_ENABLED:            ${TLS_ENABLED:-false}
       # Proxy domain — copied into sealed sandbox containers as
       # SANDBOX_PROXY_DOMAIN so bootstrap can compose its public URL.
       # See sealed/EVOLUTION_DESIGN.md section 15.5.
@@ -42,14 +48,21 @@ services:
       # TEE key — fetched from tapp-daemon via gRPC
       BACKEND_TAPP_IP:         ${BACKEND_TAPP_IP:-127.0.0.1}
       BACKEND_TAPP_PORT:       ${BACKEND_TAPP_PORT:-50051}
+      BACKEND_TAPP_SOCKET:     /run/tapp/tapp.sock
       BACKEND_APP_NAME:        ${BACKEND_APP_NAME:-0g-sandbox}
+      # Provider identity: local = the TEE signer (new on every tapp-server
+      # restart); kms = the app's KMS key, the same on every boot (needs the
+      # node to consume a KMS; tapp-server >= 0.12.0 measures its typed identity).
+      PROVIDER_KEY_SOURCE:     ${PROVIDER_KEY_SOURCE:-local}
       # Dev-only mock overrides (leave empty in production)
       MOCK_TEE:                ${MOCK_TEE:-}
       MOCK_APP_PRIVATE_KEY:    ${MOCK_APP_PRIVATE_KEY:-}
+      MOCK_PROVIDER_PRIVATE_KEY: ${MOCK_PROVIDER_PRIVATE_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./.env:/app/.env:ro   # ensures tapp-cli uploads .env for compose variable substitution
+      - ${BACKEND_TAPP_SOCKET:-/run/tapp/tapp.sock}:/run/tapp/tapp.sock
     depends_on:
       sandbox-redis:
         condition: service_healthy
@@ -215,6 +228,10 @@ services:
     # Set RUNNER_RUNTIME=sysbox-runc to enable (needs host kernel >=5.12 for
     # shiftfs/idmapped-mounts; on 5.10 sysbox can't write resolv.conf). Default runc.
     runtime: ${RUNNER_RUNTIME:-runc}
+    # Daemon mode: the Daytona daemon is PID 1 in each sandbox and starts the image
+    # entrypoint from a shell holding the container env. That is not safe for sealed
+    # creates (PROVIDER_KEY_SOURCE=kms): a sealed provider needs the 0g-daytona runner
+    # with USE_SNAPSHOT_ENTRYPOINT=true, and SEALED_ONLY=true. See docs/APP_IDENTITY.md.
     environment:
       - ENVIRONMENT=production
       - API_PORT=3003
