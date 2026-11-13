@@ -1435,6 +1435,19 @@ func (h *Handler) handleCatchAll(c *gin.Context) {
 	action := c.Param("action") // e.g. "/start", "/stop", "/autostop", "/labels"
 	method := c.Request.Method
 
+	// Daytona may treat a trailing slash as the same control operation.
+	// Reject these aliases before they can fall through to the transparent
+	// proxy and skip billing hooks, label protection or admin checks. Keep
+	// trailing slashes on unrelated passthrough paths (e.g. toolbox files).
+	if strings.HasSuffix(action, "/") {
+		switch strings.TrimRight(action, "/") {
+		case "", "/start", "/stop", "/archive", "/ensure-billing", "/ssh-access",
+			"/force", "/force-stop", "/labels", "/autostop", "/autoarchive":
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "non-canonical sandbox action path"})
+			return
+		}
+	}
+
 	// ── Blocked actions ────────────────────────────────────────────────────
 	if action == "/autostop" || action == "/autoarchive" {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "managed by billing proxy"})
