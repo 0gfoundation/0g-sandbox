@@ -283,8 +283,8 @@ func (m *Monitor) checkDisk(ctx context.Context, now time.Time, snap *Snapshot, 
 			if !critical {
 				if rec.GraceUntil == nil {
 					// The owner has started it again: time to delete files.
-					g := now.Add(m.cfg.Grace)
-					rec.GraceUntil = &g
+					start, g := now, now.Add(m.cfg.Grace)
+					rec.GraceStartedAt, rec.GraceUntil = &start, &g
 					if err := putDiskStop(ctx, m.rdb, id, rec); err != nil {
 						m.log.Warn("usage: start grace", zap.String("sandbox", id), zap.Error(err))
 					}
@@ -293,6 +293,11 @@ func (m *Monitor) checkDisk(ctx context.Context, now time.Time, snap *Snapshot, 
 					return
 				}
 				if now.Before(*rec.GraceUntil) {
+					return
+				}
+				// Act only on a size measured since the grace began: a layer
+				// scan from before it misses the files the owner deleted.
+				if rec.GraceStartedAt != nil && !u.LayerMeasuredAt.After(*rec.GraceStartedAt) {
 					return
 				}
 			}

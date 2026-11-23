@@ -211,6 +211,34 @@ func TestDisk_GracePeriodAfterRestart(t *testing.T) {
 	}
 }
 
+// A grace shorter than the runner's layer-scan interval can end before the
+// layer is measured again: the files the owner deleted during it must count.
+func TestDisk_AfterGraceWaitsForAFreshLayerSize(t *testing.T) {
+	h := newHarness(t, true)
+	h.read(true, 11, 50)
+	h.poll()
+	h.finishStop(t)
+	h.now = h.now.Add(time.Hour)
+	h.read(true, 11, 50) // restarted: grace begins
+	h.poll()
+	graceStart := h.now
+
+	h.now = h.now.Add(16 * time.Minute) // grace over; the last layer scan predates it
+	h.read(true, 11, 50)
+	h.runner.snap.Sandboxes["sb-1"].LayerMeasuredAt = graceStart.Add(-time.Second)
+	h.poll()
+	if len(h.stops) != 1 {
+		t.Fatalf("stopped again on a layer size measured before the grace: %v", h.stops)
+	}
+
+	h.now = h.now.Add(time.Minute)
+	h.read(true, 11, 50) // measured now, still over
+	h.poll()
+	if len(h.stops) != 2 {
+		t.Errorf("still over on a fresh measurement after the grace, not stopped: %v", h.stops)
+	}
+}
+
 func TestDisk_CriticalVolumeOverridesGrace(t *testing.T) {
 	h := newHarness(t, true)
 	h.read(true, 11, 50)

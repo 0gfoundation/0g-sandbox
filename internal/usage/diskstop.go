@@ -31,10 +31,12 @@ type DiskStop struct {
 	RequestedBytes int64     `json:"requested_bytes"`
 	// StoppedAt is set by the stop handler once the sandbox has stopped.
 	StoppedAt *time.Time `json:"stopped_at,omitempty"`
-	// GraceUntil is set when the Monitor first sees the sandbox running again
-	// after StoppedAt. Until then it is not stopped for disk again (unless the
-	// shared volume is critically full).
-	GraceUntil *time.Time `json:"grace_until,omitempty"`
+	// GraceStartedAt and GraceUntil are set when the Monitor first sees the
+	// sandbox running again after StoppedAt. Until GraceUntil it is not
+	// stopped for disk again (unless the shared volume is critically full),
+	// and after it only on a size measured since GraceStartedAt.
+	GraceStartedAt *time.Time `json:"grace_started_at,omitempty"`
+	GraceUntil     *time.Time `json:"grace_until,omitempty"`
 }
 
 func diskStopKey(sandboxID string) string { return diskStopKeyPrefix + sandboxID }
@@ -77,6 +79,6 @@ func MarkStopped(ctx context.Context, rdb *redis.Client, sandboxID string, at ti
 		return err
 	}
 	rec.StoppedAt = &at
-	rec.GraceUntil = nil
+	rec.GraceStartedAt, rec.GraceUntil = nil, nil
 	return putDiskStop(ctx, rdb, sandboxID, rec)
 }
