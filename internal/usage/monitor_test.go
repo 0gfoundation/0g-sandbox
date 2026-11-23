@@ -323,6 +323,31 @@ func TestOOMAlert_KillsWithinAnHour(t *testing.T) {
 	}
 }
 
+// A sandbox killed at its cap right after it starts, before the Monitor first
+// sees it, is still counted: its counter began with its container.
+func TestOOMAlert_KillsBeforeFirstSight(t *testing.T) {
+	h := newHarness(t, false)
+	h.runner.snap = &Snapshot{RefreshedAt: h.now, Sandboxes: map[string]*Sandbox{}} // not there yet
+	h.poll()
+	h.now = h.now.Add(time.Minute)
+	h.read(true, 1, 10)
+	kills := uint64(3)
+	h.runner.snap.Sandboxes["sb-1"].OOMKillsTotal = &kills
+	h.poll()
+	if len(h.alerts.of(alert.KindSandboxOOMKills)) != 1 {
+		t.Error("kills before the first sight of a new sandbox not counted")
+	}
+
+	// On the Monitor's own first reading the history is unknown: no alert.
+	h2 := newHarness(t, false)
+	h2.read(true, 1, 10)
+	h2.runner.snap.Sandboxes["sb-1"].OOMKillsTotal = &kills
+	h2.poll()
+	if len(h2.alerts.of(alert.KindSandboxOOMKills)) != 0 {
+		t.Error("alerted on kills of unknown age at the Monitor's first reading")
+	}
+}
+
 func TestCPUPinnedAlert(t *testing.T) {
 	h := newHarness(t, false)
 	seconds := 0.0

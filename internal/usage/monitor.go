@@ -72,6 +72,10 @@ type Monitor struct {
 	failingSince time.Time
 	oom          map[string][]oomSample
 	cpu          map[string]*cpuTrack
+	// prevAt and prevRunning describe the previous reading checkOOMAndCPU
+	// saw: a sandbox not running in it has started its container since.
+	prevAt      time.Time
+	prevRunning map[string]bool
 }
 
 type oomSample struct {
@@ -188,6 +192,11 @@ func (m *Monitor) checkOOMAndCPU(ctx context.Context, snap *Snapshot) {
 			if n := len(h); n > 0 && *u.OOMKillsTotal < h[n-1].kills {
 				h = nil // counter reset: the container was recreated
 			}
+			if len(h) == 0 && !m.prevAt.IsZero() && !m.prevRunning[id] {
+				// Its container started after the previous reading, and the
+				// counter with it: kills before this first sight count too.
+				h = []oomSample{{at: m.prevAt, kills: 0}}
+			}
 			if n := len(h); n == 0 || at.After(h[n-1].at) {
 				h = append(h, oomSample{at: at, kills: *u.OOMKillsTotal})
 			}
@@ -231,6 +240,11 @@ func (m *Monitor) checkOOMAndCPU(ctx context.Context, snap *Snapshot) {
 		if snap.Sandboxes[id] == nil {
 			delete(m.oom, id)
 		}
+	}
+	m.prevAt = at
+	m.prevRunning = make(map[string]bool, len(snap.Sandboxes))
+	for id, u := range snap.Sandboxes {
+		m.prevRunning[id] = u.Running
 	}
 	for id := range m.cpu {
 		if snap.Sandboxes[id] == nil {
