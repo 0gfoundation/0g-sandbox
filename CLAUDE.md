@@ -182,7 +182,7 @@ Signed by the TEE key. Nonce is per `(user, provider)` pair; must be strictly in
 | `billing:nonce:<user>:<provider>` | In-memory nonce counter (seeded from chain on startup) |
 | `voucher:<providerAddr>` | Redis list queue of pending vouchers |
 | `stop:sandbox:<sandboxID>` | Pending stop signal (value = reason string) |
-| `usage:disk_stop:<sandboxID>` | Why and when the usage monitor stopped a sandbox past its disk size, and its grace period after a restart (JSON, 30-day TTL) |
+| `usage:disk_stop:<sandboxID>` | A stop of a sandbox past its disk size: why, and its phase, `queued` → `stopped` → `grace`, each set by the event itself (JSON, 30-day TTL) |
 | `auth:nonce:<nonce>` | Seen request nonces (replay protection, TTL-based) |
 | `identity:attestor:<chain>:<registry>:<appId>:instance` | Authorized attestor registration instance (`registeredAt:owner`); `ATTESTOR_INSTANCE` replaces it |
 
@@ -286,14 +286,26 @@ set, `usage.Monitor` polls them every `USAGE_POLL_SEC` and does the following:
   - `sandbox_cpu_pinned`: `CPU_PINNED_ALERT_HOURS`.
   - `usage_unavailable`: the runner's readings have been missing or stale for
     5 minutes, so disk sizes are not being checked.
+  - `usage_incomplete`: the readings miss a sandbox Daytona says is running.
+    Either it has been absent for 5 minutes, or it has had no layer size for 15.
+    This is how a renamed metric, or a runner that cannot size layers, shows up.
 - **Disk enforcement.** With `DISK_ENFORCE=true`, a running sandbox whose writable
   layer has gone past its requested disk is stopped through the normal stop path
   with reason `disk_over_size`.
   - **Stopped, not archived.** Archiving would copy the filesystem into the
     registry or MinIO on the same volume.
-  - **Restart grace.** When the owner starts it again, they get `DISK_GRACE_SEC` to
-    delete files before it is stopped again. The grace does not apply once the
+  - **Restart grace.** The owner's `POST /start` gives them `DISK_GRACE_SEC` to
+    delete files before the sandbox is stopped again. After the grace, the stop
+    needs a size measured since the grace began. The grace does not apply once the
     shared volume is over `VOLUME_CRITICAL_PCT`.
+  - **Who records each phase.** Each phase is written by the event that causes it,
+    not inferred from readings:
+    - the monitor queues the stop;
+    - the stop handler's `onStopped` hook completes it;
+    - the proxy's start hook begins the grace.
+  - **The stop handler knows no reasons.** `stopHooks` in `cmd/billing` lists the
+    reasons that keep the filesystem (no archive), and the hooks to run after every
+    completed stop.
 
 Disk is the only resource the monitor acts on. CPU and memory have hard caps in the
 runner and are billed. A sandbox's disk has neither while Docker's backing

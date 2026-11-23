@@ -39,6 +39,7 @@ const (
 	KindSandboxOOMKills        Kind = "sandbox_oom_kills"
 	KindSandboxCPUPinned       Kind = "sandbox_cpu_pinned"
 	KindUsageUnavailable       Kind = "usage_unavailable"
+	KindUsageIncomplete        Kind = "usage_incomplete"
 )
 
 // Severity is included in the webhook payload so receivers can route or

@@ -39,7 +39,7 @@ func TestStopHandler_ArchiveFailure_PreservesRetryState(t *testing.T) {
 
 	al := &noopAlerter{}
 	stopCh := make(chan settler.StopSignal, 1)
-	go runStopHandler(ctx, stopCh, mock.client(), rdb, al, zap.NewNop(), nil)
+	go runStopHandler(ctx, stopCh, mock.client(), rdb, al, zap.NewNop(), nil, stopHooks{})
 	stopCh <- settler.StopSignal{SandboxID: id, Reason: "insufficient_balance"}
 
 	// Give the handler time to run its (failing) archive pass.
@@ -73,7 +73,7 @@ func TestStopHandler_AlreadyArchived_CleansUp(t *testing.T) {
 	rdb.Set(bg, "stop:sandbox:"+id, "insufficient_balance", 0) //nolint:errcheck
 
 	stopCh := make(chan settler.StopSignal, 1)
-	go runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil)
+	go runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil, stopHooks{})
 	stopCh <- settler.StopSignal{SandboxID: id, Reason: "insufficient_balance"}
 
 	waitKeyGone(t, rdb, "stop:sandbox:"+id, time.Second)
@@ -96,7 +96,10 @@ func TestRunStopHandler_GoneSandbox_CleansUpMarkers(t *testing.T) {
 	stopCh := make(chan settler.StopSignal, 1)
 	stopCh <- settler.StopSignal{SandboxID: "sb-gone", Reason: "insufficient_balance"}
 	done := make(chan struct{})
-	go func() { runStopHandler(ctx, stopCh, m.client(), rdb, alert.Nop{}, zap.NewNop(), nil); close(done) }()
+	go func() {
+		runStopHandler(ctx, stopCh, m.client(), rdb, alert.Nop{}, zap.NewNop(), nil, stopHooks{})
+		close(done)
+	}()
 
 	deadline := time.After(3 * time.Second)
 	for {

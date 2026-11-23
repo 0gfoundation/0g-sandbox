@@ -101,13 +101,21 @@ func (h *harness) read(running bool, layerGiB, volumeUsedGiB float64) {
 
 func (h *harness) poll() { h.m.poll(context.Background()) }
 
+// finishStop plays the stop handler completing the queued stop.
 func (h *harness) finishStop(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
-	if err := MarkStopped(ctx, h.rdb, "sb-1", h.now); err != nil {
-		t.Fatal(err)
-	}
+	h.m.OnStopped(ctx, "sb-1")
 	h.rdb.Del(ctx, "stop:sandbox:sb-1")
+	if rec := h.record(t); rec == nil || rec.Phase != PhaseStopped {
+		t.Fatalf("after the stop: %+v, want phase stopped", rec)
+	}
+}
+
+// ownerStarts plays the proxy's call after the owner's start.
+func (h *harness) ownerStarts(t *testing.T) {
+	t.Helper()
+	h.m.OnStarted(context.Background(), "sb-1")
 }
 
 func (h *harness) record(t *testing.T) *DiskStop {
@@ -146,7 +154,7 @@ func TestDisk_StopsPastSizeOnceAndRecordsWhy(t *testing.T) {
 		t.Fatalf("stops = %v, want one", h.stops)
 	}
 	rec := h.record(t)
-	if rec == nil || rec.UsedBytes != int64(10.5*float64(GiB)) || rec.RequestedBytes != 10*GiB || rec.StoppedAt != nil {
+	if rec == nil || rec.Phase != PhaseQueued || rec.UsedBytes != int64(10.5*float64(GiB)) || rec.RequestedBytes != 10*GiB {
 		t.Errorf("record = %+v", rec)
 	}
 
@@ -166,31 +174,33 @@ func TestDisk_StopsPastSizeOnceAndRecordsWhy(t *testing.T) {
 	}
 }
 
-func TestDisk_GracePeriodAfterRestart(t *testing.T) {
+// Stopped, the sandbox waits for its owner's start: a reading that still shows
+// it running (taken before the stop) neither stops it again nor starts a grace.
+func TestDisk_StoppedWaitsForTheOwnersStart(t *testing.T) {
 	h := newHarness(t, true)
 	h.read(true, 11, 50)
 	h.poll()
 	h.finishStop(t)
 
-	// A runner reading taken before the stop completed still shows it running.
-	h.now = h.now.Add(20 * time.Second)
-	stale := *h.runner.snap
-	h.runner.snap = &stale
-	h.poll()
-	if len(h.stops) != 1 || h.record(t).GraceUntil != nil {
-		t.Fatalf("acted on a reading older than the stop: stops %v", h.stops)
-	}
-
-	// Stopped, then the owner starts it again, still over.
-	h.now = h.now.Add(time.Minute)
-	h.read(false, 11, 50)
-	h.poll()
 	h.now = h.now.Add(time.Hour)
 	h.read(true, 11, 50)
 	h.poll()
+	if rec := h.record(t); len(h.stops) != 1 || rec.Phase != PhaseStopped || rec.GraceUntil != nil {
+		t.Errorf("acted without the owner's start: stops %v, record %+v", h.stops, rec)
+	}
+}
+
+func TestDisk_GracePeriodAfterTheOwnersStart(t *testing.T) {
+	h := newHarness(t, true)
+	h.read(true, 11, 50)
+	h.poll()
+	h.finishStop(t)
+
+	h.now = h.now.Add(time.Hour)
+	h.ownerStarts(t)
 	rec := h.record(t)
-	if len(h.stops) != 1 || rec.GraceUntil == nil || !rec.GraceUntil.Equal(h.now.Add(15*time.Minute)) {
-		t.Fatalf("grace not started on restart: stops %v, record %+v", h.stops, rec)
+	if rec.Phase != PhaseGrace || !rec.GraceStartedAt.Equal(h.now) || !rec.GraceUntil.Equal(h.now.Add(15*time.Minute)) {
+		t.Fatalf("grace not begun by the start: %+v", rec)
 	}
 
 	h.now = h.now.Add(14 * time.Minute)
@@ -206,7 +216,7 @@ func TestDisk_GracePeriodAfterRestart(t *testing.T) {
 	if len(h.stops) != 2 {
 		t.Fatalf("still over after the grace period but not stopped: %v", h.stops)
 	}
-	if rec := h.record(t); rec.StoppedAt != nil || rec.GraceUntil != nil {
+	if rec := h.record(t); rec.Phase != PhaseQueued || rec.GraceUntil != nil {
 		t.Errorf("second stop should start a fresh record: %+v", rec)
 	}
 }
@@ -219,8 +229,7 @@ func TestDisk_AfterGraceWaitsForAFreshLayerSize(t *testing.T) {
 	h.poll()
 	h.finishStop(t)
 	h.now = h.now.Add(time.Hour)
-	h.read(true, 11, 50) // restarted: grace begins
-	h.poll()
+	h.ownerStarts(t)
 	graceStart := h.now
 
 	h.now = h.now.Add(16 * time.Minute) // grace over; the last layer scan predates it
@@ -245,23 +254,63 @@ func TestDisk_CriticalVolumeOverridesGrace(t *testing.T) {
 	h.poll()
 	h.finishStop(t)
 	h.now = h.now.Add(time.Hour)
-	h.read(true, 11, 96) // restarted while the shared volume is 96 % full
+	h.ownerStarts(t)
+	h.read(true, 11, 96) // the shared volume is 96 % full
 	h.poll()
 	if len(h.stops) != 2 {
 		t.Errorf("not stopped with the shared volume critically full: %v", h.stops)
 	}
 }
 
-func TestDisk_CleanedUpAfterRestartClearsRecord(t *testing.T) {
+func TestDisk_CleanedUpDuringGraceClearsRecord(t *testing.T) {
 	h := newHarness(t, true)
 	h.read(true, 11, 50)
 	h.poll()
 	h.finishStop(t)
 	h.now = h.now.Add(time.Hour)
+	h.ownerStarts(t)
+
+	h.read(true, 6, 50)
+	h.runner.snap.Sandboxes["sb-1"].LayerMeasuredAt = h.now.Add(-time.Second) // before the grace
+	h.poll()
+	if h.record(t) == nil {
+		t.Fatal("cleared on a size measured before the grace")
+	}
+
+	h.now = h.now.Add(time.Minute)
 	h.read(true, 6, 50)
 	h.poll()
 	if h.record(t) != nil {
 		t.Error("record kept after the owner got back under the size")
+	}
+}
+
+func TestOnStarted_OnlyFromStopped(t *testing.T) {
+	h := newHarness(t, true)
+	h.ownerStarts(t) // no record: nothing to do
+	if h.record(t) != nil {
+		t.Fatal("a start created a record")
+	}
+	h.read(true, 11, 50)
+	h.poll() // queued
+	h.ownerStarts(t)
+	if rec := h.record(t); rec.Phase != PhaseQueued {
+		t.Errorf("a start moved a queued stop to %s", rec.Phase)
+	}
+}
+
+func TestGetDiskStop_RecordsWithoutPhase(t *testing.T) {
+	h := newHarness(t, true)
+	ctx := context.Background()
+	for raw, want := range map[string]DiskPhase{
+		`{"queued_at":"2026-11-23T00:00:00Z"}`:                                     PhaseQueued,
+		`{"queued_at":"2026-11-23T00:00:00Z","stopped_at":"2026-11-23T00:01:00Z"}`: PhaseStopped,
+		`{"queued_at":"2026-11-23T00:00:00Z","stopped_at":"2026-11-23T00:01:00Z","grace_started_at":"2026-11-23T01:00:00Z","grace_until":"2026-11-23T01:15:00Z"}`: PhaseGrace,
+	} {
+		h.rdb.Set(ctx, diskStopKey("sb-1"), raw, 0)
+		if rec := h.record(t); rec.Phase != want {
+			t.Errorf("%s → %s, want %s", raw, rec.Phase, want)
+		}
 	}
 }
 
@@ -427,10 +476,44 @@ func TestReport(t *testing.T) {
 		}
 	}
 	r = h.m.Report(ctx, "sb-1", 10)
-	if r.DiskStop == nil || r.DiskStop.RequestedBytes != 10*GiB {
+	if r.DiskStop == nil || r.DiskStop.Phase != PhaseQueued || r.DiskStop.RequestedBytes != 10*GiB {
 		t.Errorf("disk stop missing from the report: %+v", r.DiskStop)
 	}
 	if r := h.m.Report(ctx, "sb-other", 5); r.Measured || r.Disk.Status != "unknown" {
 		t.Errorf("unmeasured sandbox: %+v", r)
+	}
+}
+
+// The runner's readings must cover every running sandbox, or its disk goes
+// unchecked without a word: absent for 5 minutes, or without a layer size for
+// 15, alerts.
+func TestCoverage_AlertsOnRunningSandboxesTheRunnerMisses(t *testing.T) {
+	h := newHarness(t, true)
+	h.m.lister = &fakeLister{[]daytona.Sandbox{
+		{ID: "sb-1", Disk: 10, State: "started"},
+		{ID: "sb-gone", Disk: 10, State: "started"},    // absent from the readings
+		{ID: "sb-nolayer", Disk: 10, State: "started"}, // never sized
+		{ID: "sb-stopped", Disk: 10, State: "stopped"}, // not running: not expected
+	}}
+	step := func(d time.Duration) {
+		h.now = h.now.Add(d)
+		h.read(true, 1, 10)
+		h.runner.snap.Sandboxes["sb-nolayer"] = &Sandbox{Running: true}
+		h.poll()
+	}
+	step(0)
+	step(4 * time.Minute)
+	if len(h.alerts.of(alert.KindUsageIncomplete)) != 0 {
+		t.Fatal("alerted within 5 minutes")
+	}
+	step(time.Minute)
+	a := h.alerts.of(alert.KindUsageIncomplete)
+	if len(a) != 1 || len(a[0].details["sandboxes"].([]string)) != 1 || a[0].details["sandboxes"].([]string)[0] != "sb-gone" {
+		t.Fatalf("at 5 minutes: %+v, want sb-gone only", a)
+	}
+	step(10 * time.Minute)
+	a = h.alerts.of(alert.KindUsageIncomplete)
+	if got := a[len(a)-1].details["sandboxes"].([]string); len(got) != 2 || got[0] != "sb-gone" || got[1] != "sb-nolayer" {
+		t.Errorf("at 15 minutes: %v, want sb-gone and sb-nolayer", got)
 	}
 }

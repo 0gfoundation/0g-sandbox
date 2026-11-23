@@ -137,14 +137,18 @@ type Handler struct {
 	// SealIssuer authenticates this provider's current app instance on each
 	// sealed create. No issuer scope is accepted from the create request.
 	SealIssuer func(ctx context.Context) (SealIssuer, error)
-	// Usage serves GET /api/sandbox/:id/usage. nil (RUNNER_API_URL unset,
-	// tests) = the route answers 503.
-	Usage UsageReporter
+	// Usage serves GET /api/sandbox/:id/usage and hears of owner starts. nil
+	// (RUNNER_API_URL unset, tests) = the route answers 503.
+	Usage UsageTracker
 }
 
-// UsageReporter builds a sandbox's usage report (usage.Monitor).
-type UsageReporter interface {
+// UsageTracker is usage.Monitor as the proxy uses it.
+type UsageTracker interface {
+	// Report builds a sandbox's usage report.
 	Report(ctx context.Context, sandboxID string, requestedDiskGiB int) usage.Report
+	// OnStarted is called after the owner starts a sandbox: one stopped for
+	// its disk size then gets its grace period to delete files.
+	OnStarted(ctx context.Context, sandboxID string)
 }
 
 func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec *big.Int, providerAddress string, adminAddresses []string, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, providerKey, sealKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
@@ -840,12 +844,18 @@ func (h *Handler) handleStart(c *gin.Context) {
 	if c.Writer.Status() >= 200 && c.Writer.Status() < 300 {
 		go func() {
 			ctx := context.WithoutCancel(c.Request.Context())
-			cpu, memGB := 0, 0
+			cpu, memGB, sandboxID := 0, 0, id
 			if sb, err := h.dtona.GetSandbox(ctx, id); err == nil {
 				cpu, memGB = sb.CPU, sb.Memory
+				if sb.ID != "" {
+					sandboxID = sb.ID // :id may be a name; usage records are by ID
+				}
 			}
 			h.billing.OnStart(ctx, id, wallet, cpu, memGB)
 			// OnStart enqueues voucher; reservation released there.
+			if h.Usage != nil {
+				h.Usage.OnStarted(ctx, sandboxID)
+			}
 		}()
 	} else if startReserved {
 		billing.Release(c.Request.Context(), h.rdb, wallet, h.providerAddress, startRequired)

@@ -3,6 +3,8 @@ package usage
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -76,6 +78,8 @@ type Monitor struct {
 	// saw: a sandbox not running in it has started its container since.
 	prevAt      time.Time
 	prevRunning map[string]bool
+	// uncovered: running sandboxes the runner's readings miss, since when.
+	uncovered map[string]time.Time
 }
 
 type oomSample struct {
@@ -101,7 +105,29 @@ func NewMonitor(cfg Config, runner Fetcher, lister SandboxLister, rdb *redis.Cli
 	}
 	return &Monitor{
 		cfg: cfg, runner: runner, lister: lister, rdb: rdb, alerter: alerter, queueStop: queueStop, log: log,
-		now: time.Now, oom: map[string][]oomSample{}, cpu: map[string]*cpuTrack{},
+		now: time.Now, oom: map[string][]oomSample{}, cpu: map[string]*cpuTrack{}, uncovered: map[string]time.Time{},
+	}
+}
+
+// OnStopped is called by the stop handler after every completed stop,
+// whatever its reason: a sandbox stopped for disk enters PhaseStopped.
+func (m *Monitor) OnStopped(ctx context.Context, sandboxID string) {
+	if err := markStopped(ctx, m.rdb, sandboxID, m.now()); err != nil {
+		m.log.Warn("usage: record stop", zap.String("sandbox", sandboxID), zap.Error(err))
+	}
+}
+
+// OnStarted is called after the owner starts a sandbox. One stopped for its
+// disk size then gets Config.Grace to delete files.
+func (m *Monitor) OnStarted(ctx context.Context, sandboxID string) {
+	began, err := beginGrace(ctx, m.rdb, sandboxID, m.now(), m.cfg.Grace)
+	if err != nil {
+		m.log.Warn("usage: begin grace", zap.String("sandbox", sandboxID), zap.Error(err))
+		return
+	}
+	if began {
+		m.log.Info("usage: sandbox stopped for disk started again; grace period begins",
+			zap.String("sandbox", sandboxID), zap.Duration("grace", m.cfg.Grace))
 	}
 }
 
@@ -142,11 +168,61 @@ func (m *Monitor) poll(ctx context.Context) {
 		m.log.Warn("usage: list sandboxes for disk sizes", zap.Error(err))
 		return
 	}
+	m.checkCoverage(ctx, now, snap, sandboxes)
 	for _, sb := range sandboxes {
 		if u := snap.Sandboxes[sb.ID]; u != nil && sb.Disk > 0 {
 			m.checkDisk(ctx, now, snap, sb.ID, int64(sb.Disk)*GiB, u)
 		}
 	}
+}
+
+// checkCoverage alerts when the runner's readings miss a sandbox Daytona says
+// is running: absent from them, or without a recent layer size. Such a
+// sandbox's disk is not checked, and nothing else would say so. That is what
+// a renamed metric, or a runner that cannot size layers, looks like from here.
+func (m *Monitor) checkCoverage(ctx context.Context, now time.Time, snap *Snapshot, sandboxes []daytona.Sandbox) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var missing []string
+	seen := map[string]bool{}
+	for _, sb := range sandboxes {
+		if !strings.EqualFold(sb.State, "started") {
+			continue
+		}
+		var after time.Duration
+		switch u := snap.Sandboxes[sb.ID]; {
+		case u == nil:
+			after = unavailableAlertAfter // the runner refreshes every 30 s
+		case u.LayerBytes == nil || now.Sub(u.LayerMeasuredAt) > maxLayerAge:
+			after = maxLayerAge // it sizes layers every 5 min
+		default:
+			continue
+		}
+		seen[sb.ID] = true
+		since, ok := m.uncovered[sb.ID]
+		if !ok {
+			m.uncovered[sb.ID] = now
+			continue
+		}
+		if now.Sub(since) >= after {
+			missing = append(missing, sb.ID)
+		}
+	}
+	for id := range m.uncovered {
+		if !seen[id] {
+			delete(m.uncovered, id)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+	sort.Strings(missing)
+	if len(missing) > 20 {
+		missing = missing[:20]
+	}
+	m.alerter.Notify(ctx, alert.KindUsageIncomplete, alert.SeverityCritical,
+		fmt.Sprintf("Runner usage readings miss %d running sandbox(es): their disk sizes are not being checked", len(missing)),
+		map[string]any{"sandboxes": missing})
 }
 
 func (m *Monitor) unavailable(ctx context.Context, now time.Time, err error) {
@@ -254,7 +330,8 @@ func (m *Monitor) checkOOMAndCPU(ctx context.Context, snap *Snapshot) {
 }
 
 // checkDisk alerts on, and with enforcement stops, a sandbox past its
-// requested disk size.
+// requested disk size. What it may do depends on the sandbox's DiskStop phase,
+// which the events themselves record (see DiskStop); nothing here infers them.
 func (m *Monitor) checkDisk(ctx context.Context, now time.Time, snap *Snapshot, id string, requested int64, u *Sandbox) {
 	if u.LayerBytes == nil || now.Sub(u.LayerMeasuredAt) > maxLayerAge {
 		return
@@ -265,9 +342,12 @@ func (m *Monitor) checkDisk(ctx context.Context, now time.Time, snap *Snapshot, 
 		m.log.Warn("usage: read disk-stop record", zap.String("sandbox", id), zap.Error(err))
 		return
 	}
+	// freshInGrace: measured since the grace began, so it counts the files
+	// the owner deleted during it.
+	freshInGrace := rec != nil && rec.Phase == PhaseGrace && u.LayerMeasuredAt.After(*rec.GraceStartedAt)
+
 	if used <= requested {
-		// Back under its size after a restart: the owner cleaned up.
-		if rec != nil && rec.StoppedAt != nil && u.Running && snap.RefreshedAt.After(*rec.StoppedAt) {
+		if freshInGrace { // the owner cleaned up
 			if err := deleteDiskStop(ctx, m.rdb, id); err != nil {
 				m.log.Warn("usage: clear disk-stop record", zap.String("sandbox", id), zap.Error(err))
 			}
@@ -275,45 +355,34 @@ func (m *Monitor) checkDisk(ctx context.Context, now time.Time, snap *Snapshot, 
 		return
 	}
 
+	details := map[string]any{"sandbox": id, "used_bytes": used, "requested_bytes": requested, "enforced": m.cfg.Enforce}
+	if rec != nil {
+		details["phase"] = rec.Phase
+	}
 	m.alerter.Notify(ctx, alert.KindSandboxDiskOverSize, alert.SeverityWarning,
-		fmt.Sprintf("Sandbox %s has written %d MiB, past its %d MiB disk", id, used>>20, requested>>20),
-		map[string]any{"sandbox": id, "used_bytes": used, "requested_bytes": requested, "enforced": m.cfg.Enforce})
+		fmt.Sprintf("Sandbox %s has written %d MiB, past its %d MiB disk", id, used>>20, requested>>20), details)
 	if !m.cfg.Enforce || !u.Running {
 		return
 	}
 
 	critical := m.cfg.VolumeCriticalPct > 0 && snap.Volume.UsedPct() >= m.cfg.VolumeCriticalPct
 	if rec != nil {
-		if rec.StoppedAt == nil {
-			// Queued or in flight. The stop handler drops the marker when a
-			// stop doesn't take; queue it again then.
+		switch rec.Phase {
+		case PhaseQueued:
+			// The stop handler drops the marker of a stop that didn't take;
+			// queue it again then.
 			if n, err := m.rdb.Exists(ctx, "stop:sandbox:"+id).Result(); err != nil || n > 0 {
 				return
 			}
-		} else {
-			if !snap.RefreshedAt.After(*rec.StoppedAt) {
-				return // the reading predates the stop
-			}
+		case PhaseStopped:
+			// Reported running before the owner's start reached OnStarted: a
+			// reading from before the stop. Wait for the start.
 			if !critical {
-				if rec.GraceUntil == nil {
-					// The owner has started it again: time to delete files.
-					start, g := now, now.Add(m.cfg.Grace)
-					rec.GraceStartedAt, rec.GraceUntil = &start, &g
-					if err := putDiskStop(ctx, m.rdb, id, rec); err != nil {
-						m.log.Warn("usage: start grace", zap.String("sandbox", id), zap.Error(err))
-					}
-					m.log.Info("usage: sandbox past its disk size started again; grace period begins",
-						zap.String("sandbox", id), zap.Time("until", g))
-					return
-				}
-				if now.Before(*rec.GraceUntil) {
-					return
-				}
-				// Act only on a size measured since the grace began: a layer
-				// scan from before it misses the files the owner deleted.
-				if rec.GraceStartedAt != nil && !u.LayerMeasuredAt.After(*rec.GraceStartedAt) {
-					return
-				}
+				return
+			}
+		case PhaseGrace:
+			if !critical && (now.Before(*rec.GraceUntil) || !freshInGrace) {
+				return
 			}
 		}
 	}
@@ -322,7 +391,7 @@ func (m *Monitor) checkDisk(ctx context.Context, now time.Time, snap *Snapshot, 
 
 func (m *Monitor) stop(ctx context.Context, now time.Time, id string, used, requested int64, critical bool) {
 	// Record first, so the owner can see why the sandbox stopped.
-	if err := putDiskStop(ctx, m.rdb, id, &DiskStop{QueuedAt: now, UsedBytes: used, RequestedBytes: requested}); err != nil {
+	if err := putDiskStop(ctx, m.rdb, id, &DiskStop{Phase: PhaseQueued, QueuedAt: now, UsedBytes: used, RequestedBytes: requested}); err != nil {
 		m.log.Error("usage: record disk stop", zap.String("sandbox", id), zap.Error(err))
 		return
 	}

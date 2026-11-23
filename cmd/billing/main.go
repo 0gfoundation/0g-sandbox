@@ -596,6 +596,9 @@ func main() {
 	if attestor != nil {
 		proxyHandler.AppAdmin = attestor.IsAppSigner
 	}
+	// A sandbox past its disk size is only stopped: archiving would copy its
+	// filesystem into the registry and MinIO, which share the runner's volume.
+	hooks := stopHooks{keep: map[string]bool{usage.ReasonDiskOverSize: true}}
 	if cfg.Usage.RunnerAPIURL != "" {
 		usageMonitor := usage.NewMonitor(usage.Config{
 			Interval:          time.Duration(cfg.Usage.PollSec) * time.Second,
@@ -611,6 +614,7 @@ func main() {
 				return settler.QueueStop(ctx, rdb, stopCh, sandboxID, usage.ReasonDiskOverSize, log)
 			}, log.Named("usage"))
 		proxyHandler.Usage = usageMonitor
+		hooks.onStopped = append(hooks.onStopped, usageMonitor.OnStopped)
 		go usageMonitor.Run(ctx)
 		log.Info("usage monitoring on", zap.String("runner", cfg.Usage.RunnerAPIURL), zap.Bool("disk_enforce", cfg.Usage.DiskEnforce))
 	} else {
@@ -618,7 +622,7 @@ func main() {
 	}
 	proxyHandler.RegisterPublic(apiPublic)
 	proxyHandler.Register(api)
-	go runStopHandler(ctx, stopCh, dtona, rdb, alerter, log, proxyHandler.BrokerDeregister)
+	go runStopHandler(ctx, stopCh, dtona, rdb, alerter, log, proxyHandler.BrokerDeregister, hooks)
 	go billing.RunGenerator(ctx, rdb, billingHandler, daytonaBillable{dtona}, proxyHandler.BrokerDeregister, log)
 
 	// Admin-only: pull an image from an external registry into the internal registry.
@@ -1030,7 +1034,23 @@ func recoverPendingStops(ctx context.Context, rdb *redis.Client, stopCh chan<- s
 
 // runStopHandler consumes StopSignals, archives the sandbox (preserving state in
 // object storage so it can be restarted later), and cleans up Redis.
-func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona *daytona.Client, rdb *redis.Client, alerter alert.Alerter, log *zap.Logger, deregisterBroker func(context.Context, string)) {
+// stopHooks let other components shape the stop pipeline without it knowing
+// them.
+type stopHooks struct {
+	// keep lists stop reasons whose sandboxes are only stopped: their
+	// filesystem stays in place, without an archive.
+	keep map[string]bool
+	// onStopped run after every completed stop, whatever its reason.
+	onStopped []func(ctx context.Context, sandboxID string)
+}
+
+func (h stopHooks) stopped(ctx context.Context, sandboxID string) {
+	for _, f := range h.onStopped {
+		f(ctx, sandboxID)
+	}
+}
+
+func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona *daytona.Client, rdb *redis.Client, alerter alert.Alerter, log *zap.Logger, deregisterBroker func(context.Context, string), hooks stopHooks) {
 	for {
 		select {
 		case sig := <-stopCh:
@@ -1072,8 +1092,8 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 				)
 			}
 			cancel()
-			if sig.Reason == usage.ReasonDiskOverSize {
-				finishDiskStop(ctx, sig.SandboxID, waitErr, rdb, log, deregisterBroker)
+			if hooks.keep[sig.Reason] {
+				finishStopWithoutArchive(ctx, sig, waitErr, rdb, log, deregisterBroker, hooks)
 				continue
 			}
 			// Step 3: archive (backup filesystem to MinIO for later restore).
@@ -1111,10 +1131,7 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 			if deregisterBroker != nil {
 				deregisterBroker(ctx, sig.SandboxID)
 			}
-			// A disk stop queued behind this one is done too.
-			if err := usage.MarkStopped(ctx, rdb, sig.SandboxID, time.Now()); err != nil {
-				log.Warn("mark disk stop done", zap.String("sandbox", sig.SandboxID), zap.Error(err))
-			}
+			hooks.stopped(ctx, sig.SandboxID)
 			log.Info("sandbox archived",
 				zap.String("sandbox", sig.SandboxID),
 				zap.String("reason", sig.Reason),
@@ -1130,31 +1147,25 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 	}
 }
 
-// finishDiskStop completes the stop of a sandbox past its disk size. It is
-// stopped but not archived: archiving copies its filesystem into the registry
-// and MinIO, which share the runner's volume, so the volume would hold the
-// bytes twice while it runs and free none afterwards. The owner starts the
-// sandbox again to delete files; usage.Monitor gives them a grace period.
-func finishDiskStop(ctx context.Context, sandboxID string, waitErr error, rdb *redis.Client, log *zap.Logger, deregisterBroker func(context.Context, string)) {
+// finishStopWithoutArchive completes a stop whose reason keeps the sandbox's
+// filesystem in place (stopHooks.keep). A stop that wasn't confirmed keeps the
+// billing session and drops its marker, so whoever asked for it can ask again.
+func finishStopWithoutArchive(ctx context.Context, sig settler.StopSignal, waitErr error, rdb *redis.Client, log *zap.Logger, deregisterBroker func(context.Context, string), hooks stopHooks) {
 	if waitErr != nil {
-		// Not confirmed stopped: keep its billing session, and drop the marker
-		// so the usage monitor queues the stop again on its next poll.
-		rdb.Del(ctx, "stop:sandbox:"+sandboxID) //nolint:errcheck
+		rdb.Del(ctx, "stop:sandbox:"+sig.SandboxID) //nolint:errcheck
 		return
 	}
-	rdb.Del(ctx, "billing:compute:"+sandboxID) //nolint:errcheck
-	rdb.Del(ctx, "stop:sandbox:"+sandboxID)    //nolint:errcheck
+	rdb.Del(ctx, "billing:compute:"+sig.SandboxID) //nolint:errcheck
+	rdb.Del(ctx, "stop:sandbox:"+sig.SandboxID)    //nolint:errcheck
 	if deregisterBroker != nil {
-		deregisterBroker(ctx, sandboxID)
+		deregisterBroker(ctx, sig.SandboxID)
 	}
-	if err := usage.MarkStopped(ctx, rdb, sandboxID, time.Now()); err != nil {
-		log.Warn("mark disk stop done", zap.String("sandbox", sandboxID), zap.Error(err))
-	}
-	log.Info("sandbox stopped", zap.String("sandbox", sandboxID), zap.String("reason", usage.ReasonDiskOverSize))
+	hooks.stopped(ctx, sig.SandboxID)
+	log.Info("sandbox stopped", zap.String("sandbox", sig.SandboxID), zap.String("reason", sig.Reason))
 	_ = events.Push(ctx, rdb, events.Event{
 		Type:      events.TypeAutoStopped,
-		Message:   fmt.Sprintf("Sandbox %s stopped: %s", sandboxID, usage.ReasonDiskOverSize),
-		SandboxID: sandboxID,
+		Message:   fmt.Sprintf("Sandbox %s stopped: %s", sig.SandboxID, sig.Reason),
+		SandboxID: sig.SandboxID,
 	})
 }
 
