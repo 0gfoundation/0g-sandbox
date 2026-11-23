@@ -49,6 +49,9 @@ daytona_sandbox_usage_refreshed_timestamp_seconds 1.8e+09
 # TYPE daytona_sandbox_writable_layer_bytes gauge
 daytona_sandbox_writable_layer_bytes{sandbox_id="sb-1"} 7.516192768e+09
 daytona_sandbox_writable_layer_bytes{sandbox_id="sb-2"} 1.1811160064e+10
+# TYPE daytona_sandbox_data_bytes gauge
+daytona_sandbox_data_bytes{sandbox_id="sb-1"} 7.516192768e+09
+daytona_sandbox_data_bytes{sandbox_id="sb-2"} 1.7179869184e+10
 # TYPE daytona_sandbox_writable_layer_measured_timestamp_seconds gauge
 daytona_sandbox_writable_layer_measured_timestamp_seconds{sandbox_id="sb-1"} 1.79999994e+09
 daytona_sandbox_writable_layer_measured_timestamp_seconds{sandbox_id="sb-2"} 1.79999994e+09
@@ -77,8 +80,11 @@ func TestParseMetrics(t *testing.T) {
 		*a.LayerBytes != 7<<30 || !a.LayerMeasuredAt.Equal(time.Unix(1_799_999_940, 0)) {
 		t.Errorf("sb-1 = %+v", a)
 	}
+	if *a.DataBytes != 7<<30 || *a.Used() != 7<<30 {
+		t.Errorf("sb-1 data = %d", *a.DataBytes)
+	}
 	b := s.Sandboxes["sb-2"]
-	if b.Running || b.CPUSecondsTotal != nil || b.MemoryBytes != nil || *b.LayerBytes != 11<<30 {
+	if b.Running || b.CPUSecondsTotal != nil || b.MemoryBytes != nil || *b.LayerBytes != 11<<30 || *b.Used() != 16<<30 {
 		t.Errorf("sb-2 (stopped) = %+v", b)
 	}
 }
@@ -99,5 +105,17 @@ func TestRunnerClient_SendsTokenAndRejectsErrors(t *testing.T) {
 	}
 	if _, err := NewRunnerClient(srv.URL, "wrong").Fetch(context.Background()); err == nil || !strings.Contains(err.Error(), "401") {
 		t.Errorf("wrong token: err = %v, want status 401", err)
+	}
+}
+
+// A runner without the carry-over reports no data bytes: the writable layer
+// stands in.
+func TestSandboxUsed_FallsBackToTheWritableLayer(t *testing.T) {
+	layer := int64(5)
+	if got := (&Sandbox{LayerBytes: &layer}).Used(); got == nil || *got != 5 {
+		t.Errorf("Used() = %v, want the writable layer", got)
+	}
+	if (&Sandbox{}).Used() != nil {
+		t.Error("Used() of an unmeasured sandbox is not nil")
 	}
 }

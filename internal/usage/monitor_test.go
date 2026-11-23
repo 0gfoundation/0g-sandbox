@@ -176,6 +176,22 @@ func TestDisk_StopsPastSizeOnceAndRecordsWhy(t *testing.T) {
 
 // Stopped, the sandbox waits for its owner's start: a reading that still shows
 // it running (taken before the stop) neither stops it again nor starts a grace.
+// After a restore the writable layer restarts near 0; the data carried over
+// from the backup still counts.
+func TestDisk_CountsDataCarriedOverARestore(t *testing.T) {
+	h := newHarness(t, true)
+	h.read(true, 0.001, 50) // writable layer: 1 MiB since the restore
+	data := int64(10.5 * float64(GiB))
+	h.runner.snap.Sandboxes["sb-1"].DataBytes = &data
+	h.poll()
+	if len(h.stops) != 1 {
+		t.Errorf("a restored sandbox over its size on its carried data was not stopped: %v", h.stops)
+	}
+	if r := h.m.Report(context.Background(), "sb-1", 10); *r.Disk.UsedBytes != data || r.Disk.Status != "over" {
+		t.Errorf("report used %d, status %s; want the carried data", *r.Disk.UsedBytes, r.Disk.Status)
+	}
+}
+
 func TestDisk_StoppedWaitsForTheOwnersStart(t *testing.T) {
 	h := newHarness(t, true)
 	h.read(true, 11, 50)

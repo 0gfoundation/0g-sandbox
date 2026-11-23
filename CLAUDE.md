@@ -307,6 +307,16 @@ set, `usage.Monitor` polls them every `USAGE_POLL_SEC` and does the following:
     reasons that keep the filesystem (no archive), and the hooks to run after every
     completed stop.
 
+The disk a sandbox uses is `daytona_sandbox_data_bytes`: its writable layer plus the
+data it carried over from backups. A restore turns a sandbox's backup into an image
+layer and starts a fresh writable layer on top, so the writable layer alone resets
+after any archive. Each backup records the running total in the image label
+`ai.0g.sandbox.data-bytes`, and the runner adds it back. Two gaps remain:
+- Data restored from a backup made before the label existed stays uncounted.
+- Files deleted after a restore stay in the read-only layer, so deleting them frees
+  no space and does not lower the measure. An owner cannot clean such a sandbox
+  back under its size.
+
 Disk is the only resource the monitor acts on. CPU and memory have hard caps in the
 runner and are billed. A sandbox's disk has neither while Docker's backing
 filesystem is ext4: the runner sets `StorageOpt` only on xfs. Between two layer

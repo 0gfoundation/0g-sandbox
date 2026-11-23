@@ -193,7 +193,7 @@ func (m *Monitor) checkCoverage(ctx context.Context, now time.Time, snap *Snapsh
 		switch u := snap.Sandboxes[sb.ID]; {
 		case u == nil:
 			after = unavailableAlertAfter // the runner refreshes every 30 s
-		case u.LayerBytes == nil || now.Sub(u.LayerMeasuredAt) > maxLayerAge:
+		case u.Used() == nil || now.Sub(u.LayerMeasuredAt) > maxLayerAge:
 			after = maxLayerAge // it sizes layers every 5 min
 		default:
 			continue
@@ -333,10 +333,10 @@ func (m *Monitor) checkOOMAndCPU(ctx context.Context, snap *Snapshot) {
 // requested disk size. What it may do depends on the sandbox's DiskStop phase,
 // which the events themselves record (see DiskStop); nothing here infers them.
 func (m *Monitor) checkDisk(ctx context.Context, now time.Time, snap *Snapshot, id string, requested int64, u *Sandbox) {
-	if u.LayerBytes == nil || now.Sub(u.LayerMeasuredAt) > maxLayerAge {
+	if u.Used() == nil || now.Sub(u.LayerMeasuredAt) > maxLayerAge {
 		return
 	}
-	used := *u.LayerBytes
+	used := *u.Used()
 	rec, err := GetDiskStop(ctx, m.rdb, id)
 	if err != nil {
 		m.log.Warn("usage: read disk-stop record", zap.String("sandbox", id), zap.Error(err))
@@ -487,8 +487,8 @@ func (m *Monitor) fill(r *Report, snap *Snapshot, u *Sandbox) {
 	r.Measured = true
 	at, running := snap.RefreshedAt, u.Running
 	r.MeasuredAt, r.Running = &at, &running
-	if u.LayerBytes != nil {
-		used, measured := *u.LayerBytes, u.LayerMeasuredAt
+	if u.Used() != nil {
+		used, measured := *u.Used(), u.LayerMeasuredAt
 		r.Disk.UsedBytes, r.Disk.MeasuredAt = &used, &measured
 		if req := r.Disk.RequestedBytes; req > 0 {
 			free := max(req-used, 0)

@@ -67,8 +67,21 @@ type Sandbox struct {
 	TasksLimit          uint64
 	ReceiveBytesTotal   *uint64
 	TransmitBytesTotal  *uint64
-	LayerBytes          *int64
-	LayerMeasuredAt     time.Time
+	LayerBytes          *int64 // the writable layer alone
+	// DataBytes is the sandbox's own data: its writable layer plus what it
+	// carried over from backups, which a restore puts under a fresh writable
+	// layer. Runners before 0g-daytona#17's carry-over don't report it.
+	DataBytes       *int64
+	LayerMeasuredAt time.Time
+}
+
+// Used is the disk the sandbox uses for its own data: DataBytes, or the
+// writable layer from a runner that doesn't report it. nil if not measured.
+func (s *Sandbox) Used() *int64 {
+	if s.DataBytes != nil {
+		return s.DataBytes
+	}
+	return s.LayerBytes
 }
 
 // ParseMetrics reads the runner's /metrics in Prometheus text format,
@@ -141,6 +154,9 @@ func setSandbox(sb *Sandbox, name string, v float64) {
 	case "daytona_sandbox_writable_layer_bytes":
 		b := int64(v)
 		sb.LayerBytes = &b
+	case "daytona_sandbox_data_bytes":
+		b := int64(v)
+		sb.DataBytes = &b
 	case "daytona_sandbox_writable_layer_measured_timestamp_seconds":
 		sb.LayerMeasuredAt = time.Unix(int64(v), 0)
 	}
