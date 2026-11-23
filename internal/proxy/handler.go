@@ -29,6 +29,7 @@ import (
 	"github.com/0gfoundation/0g-sandbox/internal/daytona"
 	"github.com/0gfoundation/0g-sandbox/internal/events"
 	"github.com/0gfoundation/0g-sandbox/internal/registry"
+	"github.com/0gfoundation/0g-sandbox/internal/usage"
 	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
 
@@ -136,6 +137,14 @@ type Handler struct {
 	// SealIssuer authenticates this provider's current app instance on each
 	// sealed create. No issuer scope is accepted from the create request.
 	SealIssuer func(ctx context.Context) (SealIssuer, error)
+	// Usage serves GET /api/sandbox/:id/usage. nil (RUNNER_API_URL unset,
+	// tests) = the route answers 503.
+	Usage UsageReporter
+}
+
+// UsageReporter builds a sandbox's usage report (usage.Monitor).
+type UsageReporter interface {
+	Report(ctx context.Context, sandboxID string, requestedDiskGiB int) usage.Report
 }
 
 func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec *big.Int, providerAddress string, adminAddresses []string, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, providerKey, sealKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
@@ -1430,6 +1439,22 @@ func copyRecorder(c *gin.Context, rec *httptest.ResponseRecorder) {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+// handleUsage answers GET /api/sandbox/:id/usage: the sandbox's own CPU,
+// memory, task, network and disk numbers, its requested disk size, and why
+// it was last stopped for disk, if it was (#148).
+func (h *Handler) handleUsage(c *gin.Context) {
+	if h.Usage == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "usage monitoring is not enabled on this provider"})
+		return
+	}
+	sb, err := h.dtona.GetSandbox(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "sandbox lookup failed"})
+		return
+	}
+	c.JSON(http.StatusOK, h.Usage.Report(c.Request.Context(), sb.ID, sb.Disk))
+}
+
 // sandboxAction is a /sandbox/:id/<action> the proxy handles itself instead of
 // forwarding: the method it answers and its handler, access check included.
 type sandboxAction struct {
@@ -1450,6 +1475,9 @@ var sandboxActions = map[string]sandboxAction{
 	"/force":          {http.MethodDelete, func(h *Handler) gin.HandlerFunc { return h.handleForceDelete }},
 	"/force-stop":     {http.MethodPost, func(h *Handler) gin.HandlerFunc { return h.handleForceStop }},
 	"/labels":         {http.MethodPut, func(h *Handler) gin.HandlerFunc { return h.withOwner(h.handleLabels) }},
+	// Numbers only, no workload content: open to admins, and to the owner of
+	// a sealed sandbox.
+	"/usage": {http.MethodGet, func(h *Handler) gin.HandlerFunc { return h.withOwnerOrAdmin(h.handleUsage) }},
 }
 
 // blockedActions are sandbox settings the proxy owns (InjectOwner fixes them at

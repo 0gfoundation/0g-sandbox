@@ -182,6 +182,7 @@ Signed by the TEE key. Nonce is per `(user, provider)` pair; must be strictly in
 | `billing:nonce:<user>:<provider>` | In-memory nonce counter (seeded from chain on startup) |
 | `voucher:<providerAddr>` | Redis list queue of pending vouchers |
 | `stop:sandbox:<sandboxID>` | Pending stop signal (value = reason string) |
+| `usage:disk_stop:<sandboxID>` | Why and when the usage monitor stopped a sandbox past its disk size, and its grace period after a restart (JSON, 30-day TTL) |
 | `auth:nonce:<nonce>` | Seen request nonces (replay protection, TTL-based) |
 | `identity:attestor:<chain>:<registry>:<appId>:instance` | Authorized attestor registration instance (`registeredAt:owner`); `ATTESTOR_INSTANCE` replaces it |
 
@@ -265,6 +266,40 @@ clients can pre-check.
 - Default (production) build: `sealed: true` → blocks SSH and toolbox
 - `go build -tags sealdebug`: `sealed: true` → TEE attestation injected but SSH/toolbox remain open
 - Dockerfile: `--build-arg BUILD_TAGS=sealdebug`
+
+### Per-Sandbox Usage (#148)
+
+The 0g-daytona runner (from 0g-daytona #17) serves each sandbox's numbers on its
+token-protected `/metrics`. It labels them with the sandbox ID only: CPU used and
+throttled, memory and OOM kills, tasks, network bytes, and the writable layer's
+size. It also reports the Docker volume's size and usage. With `RUNNER_API_URL`
+set, `usage.Monitor` polls them every `USAGE_POLL_SEC` and does the following:
+
+- **Owners' view.** It serves `GET /api/sandbox/:id/usage`, which returns the
+  numbers, the requested disk size, the disk status (`ok` / `near_full` / `over`)
+  and the last disk stop.
+- **Alerts.** These go through the alert webhook:
+  - `disk_volume_high`: the shared volume is over `VOLUME_ALERT_PCT`, and critical
+    over `VOLUME_CRITICAL_PCT`.
+  - `sandbox_disk_over_size`
+  - `sandbox_oom_kills`: `OOM_ALERT_KILLS_PER_HOUR`.
+  - `sandbox_cpu_pinned`: `CPU_PINNED_ALERT_HOURS`.
+  - `usage_unavailable`: the runner's readings have been missing or stale for
+    5 minutes, so disk sizes are not being checked.
+- **Disk enforcement.** With `DISK_ENFORCE=true`, a running sandbox whose writable
+  layer has gone past its requested disk is stopped through the normal stop path
+  with reason `disk_over_size`.
+  - **Stopped, not archived.** Archiving would copy the filesystem into the
+    registry or MinIO on the same volume.
+  - **Restart grace.** When the owner starts it again, they get `DISK_GRACE_SEC` to
+    delete files before it is stopped again. The grace does not apply once the
+    shared volume is over `VOLUME_CRITICAL_PCT`.
+
+Disk is the only resource the monitor acts on. CPU and memory have hard caps in the
+runner and are billed. A sandbox's disk has neither while Docker's backing
+filesystem is ext4: the runner sets `StorageOpt` only on xfs. Between two layer
+scans (`SANDBOX_LAYER_SCAN_INTERVAL`, 5 min by default) a sandbox can still write
+past its size, and stopping it frees nothing.
 
 ### Port Exposure: Private by Default, Public on Opt-In
 
@@ -400,6 +435,7 @@ The server starts on port 8080 (`PORT` env var) and exposes:
 - `POST /api/sandbox/:id/stop` — stop a running sandbox (admin or owner; billing: OnStop)
 - `POST /api/sandbox/:id/archive` — archive a stopped sandbox (admin or owner)
 - `POST /api/sandbox/:id/ensure-billing` — idempotent backfill if the create-time billing hook missed
+- `GET /api/sandbox/:id/usage` — admin or owner (sealed sandboxes included; numbers only): CPU, memory, OOM kills, tasks, network, writable-layer bytes against the requested disk, last disk stop. 503 when `RUNNER_API_URL` is unset
 - `POST /api/sandbox/:id/ssh-access` — owner-only; sealed sandboxes return 403
 - `PUT /api/sandbox/:id/labels` — owner only (strips `daytona-owner` from the payload)
 - `Any /api/sandbox/:id/<other>` — transparent Daytona proxy (owner only, sealed sandboxes blocked)

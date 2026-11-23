@@ -33,6 +33,12 @@ const (
 	KindQueueBacklog           Kind = "queue_backlog"
 	KindStopPersistFailure     Kind = "stop_persist_failure"
 	KindArchiveFailure         Kind = "archive_failure"
+	// Per-sandbox usage (internal/usage, #148).
+	KindDiskVolumeHigh         Kind = "disk_volume_high"
+	KindSandboxDiskOverSize    Kind = "sandbox_disk_over_size"
+	KindSandboxOOMKills        Kind = "sandbox_oom_kills"
+	KindSandboxCPUPinned       Kind = "sandbox_cpu_pinned"
+	KindUsageUnavailable       Kind = "usage_unavailable"
 )
 
 // Severity is included in the webhook payload so receivers can route or

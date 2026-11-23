@@ -31,6 +31,12 @@ services:
       # restart); kms = the app's KMS key, the same on every boot (needs the
       # node to consume a KMS; tapp-server >= 0.11.0 lists it in the evidence).
       PROVIDER_KEY_SOURCE:     ${PROVIDER_KEY_SOURCE:-local}
+      # Per-sandbox usage (#148): set RUNNER_API_URL=http://runner:3003 with a
+      # 0g-daytona runner that serves per-sandbox metrics (0g-daytona #17).
+      # Unset = off. DISK_ENFORCE=true stops sandboxes past their disk size.
+      RUNNER_API_URL:          ${RUNNER_API_URL:-}
+      RUNNER_API_KEY:          ${DAYTONA_RUNNER_API_KEY:-secret_api_token}
+      DISK_ENFORCE:            ${DISK_ENFORCE:-false}
       # Dev-only mock overrides (leave empty in production)
       MOCK_TEE:                ${MOCK_TEE:-}
       MOCK_APP_PRIVATE_KEY:    ${MOCK_APP_PRIVATE_KEY:-}

@@ -202,6 +202,13 @@ func HandleStatuses(
 	}
 }
 
+// QueueStop queues a stop of sandboxID through the same path the settler
+// uses for insufficient balance: a persisted marker, then a signal to the stop
+// handler. Other components that stop sandboxes (the usage monitor) use it.
+func QueueStop(ctx context.Context, rdb *redis.Client, stopCh chan<- StopSignal, sandboxID, reason string, log *zap.Logger) error {
+	return persistStop(ctx, rdb, stopCh, sandboxID, reason, log)
+}
+
 func persistStop(ctx context.Context, rdb *redis.Client, stopCh chan<- StopSignal, sandboxID, reason string, log *zap.Logger) error {
 	// 1. Persist first (crash-safe), deduped with SetNX. A settler outage can
 	//    back up thousands of vouchers for one sandbox; when they batch-settle and

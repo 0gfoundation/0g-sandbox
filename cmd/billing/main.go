@@ -35,6 +35,7 @@ import (
 	"github.com/0gfoundation/0g-sandbox/internal/registry"
 	"github.com/0gfoundation/0g-sandbox/internal/settler"
 	"github.com/0gfoundation/0g-sandbox/internal/tee"
+	"github.com/0gfoundation/0g-sandbox/internal/usage"
 	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 	"github.com/0gfoundation/0g-sandbox/web"
 )
@@ -595,6 +596,26 @@ func main() {
 	if attestor != nil {
 		proxyHandler.AppAdmin = attestor.IsAppSigner
 	}
+	if cfg.Usage.RunnerAPIURL != "" {
+		usageMonitor := usage.NewMonitor(usage.Config{
+			Interval:          time.Duration(cfg.Usage.PollSec) * time.Second,
+			Enforce:           cfg.Usage.DiskEnforce,
+			WarnFreeBytes:     cfg.Usage.DiskWarnFreeMiB << 20,
+			Grace:             time.Duration(cfg.Usage.DiskGraceSec) * time.Second,
+			VolumeAlertPct:    cfg.Usage.VolumeAlertPct,
+			VolumeCriticalPct: cfg.Usage.VolumeCriticalPct,
+			OOMKillsPerHour:   cfg.Usage.OOMKillsPerHour,
+			CPUPinnedAfter:    time.Duration(cfg.Usage.CPUPinnedHours * float64(time.Hour)),
+		}, usage.NewRunnerClient(cfg.Usage.RunnerAPIURL, cfg.Usage.RunnerAPIKey), dtona, rdb, alerter,
+			func(ctx context.Context, sandboxID string) error {
+				return settler.QueueStop(ctx, rdb, stopCh, sandboxID, usage.ReasonDiskOverSize, log)
+			}, log.Named("usage"))
+		proxyHandler.Usage = usageMonitor
+		go usageMonitor.Run(ctx)
+		log.Info("usage monitoring on", zap.String("runner", cfg.Usage.RunnerAPIURL), zap.Bool("disk_enforce", cfg.Usage.DiskEnforce))
+	} else {
+		log.Info("usage monitoring off: RUNNER_API_URL not set")
+	}
 	proxyHandler.RegisterPublic(apiPublic)
 	proxyHandler.Register(api)
 	go runStopHandler(ctx, stopCh, dtona, rdb, alerter, log, proxyHandler.BrokerDeregister)
@@ -1043,13 +1064,18 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 			// Step 2: wait for stopped state (stop is async in Daytona).
 			// Use a 2-minute timeout so a stuck archive job doesn't block this goroutine forever.
 			waitCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-			if err := dtona.WaitStopped(waitCtx, sig.SandboxID); err != nil {
+			waitErr := dtona.WaitStopped(waitCtx, sig.SandboxID)
+			if waitErr != nil {
 				log.Warn("wait stopped failed",
 					zap.String("sandbox", sig.SandboxID),
-					zap.Error(err),
+					zap.Error(waitErr),
 				)
 			}
 			cancel()
+			if sig.Reason == usage.ReasonDiskOverSize {
+				finishDiskStop(ctx, sig.SandboxID, waitErr, rdb, log, deregisterBroker)
+				continue
+			}
 			// Step 3: archive (backup filesystem to MinIO for later restore).
 			// Only tear down billing + retry state once the sandbox is durably in
 			// a terminal archived state. If archive fails and the sandbox is NOT
@@ -1085,6 +1111,10 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 			if deregisterBroker != nil {
 				deregisterBroker(ctx, sig.SandboxID)
 			}
+			// A disk stop queued behind this one is done too.
+			if err := usage.MarkStopped(ctx, rdb, sig.SandboxID, time.Now()); err != nil {
+				log.Warn("mark disk stop done", zap.String("sandbox", sig.SandboxID), zap.Error(err))
+			}
 			log.Info("sandbox archived",
 				zap.String("sandbox", sig.SandboxID),
 				zap.String("reason", sig.Reason),
@@ -1098,6 +1128,34 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 			return
 		}
 	}
+}
+
+// finishDiskStop completes the stop of a sandbox past its disk size. It is
+// stopped but not archived: archiving copies its filesystem into the registry
+// and MinIO, which share the runner's volume, so the volume would hold the
+// bytes twice while it runs and free none afterwards. The owner starts the
+// sandbox again to delete files; usage.Monitor gives them a grace period.
+func finishDiskStop(ctx context.Context, sandboxID string, waitErr error, rdb *redis.Client, log *zap.Logger, deregisterBroker func(context.Context, string)) {
+	if waitErr != nil {
+		// Not confirmed stopped: keep its billing session, and drop the marker
+		// so the usage monitor queues the stop again on its next poll.
+		rdb.Del(ctx, "stop:sandbox:"+sandboxID) //nolint:errcheck
+		return
+	}
+	rdb.Del(ctx, "billing:compute:"+sandboxID) //nolint:errcheck
+	rdb.Del(ctx, "stop:sandbox:"+sandboxID)    //nolint:errcheck
+	if deregisterBroker != nil {
+		deregisterBroker(ctx, sandboxID)
+	}
+	if err := usage.MarkStopped(ctx, rdb, sandboxID, time.Now()); err != nil {
+		log.Warn("mark disk stop done", zap.String("sandbox", sandboxID), zap.Error(err))
+	}
+	log.Info("sandbox stopped", zap.String("sandbox", sandboxID), zap.String("reason", usage.ReasonDiskOverSize))
+	_ = events.Push(ctx, rdb, events.Event{
+		Type:      events.TypeAutoStopped,
+		Message:   fmt.Sprintf("Sandbox %s stopped: %s", sandboxID, usage.ReasonDiskOverSize),
+		SandboxID: sandboxID,
+	})
 }
 
 // sandboxDisposition classifies a sandbox for the stop pipeline.

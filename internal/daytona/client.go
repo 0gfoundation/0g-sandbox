@@ -19,6 +19,7 @@ type Sandbox struct {
 	Labels   map[string]string `json:"labels"`
 	CPU      int               `json:"cpu"`
 	Memory   int               `json:"memory"` // GB
+	Disk     int               `json:"disk"`   // GiB requested; not enforced on ext4 (#148)
 	Snapshot string            `json:"snapshot,omitempty"`
 }
 
