@@ -3,9 +3,12 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,8 +22,9 @@ import (
 )
 
 type fakeUsage struct {
-	gotID   string
-	gotDisk int
+	gotID    string
+	gotDisk  int
+	admitErr error
 
 	mu      sync.Mutex
 	started []string
@@ -36,6 +40,8 @@ func (f *fakeUsage) Report(_ context.Context, id string, disk int) usage.Report 
 	f.gotID, f.gotDisk = id, disk
 	return usage.Report{SandboxID: id, Measured: true, Disk: usage.DiskReport{RequestedBytes: int64(disk) * usage.GiB, Status: "ok"}}
 }
+
+func (f *fakeUsage) AdmitCreate() error { return f.admitErr }
 
 func usageEngine(t *testing.T, sealed bool, wallet string, u UsageTracker) *gin.Engine {
 	t.Helper()
@@ -120,5 +126,45 @@ func TestUsage_OwnerStartNotifiesTracker(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.started) != 1 || f.started[0] != "sb-u" {
 		t.Errorf("OnStarted calls = %v, want [sb-u]", f.started)
+	}
+}
+
+// A provider whose shared disk is nearly full refuses a create before it
+// reserves balance or calls Daytona.
+func TestCreate_RefusedWhileDiskNearlyFull(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		admit   error
+		refused bool
+	}{
+		{"volume full", fmt.Errorf("%w: 91%% used", usage.ErrVolumeFull), true},
+		{"room left", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var daytonaCalls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				daytonaCalls.Add(1)
+				http.NotFound(w, r)
+			}))
+			t.Cleanup(srv.Close)
+			r := gin.New()
+			api := r.Group("/api", func(c *gin.Context) { c.Set("wallet_address", "0xOWNER"); c.Next() })
+			rdb := redis.NewClient(&redis.Options{Addr: miniredis.RunT(t).Addr()})
+			h := NewHandler(daytona.NewClient(srv.URL, "k"), &mockBilling{}, nil, nil, nil, nil, nil, nil, nil, "", nil, "", rdb, zap.NewNop(), "", nil, nil, 0)
+			h.Usage = &fakeUsage{admitErr: tc.admit}
+			h.Register(api)
+
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(`{"snapshot":"s"}`)))
+			refused := w.Code == http.StatusServiceUnavailable && strings.Contains(w.Body.String(), "disk is nearly full")
+			if refused != tc.refused {
+				t.Fatalf("refused = %v, want %v: %d %s", refused, tc.refused, w.Code, w.Body.String())
+			}
+			if n := daytonaCalls.Load(); tc.refused && n != 0 {
+				t.Errorf("a refused create called Daytona %d times", n)
+			} else if !tc.refused && n == 0 {
+				t.Error("an admitted create never reached Daytona")
+			}
+		})
 	}
 }

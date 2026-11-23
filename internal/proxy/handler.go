@@ -149,6 +149,9 @@ type UsageTracker interface {
 	// OnStarted is called after the owner starts a sandbox: one stopped for
 	// its disk size then gets its grace period to delete files.
 	OnStarted(ctx context.Context, sandboxID string)
+	// AdmitCreate returns an error while the provider's shared disk is too
+	// full for a new sandbox.
+	AdmitCreate() error
 }
 
 func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec *big.Int, providerAddress string, adminAddresses []string, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, providerKey, sealKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
@@ -384,6 +387,16 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	if sealed && h.SealIssuer == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sealed issuer authentication not configured"})
 		return
+	}
+	// A provider whose shared disk is nearly full takes no new sandboxes; the
+	// ones it has keep running and can still be started. Before any balance
+	// reservation or Daytona call.
+	if h.Usage != nil {
+		if err := h.Usage.AdmitCreate(); err != nil {
+			h.log.Warn("create refused", zap.String("wallet", wallet), zap.Error(err))
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "this provider's disk is nearly full and it is not taking new sandboxes; try again later or use another provider"})
+			return
+		}
 	}
 	// Snapshot-only policy guarantees no custom cpu/memory in the body, so the
 	// snapshot record is the ONLY billing spec source. Look it up and FAIL

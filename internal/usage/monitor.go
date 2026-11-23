@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -29,6 +30,9 @@ type Config struct {
 	Grace             time.Duration
 	VolumeAlertPct    float64
 	VolumeCriticalPct float64
+	// CreateBlockPct refuses new sandboxes while the shared volume is at least
+	// this full (AdmitCreate). 0 never refuses.
+	CreateBlockPct float64
 	// OOMKillsPerHour alerts when a sandbox has this many OOM kills within an
 	// hour.
 	OOMKillsPerHour int
@@ -46,6 +50,10 @@ const (
 	unavailableAlertAfter = 5 * time.Minute
 	cpuPinnedUtilization  = 0.95
 )
+
+// ErrVolumeFull is what AdmitCreate returns, wrapped, while the shared volume
+// is too full for new sandboxes.
+var ErrVolumeFull = errors.New("the shared volume is too full for new sandboxes")
 
 // Fetcher reads the runner's metrics.
 type Fetcher interface {
@@ -240,6 +248,27 @@ func (m *Monitor) unavailable(ctx context.Context, now time.Time, err error) {
 	}
 }
 
+// AdmitCreate tells whether a new sandbox may be created. It returns an error
+// wrapping ErrVolumeFull while the latest reading has the shared volume at
+// least Config.CreateBlockPct full. Without a reading from the last
+// maxSnapshotAge it admits: a monitoring outage must not stop every create,
+// and the usage_unavailable alert already reports it.
+func (m *Monitor) AdmitCreate() error {
+	if m.cfg.CreateBlockPct <= 0 {
+		return nil
+	}
+	m.mu.Lock()
+	snap := m.latest
+	m.mu.Unlock()
+	if snap == nil || snap.Volume == nil || snap.Volume.SizeBytes == 0 || m.now().Sub(snap.RefreshedAt) > maxSnapshotAge {
+		return nil
+	}
+	if pct := snap.Volume.UsedPct(); pct >= m.cfg.CreateBlockPct {
+		return fmt.Errorf("%w: %.1f%% used, new sandboxes refused from %.0f%%", ErrVolumeFull, pct, m.cfg.CreateBlockPct)
+	}
+	return nil
+}
+
 func (m *Monitor) checkVolume(ctx context.Context, snap *Snapshot) {
 	v := snap.Volume
 	if v == nil || v.SizeBytes == 0 || m.cfg.VolumeAlertPct <= 0 {
@@ -253,9 +282,13 @@ func (m *Monitor) checkVolume(ctx context.Context, snap *Snapshot) {
 	if m.cfg.VolumeCriticalPct > 0 && pct >= m.cfg.VolumeCriticalPct {
 		sev = alert.SeverityCritical
 	}
-	m.alerter.Notify(ctx, alert.KindDiskVolumeHigh, sev,
-		fmt.Sprintf("Sandbox volume is %.0f%% full: a full volume stops billing and sandbox lifecycle on this machine", pct),
-		map[string]any{"used_bytes": v.UsedBytes, "size_bytes": v.SizeBytes, "available_bytes": v.AvailableBytes})
+	refusing := m.cfg.CreateBlockPct > 0 && pct >= m.cfg.CreateBlockPct
+	msg := fmt.Sprintf("Sandbox volume is %.0f%% full: a full volume stops billing and sandbox lifecycle on this machine", pct)
+	if refusing {
+		msg += "; new sandboxes are refused"
+	}
+	m.alerter.Notify(ctx, alert.KindDiskVolumeHigh, sev, msg,
+		map[string]any{"used_bytes": v.UsedBytes, "size_bytes": v.SizeBytes, "available_bytes": v.AvailableBytes, "creates_refused": refusing})
 }
 
 func (m *Monitor) checkOOMAndCPU(ctx context.Context, snap *Snapshot) {

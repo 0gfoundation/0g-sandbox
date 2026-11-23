@@ -533,3 +533,37 @@ func TestCoverage_AlertsOnRunningSandboxesTheRunnerMisses(t *testing.T) {
 		t.Errorf("at 15 minutes: %v, want sb-gone and sb-nolayer", got)
 	}
 }
+
+// New sandboxes are refused while the volume is at least CreateBlockPct full,
+// and the volume alert says so. Without a recent reading creates go through.
+func TestAdmitCreate(t *testing.T) {
+	h := newHarness(t, false)
+	h.m.cfg.CreateBlockPct = 90
+	lastRefusing := func() any {
+		a := h.alerts.of(alert.KindDiskVolumeHigh)
+		return a[len(a)-1].details["creates_refused"]
+	}
+	if err := h.m.AdmitCreate(); err != nil {
+		t.Errorf("no reading yet: %v, want admitted", err)
+	}
+	h.read(true, 1, 89)
+	h.poll()
+	if err := h.m.AdmitCreate(); err != nil || lastRefusing() != false {
+		t.Errorf("89%% full: %v, alert creates_refused %v; want admitted", err, lastRefusing())
+	}
+	h.read(true, 1, 90)
+	h.poll()
+	if err := h.m.AdmitCreate(); !errors.Is(err, ErrVolumeFull) || lastRefusing() != true {
+		t.Errorf("90%% full: %v, alert creates_refused %v; want ErrVolumeFull", err, lastRefusing())
+	}
+	h.now = h.now.Add(maxSnapshotAge + time.Second) // the runner has gone quiet
+	if err := h.m.AdmitCreate(); err != nil {
+		t.Errorf("stale reading: %v, want admitted", err)
+	}
+	h.m.cfg.CreateBlockPct = 0
+	h.read(true, 1, 99)
+	h.poll()
+	if err := h.m.AdmitCreate(); err != nil {
+		t.Errorf("refusal off at 99%%: %v, want admitted", err)
+	}
+}

@@ -278,9 +278,15 @@ set, `usage.Monitor` polls them every `USAGE_POLL_SEC` and does the following:
 - **Owners' view.** It serves `GET /api/sandbox/:id/usage`, which returns the
   numbers, the requested disk size, the disk status (`ok` / `near_full` / `over`)
   and the last disk stop.
+- **New sandboxes.** While the shared volume is at least `VOLUME_CREATE_BLOCK_PCT`
+  (default 90; 0 = never) full, `POST /api/sandbox` returns 503 before any balance
+  reservation or Daytona call. Existing sandboxes keep running and can still be
+  started. Without a reading from the last 5 minutes, creates go through:
+  `usage_unavailable` reports the outage.
 - **Alerts.** These go through the alert webhook:
   - `disk_volume_high`: the shared volume is over `VOLUME_ALERT_PCT`, and critical
-    over `VOLUME_CRITICAL_PCT`.
+    over `VOLUME_CRITICAL_PCT`. Past `VOLUME_CREATE_BLOCK_PCT` it says new sandboxes
+    are refused (`creates_refused`).
   - `sandbox_disk_over_size`
   - `sandbox_oom_kills`: `OOM_ALERT_KILLS_PER_HOUR`.
   - `sandbox_cpu_pinned`: `CPU_PINNED_ALERT_HOURS`.
@@ -448,7 +454,7 @@ The server starts on port 8080 (`PORT` env var) and exposes:
 
 **Authenticated (EIP-191 wallet signature):**
 - `GET /api/balance` — caller's spendable balance as the gates compute it: on-chain balance, reservations, outstanding held debt, available
-- `POST /api/sandbox` — create sandbox (billing: create-fee voucher)
+- `POST /api/sandbox` — create sandbox (billing: create-fee voucher; 503 while the shared disk is at least `VOLUME_CREATE_BLOCK_PCT` full)
 - `GET /api/sandbox` — list sandboxes (filtered to caller's own)
 - `GET /api/sandbox/paginated` — paginated list
 - `GET /api/sandbox/:id` — get sandbox (admin or owner)

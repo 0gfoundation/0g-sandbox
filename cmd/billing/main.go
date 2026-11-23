@@ -607,6 +607,7 @@ func main() {
 			Grace:             time.Duration(cfg.Usage.DiskGraceSec) * time.Second,
 			VolumeAlertPct:    cfg.Usage.VolumeAlertPct,
 			VolumeCriticalPct: cfg.Usage.VolumeCriticalPct,
+			CreateBlockPct:    cfg.Usage.VolumeCreateBlockPct,
 			OOMKillsPerHour:   cfg.Usage.OOMKillsPerHour,
 			CPUPinnedAfter:    time.Duration(cfg.Usage.CPUPinnedHours * float64(time.Hour)),
 		}, usage.NewRunnerClient(cfg.Usage.RunnerAPIURL, cfg.Usage.RunnerAPIKey), dtona, rdb, alerter,

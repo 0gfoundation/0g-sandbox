@@ -122,3 +122,24 @@ func TestAttestorInstanceWithoutAppIDWarns(t *testing.T) {
 		t.Fatalf("warnings %q", warnings)
 	}
 }
+
+func TestVolumeCreateBlockPct(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("PROVIDER_KEY_SOURCE", "local")
+	t.Setenv("TLS_ENABLED", "false")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Usage.VolumeCreateBlockPct != 90 {
+		t.Errorf("default VOLUME_CREATE_BLOCK_PCT = %v, want 90", cfg.Usage.VolumeCreateBlockPct)
+	}
+	t.Setenv("VOLUME_CREATE_BLOCK_PCT", "0")
+	if cfg, err = Load(); err != nil || cfg.Usage.VolumeCreateBlockPct != 0 {
+		t.Errorf("VOLUME_CREATE_BLOCK_PCT=0: %v, %v; want off", cfg, err)
+	}
+	t.Setenv("VOLUME_CREATE_BLOCK_PCT", "150")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "VOLUME_CREATE_BLOCK_PCT") {
+		t.Errorf("VOLUME_CREATE_BLOCK_PCT=150: err = %v, want refused", err)
+	}
+}
