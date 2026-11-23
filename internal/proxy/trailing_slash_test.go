@@ -143,3 +143,55 @@ func TestTrailingSlash_TransparentPathsStillForwardUnchanged(t *testing.T) {
 		})
 	}
 }
+
+// Daytona's router also ignores case, so a case variant is the same operation
+// as the canonical action, with or without a trailing slash.
+func TestCaseVariant_ControlCannotSkipBillingAndPolicy(t *testing.T) {
+	for _, action := range []string{"START", "Start", "Start/", "Stop", "ARCHIVE/", "Ensure-Billing", "SSH-Access", "FORCE", "Force-Stop", "Labels", "LABELS/", "AutoStop", "AUTOARCHIVE/"} {
+		for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
+			t.Run(method+"/"+action, func(t *testing.T) {
+				srv, state := newSlashDaytona(t, false)
+				r := newTestEngine(daytona.NewClient(srv.URL, "mock-admin-key"), &mockBilling{}, "0xOWNER")
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, httptest.NewRequest(method, "/api/sandbox/sb-slash/"+action, nil))
+				if w.Code != http.StatusBadRequest {
+					t.Errorf("case variant must return 400, got %d: %s", w.Code, w.Body.String())
+				}
+				state.mu.Lock()
+				defer state.mu.Unlock()
+				if len(state.mutations) != 0 {
+					t.Errorf("case variant reached upstream: %v", state.mutations)
+				}
+			})
+		}
+	}
+}
+
+// Daytona takes the autostop and autoarchive values as a path segment
+// (/autostop/:interval), so the block must cover what follows the action name.
+func TestBlockedActions_IntervalPathsCannotReachUpstream(t *testing.T) {
+	for _, action := range []string{"autostop/0", "autostop/30/", "AutoStop/15", "autoarchive/60", "AUTOARCHIVE/0"} {
+		t.Run(action, func(t *testing.T) {
+			srv, state := newSlashDaytona(t, false)
+			r := newTestEngine(daytona.NewClient(srv.URL, "mock-admin-key"), &mockBilling{}, "0xOWNER")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/sandbox/sb-slash/"+action, nil))
+			if w.Code != http.StatusForbidden {
+				t.Errorf("want 403, got %d: %s", w.Code, w.Body.String())
+			}
+			state.mu.Lock()
+			defer state.mu.Unlock()
+			if len(state.mutations) != 0 {
+				t.Errorf("blocked setting reached upstream: %v", state.mutations)
+			}
+		})
+	}
+}
+
+func TestFirstSegment(t *testing.T) {
+	for in, want := range map[string]string{"": "", "/": "/", "/autostop": "/autostop", "/autostop/30": "/autostop", "/a/b/c": "/a"} {
+		if got := firstSegment(in); got != want {
+			t.Errorf("firstSegment(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
