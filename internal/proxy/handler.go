@@ -350,6 +350,28 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// The request's own faults and this provider's sealing setup, likewise
+	// before any reservation or Daytona call: a rejection here has nothing to
+	// release.
+	sealed := extractSealed(body)
+	if err := ValidatePublicPorts(body, sealed); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !sealed && h.SealedOnly {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "this provider only accepts sealed sandboxes; set \"sealed\": true in the create request",
+		})
+		return
+	}
+	if sealed && h.sealKey == nil {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "sealed containers not available: KMS app signer not configured"})
+		return
+	}
+	if sealed && h.SealIssuer == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sealed issuer authentication not configured"})
+		return
+	}
 	// Snapshot-only policy guarantees no custom cpu/memory in the body, so the
 	// snapshot record is the ONLY billing spec source. Look it up and FAIL
 	// CLOSED when billing is on: a transient GetSnapshot error must not admit
@@ -484,26 +506,6 @@ func (h *Handler) handleCreate(c *gin.Context) {
 
 	// Sealed containers: resolve image hash and inject the container
 	// certificate + keypair before forwarding to Daytona.
-	sealed := extractSealed(body)
-	if err := ValidatePublicPorts(body, sealed); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	if !sealed && h.SealedOnly {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "this provider only accepts sealed sandboxes; set \"sealed\": true in the create request",
-		})
-		return
-	}
-	if sealed && h.sealKey == nil {
-		c.JSON(http.StatusNotImplemented, gin.H{"error": "sealed containers not available: KMS app signer not configured"})
-		return
-	}
-	if sealed && h.SealIssuer == nil {
-		releaseRejectedSeal()
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sealed issuer authentication not configured"})
-		return
-	}
 	var imageHash, snapshotID string
 	if sealed {
 		src, err := h.resolveImageRef(c.Request.Context(), body)
