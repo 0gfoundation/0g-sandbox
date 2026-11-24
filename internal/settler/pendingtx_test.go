@@ -51,13 +51,6 @@ func (m *mockFateResolver) GetLastNonce(context.Context, common.Address, common.
 	return m.lastNonce, nil
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func pendingFixture(t *testing.T) (*redis.Client, common.Address, pendingTx, string) {
 	t.Helper()
 	mr := miniredis.RunT(t)
@@ -85,7 +78,7 @@ func TestResolvePendingTx_Mined_AppliesStatuses(t *testing.T) {
 		statuses: []chain.SettlementStatus{chain.StatusSuccess},
 	}
 	stopCh := make(chan StopSignal, 1)
-	got := resolvePendingTx(context.Background(), rdb, resolver, queueKey, stopCh, provider, &p, alert.Nop{}, zap.NewNop())
+	got := resolvePendingTx(context.Background(), rdb, resolver, queueKey, stopCh, provider, &p, alert.Nop{}, zap.NewNop(), nil)
 
 	if len(got) != 1 || got[0] != chain.StatusSuccess {
 		t.Fatalf("statuses = %v", got)
@@ -106,7 +99,7 @@ func TestResolvePendingTx_Dropped_Requeues(t *testing.T) {
 	rdb, provider, p, queueKey := pendingFixture(t)
 	savePendingTx(context.Background(), rdb, provider, p) //nolint:errcheck
 	resolver := &mockFateResolver{fates: []chain.TxFate{chain.TxDropped}}
-	got := resolvePendingTx(context.Background(), rdb, resolver, queueKey, make(chan StopSignal, 1), provider, &p, alert.Nop{}, zap.NewNop())
+	got := resolvePendingTx(context.Background(), rdb, resolver, queueKey, make(chan StopSignal, 1), provider, &p, alert.Nop{}, zap.NewNop(), nil)
 
 	if got != nil {
 		t.Fatalf("dropped tx must return nil statuses, got %v", got)
@@ -194,7 +187,7 @@ func TestResolvePendingTx_MinedButExtractionFails_NeverRequeues(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		resolvePendingTx(ctx, rdb, resolver, queueKey, make(chan StopSignal, 1), provider, &p, alert.Nop{}, zap.NewNop())
+		resolvePendingTx(ctx, rdb, resolver, queueKey, make(chan StopSignal, 1), provider, &p, alert.Nop{}, zap.NewNop(), nil)
 		close(done)
 	}()
 	time.Sleep(20 * time.Millisecond)
@@ -223,7 +216,7 @@ func TestResolvePendingTx_Reverted_Requeues(t *testing.T) {
 		receipt:    &types.Receipt{Status: 0, TxHash: p.TxHash},
 		extractErr: fmt.Errorf("%w: 0xabc", chain.ErrTxReverted),
 	}
-	got := resolvePendingTx(context.Background(), rdb, resolver, queueKey, make(chan StopSignal, 1), provider, &p, alert.Nop{}, zap.NewNop())
+	got := resolvePendingTx(context.Background(), rdb, resolver, queueKey, make(chan StopSignal, 1), provider, &p, alert.Nop{}, zap.NewNop(), nil)
 	if got != nil {
 		t.Fatalf("reverted tx returns nil, got %v", got)
 	}
@@ -248,7 +241,7 @@ func TestResolvePendingTx_SingleDropped_WaitsForConfirmation(t *testing.T) {
 		receipt:  &types.Receipt{Status: 1, TxHash: p.TxHash},
 		statuses: []chain.SettlementStatus{chain.StatusSuccess},
 	}
-	got := resolvePendingTx(context.Background(), rdb, resolver, queueKey, make(chan StopSignal, 1), provider, &p, alert.Nop{}, zap.NewNop())
+	got := resolvePendingTx(context.Background(), rdb, resolver, queueKey, make(chan StopSignal, 1), provider, &p, alert.Nop{}, zap.NewNop(), nil)
 	if len(got) != 1 || got[0] != chain.StatusSuccess {
 		t.Fatalf("dropped-then-mined must apply statuses, got %v", got)
 	}

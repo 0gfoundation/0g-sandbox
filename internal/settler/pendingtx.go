@@ -139,7 +139,9 @@ func clearPendingTx(ctx context.Context, rdb *redis.Client, provider common.Addr
 // It NEVER re-signs while the fate is unknown: the original tx mining after a
 // re-sign would settle the same usage twice (double charge — the contract
 // dedupes by strictly-increasing nonce only).
-func resolvePendingTx(ctx context.Context, rdb *redis.Client, resolver fateResolver, queueKey string, stopCh chan<- StopSignal, provider common.Address, p *pendingTx, alerter alert.Alerter, log *zap.Logger) []chain.SettlementStatus {
+// whileWaiting may check balances and persist stop signals. It must leave the
+// queue unchanged until the pending batch has been reconciled.
+func resolvePendingTx(ctx context.Context, rdb *redis.Client, resolver fateResolver, queueKey string, stopCh chan<- StopSignal, provider common.Address, p *pendingTx, alerter alert.Alerter, log *zap.Logger, whileWaiting func(context.Context)) []chain.SettlementStatus {
 	dropped := 0      // consecutive TxDropped observations (finding #2)
 	pendingPolls := 0 // consecutive TxPending polls, for the stall alert (finding #3)
 	for {
@@ -186,17 +188,17 @@ func resolvePendingTx(ctx context.Context, rdb *redis.Client, resolver fateResol
 			return nil
 		default:
 			dropped = 0
-			// Liveness (finding #3): a broadcast tx that never mines (mempool
-			// eviction, partition) would poll TxPending forever and block the
-			// whole Run loop — starving the periodic sweep that protects
-			// unpayable sandboxes (#114). Alert after a threshold so an
-			// operator can intervene (replace/cancel the tx from the TEE key).
+			// The stop check can still run, but a broadcast tx that never mines
+			// blocks settlement. Alert so an operator can resolve the nonce.
 			pendingPolls++
 			if pendingPolls == pendingTxStallPolls {
 				alerter.Notify(ctx, alert.KindSettlerTxFailure, alert.SeverityCritical,
-					"Settlement tx stuck pending — settler loop blocked, stop-protection starved",
+					"Settlement tx stuck pending — voucher settlement blocked",
 					map[string]any{"tx": p.TxHash.Hex(), "polls": pendingPolls})
 			}
+		}
+		if whileWaiting != nil && ctx.Err() == nil {
+			whileWaiting(ctx)
 		}
 		select {
 		case <-ctx.Done():

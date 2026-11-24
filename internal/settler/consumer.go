@@ -36,6 +36,23 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 
 	log.Info("settler started", zap.String("queue", queueKey))
 
+	sweepInterval := time.Duration(cfg.Billing.VoucherIntervalSec) * time.Second
+	if sweepInterval <= 0 {
+		sweepInterval = time.Minute
+	}
+	waitForTx := func(p *pendingTx) []chain.SettlementStatus {
+		nextSweep := time.Now().Add(sweepInterval)
+		return resolvePendingTx(ctx, rdb, onchain, queueKey, stopCh, onchain.ProviderAddress(), p, alerter, log, func(ctx context.Context) {
+			if time.Now().Before(nextSweep) {
+				return
+			}
+			sweepCtx, cancel := context.WithTimeout(ctx, sweepInterval)
+			defer cancel()
+			sweepWhilePending(sweepCtx, rdb, onchain, queueKey, stopCh, p, log)
+			nextSweep = time.Now().Add(sweepInterval)
+		})
+	}
+
 	// Startup recovery: a crash between broadcast and receipt leaves a
 	// persisted pending tx. Resolve its fate BEFORE consuming the queue —
 	// consuming first would re-sign the same usage while the old tx may still
@@ -49,7 +66,7 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 		} else {
 			log.Warn("settler: unresolved settlement tx from previous run — resolving before consuming",
 				zap.String("tx", p.TxHash.Hex()), zap.Int("batch", len(p.Vouchers)))
-			resolvePendingTx(ctx, rdb, onchain, queueKey, stopCh, onchain.ProviderAddress(), p, alerter, log)
+			waitForTx(p)
 		}
 	}
 
@@ -63,10 +80,6 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 	// the rotation gate holds submissions — a backlog collapses and unpayable
 	// sandboxes stop during an outage, not after it. lastSweep starts zero so a
 	// cold start with a pre-existing backlog aggregates before the first submit.
-	sweepInterval := time.Duration(cfg.Billing.VoucherIntervalSec) * time.Second
-	if sweepInterval <= 0 {
-		sweepInterval = time.Minute
-	}
 	// Settlement cadence, independent of accounting cadence. The sweep above
 	// deliberately stays on the ACCOUNTING clock: it is gas-free and it is what
 	// stops unpayable sandboxes (maybeSweep → AggregateCovered → persistStop),
@@ -318,7 +331,7 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 			log.Error("settler: persist pending tx failed; resolving in-memory", zap.Error(err))
 		}
 		lastSubmit = time.Now()
-		statuses := resolvePendingTx(ctx, rdb, onchain, queueKey, stopCh, onchain.ProviderAddress(), &p, alerter, log)
+		statuses := waitForTx(&p)
 		if statuses == nil {
 			continue // re-queued (dropped/reverted) or ctx done — nothing settled
 		}
