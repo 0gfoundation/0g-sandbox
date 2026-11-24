@@ -1,11 +1,12 @@
 # CLI Reference
 
-Two command-line tools are provided for operators and users:
+Command-line tools for operators and users:
 
 | Tool | Role |
 |------|------|
 | `cmd/provider` | App owner: manage node services on-chain (register/rotate/withdraw) |
 | `cmd/user` | End user: manage balance and sandboxes |
+| `billing cancel-pending-settlement` | Operator, inside the node: free the nonce of a settlement tx that never mines ([SETTLEMENT_RECOVERY.md](SETTLEMENT_RECOVERY.md)) |
 
 Private keys can be passed via `--key` flag or environment variable (`OWNER_KEY` / `USER_KEY`; `PROVIDER_KEY` is accepted as a legacy alias for `OWNER_KEY`). The `0x` prefix is optional.
 
