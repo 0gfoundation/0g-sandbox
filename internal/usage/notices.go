@@ -99,7 +99,10 @@ func (m *Monitor) diskNotice(ctx context.Context, now time.Time, snap *Snapshot,
 		if m.cfg.Grace > 0 {
 			text += fmt.Sprintf(" When the owner starts it again, it has %s to get back under %s.", m.cfg.Grace.Round(time.Minute), bytesText(size))
 		}
-		at := now
+		at := now.UTC().Truncate(time.Second)
+		if rec != nil { // the stop's own time, the same on every poll
+			at = rec.QueuedAt.UTC().Truncate(time.Second)
+		}
 		return &notice.Notice{Kind: notice.KindDiskOverSize, Severity: notice.SeverityCritical, Deadline: &at, Action: notice.ActionStop, Message: text}
 	case size-used < m.cfg.WarnFreeBytes:
 		n := &notice.Notice{Kind: notice.KindDiskNearFull, Severity: notice.SeverityWarning,

@@ -27,15 +27,19 @@ type BalanceChain interface {
 //
 // The balance left is counted as the gates count it (GET /api/balance): the
 // on-chain balance less reservations, held debt and vouchers queued for
-// settlement. It lasts that divided by the per-second price of the owner's
-// running sandboxes. The stop comes at a voucher period's start, so the
-// estimate can be off by up to one period.
+// settlement. It pays the running sandboxes' next vouchers in the order they
+// fall due, one period each; the deadline is when the first one it cannot pay
+// falls due. Paying a voucher moves both the balance and the sandbox's next
+// voucher time, so the deadline stays put from one poll to the next: a reader
+// that compares deadlines sees a change only when something changed.
 type Balance struct {
 	Chain    BalanceChain
 	RDB      *redis.Client
 	Provider common.Address
 	// FallbackPricePerSec prices a session that recorded no price.
 	FallbackPricePerSec *big.Int
+	// Interval is the voucher period (VOUCHER_INTERVAL_SEC).
+	Interval time.Duration
 	// Within warns when the balance runs out within this. 0 never warns.
 	Within time.Duration
 	Now    func() time.Time
@@ -43,15 +47,24 @@ type Balance struct {
 
 type account struct {
 	addr      common.Address
-	rate      *big.Int // neuron per second, all running sandboxes
+	charges   []charge // one per running sandbox
 	sandboxes []string
+}
+
+// charge is a running sandbox's next voucher: its fee, due at unix second at
+// and every period after.
+type charge struct {
+	at  int64
+	fee *big.Int
 }
 
 // Notices implements Source.
 func (b *Balance) Notices(ctx context.Context, running []string) (Set, error) {
-	if b.Within <= 0 || len(running) == 0 {
+	period := int64(b.Interval / time.Second)
+	if b.Within <= 0 || period <= 0 || len(running) == 0 {
 		return nil, nil
 	}
+	now := b.Now()
 	isRunning := make(map[string]bool, len(running))
 	for _, id := range running {
 		isRunning[id] = true
@@ -75,10 +88,11 @@ func (b *Balance) Notices(ctx context.Context, running []string) (Set, error) {
 		owner := common.HexToAddress(s.Owner)
 		a := byOwner[owner]
 		if a == nil {
-			a = &account{addr: owner, rate: new(big.Int)}
+			a = &account{addr: owner}
 			byOwner[owner] = a
 		}
-		a.rate.Add(a.rate, price)
+		// An overdue voucher is emitted on the generator's next tick.
+		a.charges = append(a.charges, charge{at: max(s.NextVoucherAt, now.Unix()), fee: new(big.Int).Mul(price, big.NewInt(period))})
 		a.sandboxes = append(a.sandboxes, s.SandboxID)
 	}
 	if len(byOwner) == 0 {
@@ -102,7 +116,6 @@ func (b *Balance) Notices(ctx context.Context, running []string) (Set, error) {
 		return nil, fmt.Errorf("queued vouchers: %w", err)
 	}
 
-	now := b.Now()
 	set := Set{}
 	for i, a := range accounts {
 		if i >= len(balances) || balances[i] == nil {
@@ -121,14 +134,14 @@ func (b *Balance) Notices(ctx context.Context, running []string) (Set, error) {
 		if left.Sign() < 0 {
 			left.SetInt64(0)
 		}
-		secs := new(big.Int).Quo(left, a.rate)
-		if secs.Cmp(big.NewInt(int64(b.Within/time.Second))) > 0 {
+		due, ok := runsOut(left, a.charges, period, now.Unix()+int64(b.Within/time.Second))
+		if !ok {
 			continue
 		}
-		lasts := time.Duration(secs.Int64()) * time.Second
-		deadline := now.Add(lasts)
+		deadline := time.Unix(due, 0).UTC()
+		lasts := max(deadline.Sub(now), 0)
 		n := Notice{Kind: KindBalanceLow, Severity: severityBy(deadline, now), Deadline: &deadline, Action: ActionStop}
-		if lasts < time.Minute {
+		if left.Sign() == 0 || lasts < time.Minute {
 			n.Message = "Your owner's balance with this provider is used up, and this provider is stopping the sandboxes it pays for, this one included. Save your work now. Files are kept while the sandbox is stopped; the owner can deposit more and start it again."
 		} else {
 			n.Message = fmt.Sprintf("Your owner's balance with this provider covers about %s more of its running sandboxes (%d, this one included). Around %s this provider stops them unless the owner deposits more. Save your work before then, and tell your owner if you can. Files are kept while the sandbox is stopped.",
@@ -139,6 +152,34 @@ func (b *Balance) Notices(ctx context.Context, running []string) (Set, error) {
 		}
 	}
 	return set, nil
+}
+
+// runsOut is when the first voucher that left cannot pay falls due, if that
+// is no later than by. Every sandbox pays its fee at its next voucher time
+// and every period after; left pays them in the order they fall due.
+func runsOut(left *big.Int, charges []charge, period, by int64) (int64, bool) {
+	sort.Slice(charges, func(i, j int) bool { return charges[i].at < charges[j].at })
+	cycle := new(big.Int)
+	for _, c := range charges {
+		cycle.Add(cycle, c.fee)
+	}
+	if cycle.Sign() == 0 {
+		return 0, false
+	}
+	// left pays `full` whole periods of every sandbox, then the remainder
+	// pays the next vouchers in order until one does not fit.
+	full, rem := new(big.Int).QuoRem(left, cycle, new(big.Int))
+	if full.Cmp(big.NewInt((by-charges[0].at)/period+1)) > 0 {
+		return 0, false // lasts past by
+	}
+	for _, c := range charges {
+		if rem.Cmp(c.fee) < 0 {
+			due := c.at + full.Int64()*period
+			return due, due <= by
+		}
+		rem.Sub(rem, c.fee)
+	}
+	return 0, false // unreachable: rem < cycle
 }
 
 // queued sums each user's vouchers waiting in the settle queue.

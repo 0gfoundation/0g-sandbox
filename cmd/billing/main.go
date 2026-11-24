@@ -623,6 +623,7 @@ func main() {
 				&notice.Balance{
 					Chain: onchain, RDB: rdb, Provider: common.HexToAddress(providerHex),
 					FallbackPricePerSec: computePricePerSec,
+					Interval:            time.Duration(cfg.Billing.VoucherIntervalSec) * time.Second,
 					Within:              time.Duration(cfg.Usage.BalanceNoticeMin) * time.Minute,
 					Now:                 time.Now,
 				},
