@@ -14,6 +14,7 @@ import (
 
 	"github.com/0gfoundation/0g-sandbox/internal/alert"
 	"github.com/0gfoundation/0g-sandbox/internal/daytona"
+	"github.com/0gfoundation/0g-sandbox/internal/notice"
 )
 
 // Config tunes the Monitor. Zero values disable the corresponding alert.
@@ -88,6 +89,13 @@ type Monitor struct {
 	prevRunning map[string]bool
 	// uncovered: running sandboxes the runner's readings miss, since when.
 	uncovered map[string]time.Time
+	// lastNotices: the notices last sent to the runner (notices.go).
+	lastNotices notice.Set
+
+	// Notices, when enabled; touched by the polling goroutine only.
+	pusher         NoticePusher
+	sources        []notice.Source
+	noticesFailing bool
 }
 
 type oomSample struct {
@@ -182,6 +190,7 @@ func (m *Monitor) poll(ctx context.Context) {
 			m.checkDisk(ctx, now, snap, sb.ID, int64(sb.Disk)*GiB, u)
 		}
 	}
+	m.sendNotices(ctx, now, snap, sandboxes)
 }
 
 // checkCoverage alerts when the runner's readings miss a sandbox Daytona says
@@ -454,6 +463,9 @@ type Report struct {
 	Memory       *MemoryReport  `json:"memory,omitempty"`
 	Tasks        *TasksReport   `json:"tasks,omitempty"`
 	Network      *NetworkReport `json:"network,omitempty"`
+	// Notices are what the sandbox was last told of the provider's coming
+	// actions, as its environment file shows them.
+	Notices []notice.Notice `json:"notices,omitempty"`
 }
 
 type DiskReport struct {
@@ -502,6 +514,7 @@ func (m *Monitor) Report(ctx context.Context, sandboxID string, requestedDiskGiB
 	}
 	m.mu.Lock()
 	snap := m.latest
+	r.Notices = m.lastNotices[sandboxID]
 	m.mu.Unlock()
 	if snap != nil {
 		if u := snap.Sandboxes[sandboxID]; u != nil {

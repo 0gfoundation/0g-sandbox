@@ -37,6 +37,10 @@ services:
       RUNNER_API_URL:          ${RUNNER_API_URL:-}
       RUNNER_API_KEY:          ${DAYTONA_RUNNER_API_KEY:-secret_api_token}
       DISK_ENFORCE:            ${DISK_ENFORCE:-false}
+      # Each running sandbox is told what is coming (disk, balance,
+      # maintenance) in its /run/0g/environment.json; needs 0g-daytona #19.
+      SANDBOX_NOTICES:         ${SANDBOX_NOTICES:-true}
+      BALANCE_NOTICE_MIN:      ${BALANCE_NOTICE_MIN:-60}
       # Dev-only mock overrides (leave empty in production)
       MOCK_TEE:                ${MOCK_TEE:-}
       MOCK_APP_PRIVATE_KEY:    ${MOCK_APP_PRIVATE_KEY:-}

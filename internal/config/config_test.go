@@ -143,3 +143,25 @@ func TestVolumeCreateBlockPct(t *testing.T) {
 		t.Errorf("VOLUME_CREATE_BLOCK_PCT=150: err = %v, want refused", err)
 	}
 }
+
+func TestSandboxNotices(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("PROVIDER_KEY_SOURCE", "local")
+	t.Setenv("TLS_ENABLED", "false")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Usage.Notices || cfg.Usage.BalanceNoticeMin != 60 {
+		t.Errorf("defaults: SANDBOX_NOTICES = %v, BALANCE_NOTICE_MIN = %d; want true, 60", cfg.Usage.Notices, cfg.Usage.BalanceNoticeMin)
+	}
+	t.Setenv("SANDBOX_NOTICES", "false")
+	t.Setenv("BALANCE_NOTICE_MIN", "0")
+	if cfg, err = Load(); err != nil || cfg.Usage.Notices || cfg.Usage.BalanceNoticeMin != 0 {
+		t.Errorf("off: %+v, %v", cfg.Usage, err)
+	}
+	t.Setenv("BALANCE_NOTICE_MIN", "-5")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "BALANCE_NOTICE_MIN") {
+		t.Errorf("BALANCE_NOTICE_MIN=-5: err = %v, want refused", err)
+	}
+}

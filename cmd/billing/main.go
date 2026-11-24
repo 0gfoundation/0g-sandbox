@@ -30,6 +30,7 @@ import (
 	"github.com/0gfoundation/0g-sandbox/internal/config"
 	"github.com/0gfoundation/0g-sandbox/internal/daytona"
 	"github.com/0gfoundation/0g-sandbox/internal/events"
+	"github.com/0gfoundation/0g-sandbox/internal/notice"
 	"github.com/0gfoundation/0g-sandbox/internal/observability"
 	"github.com/0gfoundation/0g-sandbox/internal/proxy"
 	"github.com/0gfoundation/0g-sandbox/internal/registry"
@@ -600,6 +601,7 @@ func main() {
 	// filesystem into the registry and MinIO, which share the runner's volume.
 	hooks := stopHooks{keep: map[string]bool{usage.ReasonDiskOverSize: true}}
 	if cfg.Usage.RunnerAPIURL != "" {
+		runnerClient := usage.NewRunnerClient(cfg.Usage.RunnerAPIURL, cfg.Usage.RunnerAPIKey)
 		usageMonitor := usage.NewMonitor(usage.Config{
 			Interval:          time.Duration(cfg.Usage.PollSec) * time.Second,
 			Enforce:           cfg.Usage.DiskEnforce,
@@ -610,19 +612,36 @@ func main() {
 			CreateBlockPct:    cfg.Usage.VolumeCreateBlockPct,
 			OOMKillsPerHour:   cfg.Usage.OOMKillsPerHour,
 			CPUPinnedAfter:    time.Duration(cfg.Usage.CPUPinnedHours * float64(time.Hour)),
-		}, usage.NewRunnerClient(cfg.Usage.RunnerAPIURL, cfg.Usage.RunnerAPIKey), dtona, rdb, alerter,
+		}, runnerClient, dtona, rdb, alerter,
 			func(ctx context.Context, sandboxID string) error {
 				return settler.QueueStop(ctx, rdb, stopCh, sandboxID, usage.ReasonDiskOverSize, log)
 			}, log.Named("usage"))
+		if cfg.Usage.Notices {
+			// Each running sandbox is told what is coming, in its own
+			// /run/0g/environment.json: disk, balance, maintenance.
+			usageMonitor.EnableNotices(runnerClient,
+				&notice.Balance{
+					Chain: onchain, RDB: rdb, Provider: common.HexToAddress(providerHex),
+					FallbackPricePerSec: computePricePerSec,
+					Within:              time.Duration(cfg.Usage.BalanceNoticeMin) * time.Minute,
+					Now:                 time.Now,
+				},
+				notice.MaintenanceSource{RDB: rdb, Now: time.Now})
+		}
 		proxyHandler.Usage = usageMonitor
 		hooks.onStopped = append(hooks.onStopped, usageMonitor.OnStopped)
 		go usageMonitor.Run(ctx)
-		log.Info("usage monitoring on", zap.String("runner", cfg.Usage.RunnerAPIURL), zap.Bool("disk_enforce", cfg.Usage.DiskEnforce))
+		log.Info("usage monitoring on", zap.String("runner", cfg.Usage.RunnerAPIURL), zap.Bool("disk_enforce", cfg.Usage.DiskEnforce),
+			zap.Bool("notices", cfg.Usage.Notices))
 	} else {
 		log.Info("usage monitoring off: RUNNER_API_URL not set")
 	}
 	proxyHandler.RegisterPublic(apiPublic)
 	proxyHandler.Register(api)
+	// Planned maintenance: every running sandbox is told (internal/notice).
+	api.GET("/maintenance", notice.HandleGetMaintenance(rdb))
+	api.PUT("/maintenance", notice.HandleSetMaintenance(rdb, proxyHandler.IsAdmin, time.Now))
+	api.DELETE("/maintenance", notice.HandleClearMaintenance(rdb, proxyHandler.IsAdmin))
 	go runStopHandler(ctx, stopCh, dtona, rdb, alerter, log, proxyHandler.BrokerDeregister, hooks)
 	go billing.RunGenerator(ctx, rdb, billingHandler, daytonaBillable{dtona}, proxyHandler.BrokerDeregister, log)
 
