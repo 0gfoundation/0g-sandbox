@@ -5,17 +5,17 @@ package proxy
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/0gfoundation/0g-sandbox/internal/daytona"
 )
 
-// The transparent catch-all forwards any unnamed /sandbox/:id/* action to
-// Daytona as admin. On a sealed sandbox that reached port preview URLs (a way
-// into any port, not just the attested :8080) and the public toggle (exposes
-// every port) — both outside what sealing promises the owner. Sealed denies
-// the catch-all by default; the lifecycle actions an owner legitimately needs
-// have explicit routes and keep working.
+// The transparent catch-all forwards the listed /sandbox/:id/* actions to
+// Daytona as admin. On a sealed sandbox even those are a way into any port,
+// not just the attested :8080 — outside what sealing promises the owner — so
+// sealed denies the catch-all entirely; the lifecycle actions an owner
+// legitimately needs have explicit routes and keep working.
 func TestSealedSandbox_CatchAllDenied(t *testing.T) {
 	sealedSB := daytona.Sandbox{
 		ID:     "sb-sealed",
@@ -24,17 +24,24 @@ func TestSealedSandbox_CatchAllDenied(t *testing.T) {
 	srv, _ := mockDaytona(t, []daytona.Sandbox{sealedSB})
 	r := newTestEngine(daytona.NewClient(srv.URL, "key"), &mockBilling{}, "0xOWNER")
 
-	for _, tc := range []struct{ method, path string }{
-		{http.MethodGet, "/api/sandbox/sb-sealed/ports/3000/preview-url"},
-		{http.MethodPost, "/api/sandbox/sb-sealed/public/true"},
-		{http.MethodGet, "/api/sandbox/sb-sealed/build-logs"},
-		{http.MethodPost, "/api/sandbox/sb-sealed/anything-new-daytona-adds"},
+	for _, tc := range []struct {
+		method, path string
+		listed       bool // refused by the sealed gate, not by the allowlist
+	}{
+		{http.MethodGet, "/api/sandbox/sb-sealed/ports/3000/preview-url", true},
+		{http.MethodDelete, "/api/sandbox/sb-sealed/ssh-access", true},
+		{http.MethodPost, "/api/sandbox/sb-sealed/public/true", false},
+		{http.MethodGet, "/api/sandbox/sb-sealed/build-logs", false},
+		{http.MethodPost, "/api/sandbox/sb-sealed/anything-new-daytona-adds", false},
 	} {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, nil))
 		if w.Code != http.StatusForbidden {
 			t.Errorf("%s %s on a sealed sandbox: got %d, want 403 — the owner "+
 				"has a channel into the workload beyond :8080", tc.method, tc.path, w.Code)
+		}
+		if tc.listed && !strings.Contains(w.Body.String(), "sealed sandbox") {
+			t.Errorf("%s %s: refused by %s, want the sealed gate", tc.method, tc.path, w.Body.String())
 		}
 	}
 }
@@ -58,7 +65,7 @@ func TestSealedSandbox_LifecycleStillAllowed(t *testing.T) {
 	}
 }
 
-// Unsealed sandboxes keep the full transparent proxy.
+// Unsealed sandboxes keep the listed passthrough actions (passthroughActions).
 func TestUnsealedSandbox_CatchAllStillForwards(t *testing.T) {
 	sb := daytona.Sandbox{ID: "sb-normal", Labels: map[string]string{ownerLabel: "0xOWNER"}}
 	srv, _ := mockDaytona(t, []daytona.Sandbox{sb})

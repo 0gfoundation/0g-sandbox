@@ -227,9 +227,9 @@ When a sandbox create request includes `"sealed": true`, the proxy:
    The accepted caller keys pass through unchanged.
    Responses drop `SANDBOX_SEAL_KEY` and `SEAL_BOOT_TICKET` from every returned sandbox's env
    (`responsescrub.go`, `stripSealKey`).
-5. Sets label `0g-sealed: "true"` → blocks SSH, toolbox, and the transparent `/api/sandbox/:id/<other>`
-   passthrough for the sandbox lifetime (the passthrough reaches Daytona's port-preview and public-toggle
-   endpoints, either of which would open ports beyond :8080; lifecycle routes keep working)
+5. Sets label `0g-sealed: "true"` → blocks SSH, toolbox, and the transparent `/api/sandbox/:id/<action>`
+   passthrough for the sandbox lifetime (the passthrough reaches Daytona's port-preview endpoint, whose
+   token opens ports beyond :8080; lifecycle routes keep working)
 6. Sets label `0g-seal-id: <64-char hex>` → operators can correlate sandbox ↔ certificate
 
 Sealing requires `PROVIDER_KEY_SOURCE=kms` and a valid current KMS service binding.
@@ -485,7 +485,10 @@ The server starts on port 8080 (`PORT` env var) and exposes:
 - `GET /api/sandbox/:id/usage` — admin or owner (sealed sandboxes included; numbers only): CPU, memory, OOM kills, tasks, network, writable-layer bytes against the requested disk, last disk stop. 503 when `RUNNER_API_URL` is unset
 - `POST /api/sandbox/:id/ssh-access` — owner-only; sealed sandboxes return 403
 - `PUT /api/sandbox/:id/labels` — owner only (strips `daytona-owner` from the payload)
-- `Any /api/sandbox/:id/<other>` — transparent Daytona proxy (owner only, sealed sandboxes blocked)
+- `GET /api/sandbox/:id/ports/:port/preview-url`, `DELETE /api/sandbox/:id/ssh-access` — forwarded to
+  Daytona (owner only, sealed sandboxes blocked). Any other `/api/sandbox/:id/<action>` is refused: the
+  forward runs as Daytona's admin, so only the actions listed in `passthroughActions`
+  (`internal/proxy/handler.go`), in their plain spelling, reach it
 - `Any /api/toolbox/:id/*` — Daytona toolbox proxy (owner only, sealed sandboxes blocked)
 - `GET /api/volumes` — list volumes owned by caller
 - `GET /api/snapshots` `POST /api/snapshots` `DELETE /api/snapshots/:id` — snapshot mgmt
@@ -495,8 +498,8 @@ The server starts on port 8080 (`PORT` env var) and exposes:
 
 Most management-plane routes use `withOwnerOrAdmin`: admins skip the owner
 check, non-admins still need to own the sandbox. Routes that read or run the
-user's workload (`/start`, `/ssh-access`, `/toolbox/*`, transparent
-`/sandbox/:id/<other>`) intentionally stay owner-only — exposing them to
+user's workload (`/start`, `/ssh-access`, `/toolbox/*`, the forwarded
+`/sandbox/:id/...` actions) intentionally stay owner-only — exposing them to
 admins would let the operator read user code or trigger billable starts,
 violating the workload-privacy guarantee.
 

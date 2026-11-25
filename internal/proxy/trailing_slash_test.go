@@ -121,11 +121,12 @@ func TestTrailingSlash_RootResourceCannotBypassDeleteHook(t *testing.T) {
 }
 
 // Trailing slashes can be meaningful to transparent upstream APIs. Limit the
-// rejection to managed control paths, leaving toolbox and custom paths intact.
+// rejection to managed control paths, leaving toolbox paths intact. (The
+// sandbox passthrough forwards only listed actions, as spelled:
+// passthrough_test.go.)
 func TestTrailingSlash_TransparentPathsStillForwardUnchanged(t *testing.T) {
 	for _, target := range []string{
 		"/api/toolbox/sb-slash/toolbox/files/",
-		"/api/sandbox/sb-slash/custom/files/",
 	} {
 		t.Run(target, func(t *testing.T) {
 			srv, state := newSlashDaytona(t, false)
