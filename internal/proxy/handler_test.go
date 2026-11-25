@@ -909,6 +909,50 @@ func TestCreateGate_RejectionRollsBackReservation(t *testing.T) {
 	}
 }
 
+// A create rejected for the request itself (an unsealed create on a
+// SEALED_ONLY provider, bad publicPorts) or for this provider's sealing setup
+// takes no reservation, even when the balance would cover it. These checks used
+// to run after the reservation without releasing it, so each rejection held
+// createFee plus one interval of the caller's balance until the TTL.
+func TestCreateGate_RequestRejectionsTakeNoReservation(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		sealedOnly bool
+		body       string
+		want       int
+	}{
+		{"unsealed on a sealed-only provider", true, `{"snapshot":"snap-x"}`, http.StatusBadRequest},
+		{"system port in publicPorts", false, `{"snapshot":"snap-x","publicPorts":[22222]}`, http.StatusBadRequest},
+		{"sealed without the KMS app signer", false, `{"snapshot":"snap-x","sealed":true}`, http.StatusNotImplemented},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rdb := redis.NewClient(&redis.Options{Addr: miniredis.RunT(t).Addr()})
+			srv, captured := mockDaytona(t, nil)
+			r := gin.New()
+			api := r.Group("/api", func(c *gin.Context) { c.Set("wallet_address", "0xW"); c.Next() })
+			h := NewHandler(daytona.NewClient(srv.URL, "test-key"), &mockBilling{}, &mockBalChecker{bal: big.NewInt(1_000_000)}, nil, nil,
+				big.NewInt(100), new(big.Int), new(big.Int), new(big.Int), "0xPROV",
+				nil, "", rdb, zap.NewNop(), "", nil, nil, 60)
+			h.SealedOnly = tc.sealedOnly
+			h.Register(api)
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/sandbox", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			if w.Code != tc.want {
+				t.Fatalf("status %d, want %d: %s", w.Code, tc.want, w.Body.String())
+			}
+			if got := billing.GetReserved(context.Background(), rdb, "0xW", "0xPROV"); got.Sign() != 0 {
+				t.Errorf("rejected create left %s reserved", got)
+			}
+			if n := len(*captured); n != 0 {
+				t.Errorf("rejected create reached Daytona's create %d times", n)
+			}
+		})
+	}
+}
+
 // Review #116 F1: a start against an already-open billing session is a billing
 // no-op (OnStart returns early), so it must NOT take a reservation — that would
 // leak for the TTL. Assert the reservation counter stays at whatever it was.
