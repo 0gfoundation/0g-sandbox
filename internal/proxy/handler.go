@@ -1428,39 +1428,85 @@ func copyRecorder(c *gin.Context, rec *httptest.ResponseRecorder) {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+// sandboxAction is a /sandbox/:id/<action> the proxy handles itself instead of
+// forwarding: the method it answers and its handler, access check included.
+type sandboxAction struct {
+	method  string
+	handler func(h *Handler) gin.HandlerFunc
+}
+
+// sandboxActions are the actions handleCatchAll dispatches by name: lifecycle
+// operations with billing hooks, admin overrides, and label protection. The
+// same table decides which spellings are refused as aliases (isManagedAlias),
+// so an action added here is covered by both.
+var sandboxActions = map[string]sandboxAction{
+	"/start":          {http.MethodPost, func(h *Handler) gin.HandlerFunc { return h.withOwner(h.handleStart) }},
+	"/stop":           {http.MethodPost, func(h *Handler) gin.HandlerFunc { return h.withOwnerOrAdmin(h.handleStop) }},
+	"/archive":        {http.MethodPost, func(h *Handler) gin.HandlerFunc { return h.withOwnerOrAdmin(h.handleArchive) }},
+	"/ensure-billing": {http.MethodPost, func(h *Handler) gin.HandlerFunc { return h.withOwnerOrAdmin(h.handleEnsureBilling) }},
+	"/ssh-access":     {http.MethodPost, func(h *Handler) gin.HandlerFunc { return h.withOwner(h.handleSSHAccess) }},
+	"/force":          {http.MethodDelete, func(h *Handler) gin.HandlerFunc { return h.handleForceDelete }},
+	"/force-stop":     {http.MethodPost, func(h *Handler) gin.HandlerFunc { return h.handleForceStop }},
+	"/labels":         {http.MethodPut, func(h *Handler) gin.HandlerFunc { return h.withOwner(h.handleLabels) }},
+}
+
+// blockedActions are sandbox settings the proxy owns (InjectOwner fixes them at
+// create). Daytona takes the value as a further path segment
+// (/autostop/:interval, /autoarchive/:interval), so they match on the first
+// segment of the action.
+var blockedActions = map[string]bool{"/autostop": true, "/autoarchive": true}
+
+// isManagedAlias reports whether action is a non-canonical spelling of the
+// sandbox itself or of an action the proxy handles or blocks by name.
+//
+// Daytona's router keeps Express's defaults: it ignores case and a trailing
+// slash, so "/Start", "/start/" and "/START/" are all its start operation.
+// Any such alias would fall through to the transparent proxy and reach Daytona
+// as admin without the billing hook, label protection or admin check its
+// canonical spelling gets here. A bare "/" (the sandbox itself) would let a
+// DELETE skip handleDelete's billing cleanup.
+func isManagedAlias(action string) bool {
+	norm := strings.ToLower(strings.TrimRight(action, "/"))
+	if norm == action {
+		return false
+	}
+	_, handled := sandboxActions[norm]
+	return norm == "" || handled || blockedActions[norm]
+}
+
+// firstSegment returns the leading "/segment" of p: "/autostop/30" → "/autostop".
+func firstSegment(p string) string {
+	if i := strings.IndexByte(strings.TrimPrefix(p, "/"), '/'); i >= 0 {
+		return p[:i+1]
+	}
+	return p
+}
+
 // handleCatchAll dispatches all /sandbox/:id/<action> requests.
 // Gin requires a single catch-all to avoid routing-tree conflicts between
 // static sub-paths and wildcard segments.
 func (h *Handler) handleCatchAll(c *gin.Context) {
-	action := c.Param("action") // e.g. "/start", "/stop", "/autostop", "/labels"
-	method := c.Request.Method
+	action := c.Param("action") // e.g. "/start", "/stop", "/autostop/30", "/labels"
+
+	// Only the canonical spelling of a managed action is accepted. Other paths
+	// keep their spelling: toolbox and passthrough paths can mean something
+	// different with a trailing slash.
+	if isManagedAlias(action) {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "non-canonical sandbox action path"})
+		return
+	}
 
 	// ── Blocked actions ────────────────────────────────────────────────────
-	if action == "/autostop" || action == "/autoarchive" {
+	if blockedActions[firstSegment(strings.ToLower(action))] {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "managed by billing proxy"})
 		return
 	}
 
-	// ── Lifecycle with billing hooks ───────────────────────────────────────
-	switch {
-	case method == http.MethodPost && action == "/start":
-		h.withOwner(h.handleStart)(c)
-	case method == http.MethodPost && action == "/stop":
-		h.withOwnerOrAdmin(h.handleStop)(c)
-	case method == http.MethodPost && action == "/archive":
-		h.withOwnerOrAdmin(h.handleArchive)(c)
-	case method == http.MethodPost && action == "/ensure-billing":
-		h.withOwnerOrAdmin(h.handleEnsureBilling)(c)
-	case method == http.MethodPost && action == "/ssh-access":
-		h.withOwner(h.handleSSHAccess)(c)
-	case method == http.MethodDelete && action == "/force":
-		h.handleForceDelete(c)
-	case method == http.MethodPost && action == "/force-stop":
-		h.handleForceStop(c)
-
-	// ── Label protection ───────────────────────────────────────────────────
-	case method == http.MethodPut && action == "/labels":
-		h.withOwner(h.handleLabels)(c)
+	// ── Lifecycle with billing hooks, admin overrides, label protection ────
+	if a, ok := sandboxActions[action]; ok && a.method == c.Request.Method {
+		a.handler(h)(c)
+		return
+	}
 
 	// ── Transparent proxy (owner check, sealed denied) ─────────────────────
 	// Everything not named above is forwarded to Daytona as admin, so this
@@ -1471,10 +1517,8 @@ func (h *Handler) handleCatchAll(c *gin.Context) {
 	// beyond :8080; SSH and toolbox were blocked by name, which left this
 	// catch-all open to whatever Daytona adds. Deny by default instead: the
 	// lifecycle operations a sealed owner legitimately needs all have their
-	// own cases above and are unaffected.
-	default:
-		h.withOwnerNotSealed(h.stripVolumesThenForward)(c)
-	}
+	// own entries in sandboxActions and are unaffected.
+	h.withOwnerNotSealed(h.stripVolumesThenForward)(c)
 }
 
 // stripVolumesThenForward removes any caller-supplied "volumes" (any case) from
