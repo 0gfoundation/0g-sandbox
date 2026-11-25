@@ -13,7 +13,7 @@ import (
 // StopSignal carries the reason a sandbox should be stopped.
 type StopSignal struct {
 	SandboxID string
-	Reason    string // "insufficient_balance" | "not_acknowledged"
+	Reason    string // "insufficient_balance" | "not_acknowledged" | "disk_over_size" (usage.ReasonDiskOverSize)
 }
 
 // ChainClient submits signed vouchers to the settlement contract.

@@ -17,6 +17,7 @@ type Config struct {
 	Server  ServerConfig
 	Broker  BrokerConfig
 	Alert   AlertConfig
+	Usage   UsageConfig
 }
 
 type BrokerConfig struct {
@@ -135,6 +136,24 @@ type AlertConfig struct {
 	QueueBacklogThreshold   int64  `mapstructure:"queue_backlog_threshold"`
 }
 
+// UsageConfig drives per-sandbox usage monitoring (#148). Empty RunnerAPIURL
+// disables it: no usage reports, alerts or disk enforcement.
+type UsageConfig struct {
+	RunnerAPIURL      string  `mapstructure:"runner_api_url"`
+	RunnerAPIKey      string  `mapstructure:"runner_api_key"`
+	PollSec           int64   `mapstructure:"poll_sec"`
+	DiskEnforce       bool    `mapstructure:"disk_enforce"`
+	DiskWarnFreeMiB   int64   `mapstructure:"disk_warn_free_mib"`
+	DiskGraceSec      int64   `mapstructure:"disk_grace_sec"`
+	VolumeAlertPct    float64 `mapstructure:"volume_alert_pct"`
+	VolumeCriticalPct float64 `mapstructure:"volume_critical_pct"`
+	// VolumeCreateBlockPct refuses new sandboxes while the shared volume is at
+	// least this full; 0 never refuses.
+	VolumeCreateBlockPct float64 `mapstructure:"volume_create_block_pct"`
+	OOMKillsPerHour      int     `mapstructure:"oom_kills_per_hour"`
+	CPUPinnedHours       float64 `mapstructure:"cpu_pinned_hours"`
+}
+
 func Load() (*Config, error) {
 	v := viper.New()
 
@@ -152,6 +171,15 @@ func Load() (*Config, error) {
 	v.SetDefault("alert.dedup_window_sec", 3600)          // 1h between same-kind alerts
 	v.SetDefault("alert.settler_low_balance_factor", 100) // warn when balance < 100 settle-tx worth
 	v.SetDefault("alert.queue_backlog_threshold", 1000)   // alert if queue depth exceeds this
+	v.SetDefault("usage.poll_sec", 60)
+	v.SetDefault("usage.disk_enforce", false) // alert and report only until turned on
+	v.SetDefault("usage.disk_warn_free_mib", 1024)
+	v.SetDefault("usage.disk_grace_sec", 900)
+	v.SetDefault("usage.volume_alert_pct", 80)
+	v.SetDefault("usage.volume_critical_pct", 95)
+	v.SetDefault("usage.volume_create_block_pct", 90)
+	v.SetDefault("usage.oom_kills_per_hour", 3)
+	v.SetDefault("usage.cpu_pinned_hours", 6)
 
 	// Config file (optional)
 	v.SetConfigName("config")
@@ -194,6 +222,17 @@ func Load() (*Config, error) {
 		"alert.dedup_window_sec":           "ALERT_DEDUP_WINDOW_SEC",
 		"alert.settler_low_balance_factor": "SETTLER_LOW_BALANCE_FACTOR",
 		"alert.queue_backlog_threshold":    "QUEUE_BACKLOG_THRESHOLD",
+		"usage.runner_api_url":             "RUNNER_API_URL",
+		"usage.runner_api_key":             "RUNNER_API_KEY",
+		"usage.poll_sec":                   "USAGE_POLL_SEC",
+		"usage.disk_enforce":               "DISK_ENFORCE",
+		"usage.disk_warn_free_mib":         "DISK_WARN_FREE_MIB",
+		"usage.disk_grace_sec":             "DISK_GRACE_SEC",
+		"usage.volume_alert_pct":           "VOLUME_ALERT_PCT",
+		"usage.volume_critical_pct":        "VOLUME_CRITICAL_PCT",
+		"usage.volume_create_block_pct":    "VOLUME_CREATE_BLOCK_PCT",
+		"usage.oom_kills_per_hour":         "OOM_ALERT_KILLS_PER_HOUR",
+		"usage.cpu_pinned_hours":           "CPU_PINNED_ALERT_HOURS",
 	}
 	for key, env := range bindings {
 		if err := v.BindEnv(key, env); err != nil {
@@ -293,6 +332,21 @@ func (c *Config) validate() error {
 	}
 	if c.Chain.ChainID == 0 {
 		return fmt.Errorf("required config missing: CHAIN_ID")
+	}
+	if c.Usage.RunnerAPIURL != "" && c.Usage.RunnerAPIKey == "" {
+		return fmt.Errorf("RUNNER_API_KEY is required when RUNNER_API_URL is set")
+	}
+	for _, p := range []struct {
+		env string
+		v   float64
+	}{
+		{"VOLUME_ALERT_PCT", c.Usage.VolumeAlertPct},
+		{"VOLUME_CRITICAL_PCT", c.Usage.VolumeCriticalPct},
+		{"VOLUME_CREATE_BLOCK_PCT", c.Usage.VolumeCreateBlockPct},
+	} {
+		if p.v < 0 || p.v > 100 {
+			return fmt.Errorf("%s must be between 0 and 100, got %v", p.env, p.v)
+		}
 	}
 	if c.Chain.ProviderKeySource != "local" && c.Chain.ProviderKeySource != "kms" {
 		return fmt.Errorf("PROVIDER_KEY_SOURCE must be \"local\" or \"kms\", got %q", c.Chain.ProviderKeySource)

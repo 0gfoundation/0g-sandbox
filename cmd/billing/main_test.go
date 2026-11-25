@@ -249,7 +249,7 @@ func TestRunStopHandler_StopsAndCleansRedis(t *testing.T) {
 	rdb.Set(bg, "billing:compute:sb-1", "session", 0)           //nolint:errcheck
 	rdb.Set(bg, "stop:sandbox:sb-1", "insufficient_balance", 0) //nolint:errcheck
 
-	go runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil)
+	go runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil, stopHooks{})
 
 	stopCh <- settler.StopSignal{SandboxID: "sb-1", Reason: "insufficient_balance"}
 
@@ -275,7 +275,7 @@ func TestRunStopHandler_DaytonaError_StillCleansRedis(t *testing.T) {
 	rdb.Set(bg, "billing:compute:sb-err", "session", 0)       //nolint:errcheck
 	rdb.Set(bg, "stop:sandbox:sb-err", "not_acknowledged", 0) //nolint:errcheck
 
-	go runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil)
+	go runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil, stopHooks{})
 
 	stopCh <- settler.StopSignal{SandboxID: "sb-err", Reason: "not_acknowledged"}
 
@@ -296,7 +296,7 @@ func TestRunStopHandler_MultipleSignals(t *testing.T) {
 		rdb.Set(bg, "stop:sandbox:"+id, "insufficient_balance", 0) //nolint:errcheck
 	}
 
-	go runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil)
+	go runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil, stopHooks{})
 
 	for _, id := range []string{"sb-x", "sb-y", "sb-z"} {
 		stopCh <- settler.StopSignal{SandboxID: id, Reason: "insufficient_balance"}
@@ -324,7 +324,7 @@ func TestRunStopHandler_ContextCancel_Exits(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil)
+		runStopHandler(ctx, stopCh, mock.client(), rdb, &noopAlerter{}, zap.NewNop(), nil, stopHooks{})
 		close(done)
 	}()
 

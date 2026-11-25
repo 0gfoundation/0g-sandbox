@@ -29,6 +29,7 @@ import (
 	"github.com/0gfoundation/0g-sandbox/internal/daytona"
 	"github.com/0gfoundation/0g-sandbox/internal/events"
 	"github.com/0gfoundation/0g-sandbox/internal/registry"
+	"github.com/0gfoundation/0g-sandbox/internal/usage"
 	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
 
@@ -136,6 +137,21 @@ type Handler struct {
 	// SealIssuer authenticates this provider's current app instance on each
 	// sealed create. No issuer scope is accepted from the create request.
 	SealIssuer func(ctx context.Context) (SealIssuer, error)
+	// Usage serves GET /api/sandbox/:id/usage and hears of owner starts. nil
+	// (RUNNER_API_URL unset, tests) = the route answers 503.
+	Usage UsageTracker
+}
+
+// UsageTracker is usage.Monitor as the proxy uses it.
+type UsageTracker interface {
+	// Report builds a sandbox's usage report.
+	Report(ctx context.Context, sandboxID string, requestedDiskGiB int) usage.Report
+	// OnStarted is called after the owner starts a sandbox: one stopped for
+	// its disk size then gets its grace period to delete files.
+	OnStarted(ctx context.Context, sandboxID string)
+	// AdmitCreate returns an error while the provider's shared disk is too
+	// full for a new sandbox.
+	AdmitCreate() error
 }
 
 func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec *big.Int, providerAddress string, adminAddresses []string, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, providerKey, sealKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
@@ -371,6 +387,16 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	if sealed && h.SealIssuer == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sealed issuer authentication not configured"})
 		return
+	}
+	// A provider whose shared disk is nearly full takes no new sandboxes; the
+	// ones it has keep running and can still be started. Before any balance
+	// reservation or Daytona call.
+	if h.Usage != nil {
+		if err := h.Usage.AdmitCreate(); err != nil {
+			h.log.Warn("create refused", zap.String("wallet", wallet), zap.Error(err))
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "this provider's disk is nearly full and it is not taking new sandboxes; try again later or use another provider"})
+			return
+		}
 	}
 	// Snapshot-only policy guarantees no custom cpu/memory in the body, so the
 	// snapshot record is the ONLY billing spec source. Look it up and FAIL
@@ -831,12 +857,18 @@ func (h *Handler) handleStart(c *gin.Context) {
 	if c.Writer.Status() >= 200 && c.Writer.Status() < 300 {
 		go func() {
 			ctx := context.WithoutCancel(c.Request.Context())
-			cpu, memGB := 0, 0
+			cpu, memGB, sandboxID := 0, 0, id
 			if sb, err := h.dtona.GetSandbox(ctx, id); err == nil {
 				cpu, memGB = sb.CPU, sb.Memory
+				if sb.ID != "" {
+					sandboxID = sb.ID // :id may be a name; usage records are by ID
+				}
 			}
 			h.billing.OnStart(ctx, id, wallet, cpu, memGB)
 			// OnStart enqueues voucher; reservation released there.
+			if h.Usage != nil {
+				h.Usage.OnStarted(ctx, sandboxID)
+			}
 		}()
 	} else if startReserved {
 		billing.Release(c.Request.Context(), h.rdb, wallet, h.providerAddress, startRequired)
@@ -1430,6 +1462,22 @@ func copyRecorder(c *gin.Context, rec *httptest.ResponseRecorder) {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+// handleUsage answers GET /api/sandbox/:id/usage: the sandbox's own CPU,
+// memory, task, network and disk numbers, its requested disk size, and why
+// it was last stopped for disk, if it was (#148).
+func (h *Handler) handleUsage(c *gin.Context) {
+	if h.Usage == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "usage monitoring is not enabled on this provider"})
+		return
+	}
+	sb, err := h.dtona.GetSandbox(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "sandbox lookup failed"})
+		return
+	}
+	c.JSON(http.StatusOK, h.Usage.Report(c.Request.Context(), sb.ID, sb.Disk))
+}
+
 // sandboxAction is a /sandbox/:id/<action> the proxy handles itself instead of
 // forwarding: the method it answers and its handler, access check included.
 type sandboxAction struct {
@@ -1450,6 +1498,9 @@ var sandboxActions = map[string]sandboxAction{
 	"/force":          {http.MethodDelete, func(h *Handler) gin.HandlerFunc { return h.handleForceDelete }},
 	"/force-stop":     {http.MethodPost, func(h *Handler) gin.HandlerFunc { return h.handleForceStop }},
 	"/labels":         {http.MethodPut, func(h *Handler) gin.HandlerFunc { return h.withOwner(h.handleLabels) }},
+	// Numbers only, no workload content: open to admins, and to the owner of
+	// a sealed sandbox.
+	"/usage": {http.MethodGet, func(h *Handler) gin.HandlerFunc { return h.withOwnerOrAdmin(h.handleUsage) }},
 }
 
 // blockedActions are sandbox settings the proxy owns (InjectOwner fixes them at
