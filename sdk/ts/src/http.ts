@@ -1,10 +1,12 @@
+import { sha256, stringToBytes } from 'viem';
 import { buildAuthHeaders, type Signer } from './signer.js';
 import { mapHttpError, SandboxSDKError } from './errors.js';
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
 export interface SignedRequestOptions {
-  action: string;
+  /** @deprecated Ignored — the signed action is derived from method, path and query. */
+  action?: string;
   resourceId?: string;
   /** Value embedded in the signed message (NOT the HTTP body). Defaults to {}. */
   payload?: unknown;
@@ -29,20 +31,26 @@ export class HttpClient {
     this.timeoutMs = timeoutMs;
   }
 
-  /** Wallet-signed request. */
-  async signed<T = unknown>(method: string, path: string, opts: SignedRequestOptions): Promise<T> {
+  /**
+   * Wallet-signed request. The signature is bound to this exact request —
+   * `METHOD:path?query` and the SHA-256 of the body bytes — so the server
+   * rejects it for any other operation, path or body.
+   */
+  async signed<T = unknown>(method: string, path: string, opts: SignedRequestOptions = {}): Promise<T> {
     const provider = await this.resolveProvider();
+    const m = method.toUpperCase();
+    // One target string for both the signature and the URL: the server
+    // compares the signed query verbatim.
+    const target = path + queryString(opts.query);
+    const body = opts.body !== undefined ? JSON.stringify(opts.body) : undefined;
     const headers: Record<string, string> = {
-      ...(await buildAuthHeaders(this.signer, opts.action, opts.resourceId ?? '', opts.payload ?? {}, {
+      ...(await buildAuthHeaders(this.signer, `${m}:${target}`, opts.resourceId ?? '', opts.payload ?? {}, {
         provider,
+        bodySha256: sha256(stringToBytes(body ?? '')),
       })),
     };
-    let body: string | undefined;
-    if (opts.body !== undefined) {
-      headers['Content-Type'] = 'application/json';
-      body = JSON.stringify(opts.body);
-    }
-    return this.do<T>(method, path, { headers, body, query: opts.query, timeoutMs: opts.timeoutMs });
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    return this.do<T>(m, target, { headers, body, timeoutMs: opts.timeoutMs });
   }
 
   /**
@@ -73,10 +81,7 @@ export class HttpClient {
     path: string,
     opts: { headers?: Record<string, string>; body?: string; query?: Record<string, string>; timeoutMs?: number },
   ): Promise<T> {
-    let url = this.baseUrl.replace(/\/+$/, '') + path;
-    if (opts.query && Object.keys(opts.query).length > 0) {
-      url += '?' + new URLSearchParams(opts.query).toString();
-    }
+    const url = this.baseUrl.replace(/\/+$/, '') + path + queryString(opts.query);
     // fetch has no default timeout — a hung server/RPC would hang forever.
     const timeout = opts.timeoutMs ?? this.timeoutMs;
     const signal = timeout > 0 ? AbortSignal.timeout(timeout) : undefined;
@@ -97,4 +102,8 @@ export class HttpClient {
       return text as unknown as T;
     }
   }
+}
+
+function queryString(query?: Record<string, string>): string {
+  return query && Object.keys(query).length > 0 ? '?' + new URLSearchParams(query).toString() : '';
 }

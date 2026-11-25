@@ -1,9 +1,12 @@
 package auth
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -298,5 +301,181 @@ func TestBinding_EmptyResourceStrictRejected(t *testing.T) {
 	req := buildBoundRequest(t, "bind-7", testProvider, "", "/sandbox/sandbox-Y/stop")
 	if code := runBound(t, Options{ProviderAddress: testProvider, Strict: true}, req, true); code != http.StatusUnauthorized {
 		t.Fatalf("strict + empty resource must 401, got %d", code)
+	}
+}
+
+// ── Request binding (action METHOD:path + body_sha256) ──────────────────────
+
+func bodyHash(body []byte) string {
+	sum := sha256.Sum256(body)
+	return "0x" + hex.EncodeToString(sum[:])
+}
+
+// buildRequestBoundRequest signs action + bodySHA (bodySHA "" = legacy,
+// unbound message) and sends method/target with body.
+func buildRequestBoundRequest(t *testing.T, nonce, action, bodySHA, method, target string, body []byte) *http.Request {
+	t.Helper()
+	privKey, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sr := SignedRequest{
+		Action:     action,
+		BodySHA256: bodySHA,
+		ExpiresAt:  time.Now().Add(2 * time.Minute).Unix(),
+		Nonce:      nonce,
+		Payload:    json.RawMessage(`{}`),
+		Provider:   testProvider,
+		ResourceID: "sb-1",
+	}
+	msgBytes, _ := json.Marshal(sr)
+	sig, _ := crypto.Sign(HashMessage(msgBytes), privKey)
+	sig[64] += 27
+	req := httptest.NewRequest(method, target, bytes.NewReader(body))
+	req.Header.Set("X-Wallet-Address", crypto.PubkeyToAddress(privKey.PublicKey).Hex())
+	req.Header.Set("X-Signed-Message", base64.StdEncoding.EncodeToString(msgBytes))
+	req.Header.Set("X-Wallet-Signature", "0x"+hex.EncodeToString(sig))
+	return req
+}
+
+// requestBindingEngine mounts the middleware on sandbox-shaped routes; the
+// handler echoes the body it received so tests can check it was restored.
+func requestBindingEngine(t *testing.T, opts Options) *gin.Engine {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	r := gin.New()
+	echo := func(c *gin.Context) {
+		b, _ := io.ReadAll(c.Request.Body)
+		c.String(http.StatusOK, string(b))
+	}
+	mw := MiddlewareWithOptions(rdb, opts)
+	r.GET("/sandbox/:id", mw, echo)
+	r.DELETE("/sandbox/:id", mw, echo)
+	r.Any("/sandbox/:id/*action", mw, echo)
+	r.POST("/registry/gc", mw, echo)
+	return r
+}
+
+func serve(r *gin.Engine, req *http.Request) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func TestRequestBinding_MatchingAcceptedAndBodyRestored(t *testing.T) {
+	r := requestBindingEngine(t, Options{ProviderAddress: testProvider})
+	body := []byte(`{"command":"ls","timeout":10}`)
+	req := buildRequestBoundRequest(t, "rb-1", "POST:/sandbox/sb-1/exec", bodyHash(body), http.MethodPost, "/sandbox/sb-1/exec", body)
+	w := serve(r, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("bound request must pass, got %d: %s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != string(body) {
+		t.Fatalf("handler must see the original body, got %q", w.Body.String())
+	}
+}
+
+// Same sandbox, same provider — the re-aim that provider/resource binding
+// cannot catch.
+func TestRequestBinding_PathRewriteRejected(t *testing.T) {
+	r := requestBindingEngine(t, Options{ProviderAddress: testProvider})
+	req := buildRequestBoundRequest(t, "rb-2", "POST:/sandbox/sb-1/stop", bodyHash(nil), http.MethodPost, "/sandbox/sb-1/ssh-access", nil)
+	if w := serve(r, req); w.Code != http.StatusUnauthorized {
+		t.Fatalf("rewritten path must 401, got %d", w.Code)
+	}
+}
+
+func TestRequestBinding_MethodRewriteRejected(t *testing.T) {
+	r := requestBindingEngine(t, Options{ProviderAddress: testProvider})
+	req := buildRequestBoundRequest(t, "rb-3", "GET:/sandbox/sb-1", bodyHash(nil), http.MethodDelete, "/sandbox/sb-1", nil)
+	if w := serve(r, req); w.Code != http.StatusUnauthorized {
+		t.Fatalf("rewritten method must 401, got %d", w.Code)
+	}
+}
+
+func TestRequestBinding_BodyRewriteRejected(t *testing.T) {
+	r := requestBindingEngine(t, Options{ProviderAddress: testProvider})
+	signed := []byte(`{"command":"ls"}`)
+	sent := []byte(`{"command":"cat /etc/secret"}`)
+	req := buildRequestBoundRequest(t, "rb-4", "POST:/sandbox/sb-1/exec", bodyHash(signed), http.MethodPost, "/sandbox/sb-1/exec", sent)
+	if w := serve(r, req); w.Code != http.StatusUnauthorized {
+		t.Fatalf("rewritten body must 401, got %d", w.Code)
+	}
+}
+
+// A GET carries no body; its bound hash is the hash of zero bytes.
+func TestRequestBinding_EmptyBody(t *testing.T) {
+	r := requestBindingEngine(t, Options{ProviderAddress: testProvider})
+	req := buildRequestBoundRequest(t, "rb-5", "GET:/sandbox/sb-1", bodyHash(nil), http.MethodGet, "/sandbox/sb-1", nil)
+	if w := serve(r, req); w.Code != http.StatusOK {
+		t.Fatalf("empty-body bound GET must pass, got %d: %s", w.Code, w.Body.String())
+	}
+	// Uppercase hex without 0x is the same hash.
+	sum := sha256.Sum256(nil)
+	req2 := buildRequestBoundRequest(t, "rb-5b", "GET:/sandbox/sb-1", strings.ToUpper(hex.EncodeToString(sum[:])), http.MethodGet, "/sandbox/sb-1", nil)
+	if w := serve(r, req2); w.Code != http.StatusOK {
+		t.Fatalf("hash format variant must pass, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// The query is part of the request (e.g. dry_run) and is bound verbatim.
+func TestRequestBinding_QueryBound(t *testing.T) {
+	r := requestBindingEngine(t, Options{ProviderAddress: testProvider})
+	req := buildRequestBoundRequest(t, "rb-6", "POST:/registry/gc?dry_run=true", bodyHash(nil), http.MethodPost, "/registry/gc", nil)
+	if w := serve(r, req); w.Code != http.StatusUnauthorized {
+		t.Fatalf("dropped query must 401, got %d", w.Code)
+	}
+	req2 := buildRequestBoundRequest(t, "rb-7", "POST:/registry/gc?dry_run=true", bodyHash(nil), http.MethodPost, "/registry/gc?dry_run=true", nil)
+	if w := serve(r, req2); w.Code != http.StatusOK {
+		t.Fatalf("matching query must pass, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// The broker relay sets URL.Path to the decoded path and leaves a RawPath
+// that no longer matches, so the server sees the decoded form of whatever
+// encoding the client signed.
+func TestRequestBinding_EncodedPathThroughRelay(t *testing.T) {
+	r := requestBindingEngine(t, Options{ProviderAddress: testProvider})
+	req := buildRequestBoundRequest(t, "rb-8", "POST:/sandbox/sb-1/files%3Ainfo", bodyHash(nil), http.MethodPost, "/sandbox/sb-1/files:info", nil)
+	req.URL.RawPath = "/proxy/0xabc/sandbox/sb-1/files%3Ainfo"
+	if w := serve(r, req); w.Code != http.StatusOK {
+		t.Fatalf("encoded signed path must match decoded request path, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// Legacy (unbound) messages: accepted unless RequireRequestBinding is on.
+func TestRequestBinding_RequireFlag(t *testing.T) {
+	lax := requestBindingEngine(t, Options{ProviderAddress: testProvider, Strict: true})
+	req := buildRequestBoundRequest(t, "rb-9", "stop", "", http.MethodPost, "/sandbox/sb-1/stop", nil)
+	if w := serve(lax, req); w.Code != http.StatusOK {
+		t.Fatalf("strict alone must still accept a provider-bound legacy message, got %d: %s", w.Code, w.Body.String())
+	}
+	required := requestBindingEngine(t, Options{ProviderAddress: testProvider, Strict: true, RequireRequestBinding: true})
+	req2 := buildRequestBoundRequest(t, "rb-10", "stop", "", http.MethodPost, "/sandbox/sb-1/stop", nil)
+	if w := serve(required, req2); w.Code != http.StatusUnauthorized {
+		t.Fatalf("RequireRequestBinding must reject an unbound message, got %d", w.Code)
+	}
+}
+
+// A rejected binding must not burn the nonce — same as provider/resource.
+func TestRequestBinding_MismatchDoesNotConsumeNonce(t *testing.T) {
+	r := requestBindingEngine(t, Options{ProviderAddress: testProvider})
+	bad := buildRequestBoundRequest(t, "rb-11", "POST:/sandbox/sb-1/stop", bodyHash(nil), http.MethodPost, "/sandbox/sb-1/start", nil)
+	if w := serve(r, bad); w.Code != http.StatusUnauthorized {
+		t.Fatalf("mismatch must 401, got %d", w.Code)
+	}
+	good := buildRequestBoundRequest(t, "rb-11", "POST:/sandbox/sb-1/stop", bodyHash(nil), http.MethodPost, "/sandbox/sb-1/stop", nil)
+	if w := serve(r, good); w.Code != http.StatusOK {
+		t.Fatalf("nonce must still be usable after a rejected binding, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRequestBinding_BodyTooLarge(t *testing.T) {
+	r := requestBindingEngine(t, Options{ProviderAddress: testProvider})
+	body := make([]byte, maxBoundBodyBytes+1)
+	req := buildRequestBoundRequest(t, "rb-12", "POST:/sandbox/sb-1/exec", bodyHash(body), http.MethodPost, "/sandbox/sb-1/exec", body)
+	if w := serve(r, req); w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized bound body must 413, got %d", w.Code)
 	}
 }

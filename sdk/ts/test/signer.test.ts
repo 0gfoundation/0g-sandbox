@@ -12,6 +12,8 @@ const vectors = JSON.parse(
   privateKey: `0x${string}`;
   address: string;
   action: string;
+  body?: string;
+  bodySha256?: string;
   resourceId: string;
   payload: unknown;
   nonce: string;
@@ -30,6 +32,7 @@ describe('golden signing vectors', () => {
       const headers = await buildAuthHeaders(signer, v.action, v.resourceId, v.payload, {
         nonce: v.nonce,
         nowSec: v.expiresAt - 180,
+        bodySha256: v.bodySha256,
       });
 
       // Byte-exact message reproduction (base64 of the same JSON string).
@@ -53,6 +56,19 @@ describe('golden signing vectors', () => {
     const msg = Buffer.from(headers['X-Signed-Message'], 'base64').toString('utf8');
     expect(msg).toBe(
       `{"action":"list","expires_at":1180,"nonce":"${'00'.repeat(16)}","payload":{},"resource_id":""}`,
+    );
+  });
+
+  it('body_sha256 sits between action and expires_at', async () => {
+    const signer = privateKeySigner(vectors[0].privateKey);
+    const headers = await buildAuthHeaders(signer, 'GET:/api/sandbox', '', {}, {
+      nonce: '00'.repeat(16),
+      nowSec: 1000,
+      bodySha256: '0xabc',
+    });
+    const msg = Buffer.from(headers['X-Signed-Message'], 'base64').toString('utf8');
+    expect(msg).toBe(
+      `{"action":"GET:/api/sandbox","body_sha256":"0xabc","expires_at":1180,"nonce":"${'00'.repeat(16)}","payload":{},"resource_id":""}`,
     );
   });
 

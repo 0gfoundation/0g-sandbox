@@ -28,8 +28,10 @@ services:
       BROKER_THRESHOLD_INTERVALS:  ${BROKER_THRESHOLD_INTERVALS:-2}
       # Payment layer — empty = noop (log-only, top-up manually)
       PAYMENT_LAYER_URL:    ${PAYMENT_LAYER_URL:-}
-      # Debug: expose GET /api/monitor
+      # Debug: GET /api/monitor, admin-signed only — stays off unless
+      # ADMIN_ADDRESSES is also set
       BROKER_DEBUG:         ${BROKER_DEBUG:-false}
+      ADMIN_ADDRESSES:      ${ADMIN_ADDRESSES:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

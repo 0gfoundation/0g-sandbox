@@ -14,6 +14,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
+	"github.com/0gfoundation/0g-sandbox/internal/auth"
 	"github.com/0gfoundation/0g-sandbox/internal/broker"
 	"github.com/0gfoundation/0g-sandbox/internal/chain"
 	"github.com/0gfoundation/0g-sandbox/internal/config"
@@ -119,17 +120,7 @@ func main() {
 	})
 
 	if os.Getenv("BROKER_DEBUG") == "true" {
-		r.GET("/api/monitor", func(c *gin.Context) {
-			sessions := mon.GetSessions(c.Request.Context())
-			if sessions == nil {
-				sessions = []broker.SessionEntry{}
-			}
-			c.JSON(http.StatusOK, gin.H{
-				"total_sessions": len(sessions),
-				"sessions":       sessions,
-			})
-		})
-		log.Info("debug route enabled: GET /api/monitor")
+		registerMonitor(r, rdb, cfg.Chain.AdminList(), mon.GetSessions, log)
 	}
 
 	// Provider reverse proxy — eliminates CORS: browser calls /proxy/:addr/* (same origin)
@@ -186,4 +177,42 @@ func main() {
 	<-quit
 	log.Info("broker shutting down")
 	cancel()
+}
+
+// registerMonitor mounts GET /api/monitor, the live session registry. It
+// names every active sandbox with its owner wallet, provider and pricing, so
+// it is never public: the caller must sign as one of admins, and with no
+// admin configured the route stays off even under BROKER_DEBUG — a debug flag
+// left on in a deployment must not publish the fleet.
+func registerMonitor(r *gin.Engine, rdb *redis.Client, admins []string, sessions func(context.Context) []broker.SessionEntry, log *zap.Logger) {
+	if len(admins) == 0 {
+		log.Warn("BROKER_DEBUG is set but ADMIN_ADDRESSES is empty; GET /api/monitor stays disabled")
+		return
+	}
+	r.GET("/api/monitor", auth.Middleware(rdb), requireAdmin(admins), func(c *gin.Context) {
+		list := sessions(c.Request.Context())
+		if list == nil {
+			list = []broker.SessionEntry{}
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"total_sessions": len(list),
+			"sessions":       list,
+		})
+	})
+	log.Info("debug route enabled: GET /api/monitor (admin-signed)", zap.Strings("admins", admins))
+}
+
+// requireAdmin admits only wallets in admins (lowercased hex, as
+// ChainConfig.AdminList returns them). Runs after auth.Middleware.
+func requireAdmin(admins []string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		wallet := strings.ToLower(c.GetString("wallet_address"))
+		for _, a := range admins {
+			if a == wallet {
+				c.Next()
+				return
+			}
+		}
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin only"})
+	}
 }

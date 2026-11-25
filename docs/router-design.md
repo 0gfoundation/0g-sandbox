@@ -252,6 +252,20 @@ keccak256(sandbox_id | provider_addr | user_addr | cpu | mem_gb | start_time | v
 
 ### `GET /api/monitor`（运维只读）
 
+只在 `BROKER_DEBUG=true` **且** `ADMIN_ADDRESSES` 非空时注册；请求必须带 `ADMIN_ADDRESSES` 中某个钱包的签名（与 billing 相同的三个认证头），否则 `401`/`403`。没有配置管理员时，即使开了 `BROKER_DEBUG` 也不注册（返回 `404`）——它列出所有 sandbox、钱包和价格，不能因为一个调试开关对外公开。
+
+用 Foundry `cast` 调用：
+
+```bash
+KEY=0x<admin-key>; BROKER=https://<broker-host>
+MSG=$(printf '{"action":"GET:/api/monitor","body_sha256":"0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","expires_at":%d,"nonce":"%s","payload":{},"resource_id":""}' \
+  $(( $(date +%s) + 120 )) "$(openssl rand -hex 16)")
+curl -s "$BROKER/api/monitor" \
+  -H "X-Wallet-Address: $(cast wallet address --private-key $KEY)" \
+  -H "X-Signed-Message: $(printf %s "$MSG" | base64 | tr -d '\n')" \
+  -H "X-Wallet-Signature: $(cast wallet sign --private-key $KEY "$MSG")"
+```
+
 响应：
 ```json
 {

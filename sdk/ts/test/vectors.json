@@ -62,5 +62,38 @@
     "message": "{\"action\":\"create\",\"expires_at\":1893456000,\"nonce\":\"000102030405060708090a0b0c0d0e0f\",\"payload\":{\"name\":\"沙盒-α\",\"env\":{\"GREETING\":\"héllo & <world>\"}},\"resource_id\":\"\"}",
     "messageB64": "eyJhY3Rpb24iOiJjcmVhdGUiLCJleHBpcmVzX2F0IjoxODkzNDU2MDAwLCJub25jZSI6IjAwMDEwMjAzMDQwNTA2MDcwODA5MGEwYjBjMGQwZTBmIiwicGF5bG9hZCI6eyJuYW1lIjoi5rKZ55uSLc6xIiwiZW52Ijp7IkdSRUVUSU5HIjoiaMOpbGxvICYgPHdvcmxkPiJ9fSwicmVzb3VyY2VfaWQiOiIifQ==",
     "signature": "0x83b7e232e0ff4753fb6f512897fddb3f1d9501a9645a4ba97321f0ac91cc72e902fc5eed74962b6593f002f023c6d10ed8b8461529e7dbf205d896ac70cd80671c"
+  },
+  {
+    "name": "bound-create",
+    "privateKey": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "action": "POST:/api/sandbox",
+    "body": "{\"name\":\"沙盒-α\",\"snapshot\":\"0g-ubuntu22\"}",
+    "bodySha256": "0x764f1eccee900e1f9dc675b80c639adedb68834bb80d36126f74ff70a17b411e",
+    "resourceId": "",
+    "payload": {
+      "name": "沙盒-α",
+      "snapshot": "0g-ubuntu22"
+    },
+    "nonce": "000102030405060708090a0b0c0d0e0f",
+    "expiresAt": 1893456000,
+    "message": "{\"action\":\"POST:/api/sandbox\",\"body_sha256\":\"0x764f1eccee900e1f9dc675b80c639adedb68834bb80d36126f74ff70a17b411e\",\"expires_at\":1893456000,\"nonce\":\"000102030405060708090a0b0c0d0e0f\",\"payload\":{\"name\":\"沙盒-α\",\"snapshot\":\"0g-ubuntu22\"},\"resource_id\":\"\"}",
+    "messageB64": "eyJhY3Rpb24iOiJQT1NUOi9hcGkvc2FuZGJveCIsImJvZHlfc2hhMjU2IjoiMHg3NjRmMWVjY2VlOTAwZTFmOWRjNjc1YjgwYzYzOWFkZWRiNjg4MzRiYjgwZDM2MTI2Zjc0ZmY3MGExN2I0MTFlIiwiZXhwaXJlc19hdCI6MTg5MzQ1NjAwMCwibm9uY2UiOiIwMDAxMDIwMzA0MDUwNjA3MDgwOTBhMGIwYzBkMGUwZiIsInBheWxvYWQiOnsibmFtZSI6Iuaymeebki3OsSIsInNuYXBzaG90IjoiMGctdWJ1bnR1MjIifSwicmVzb3VyY2VfaWQiOiIifQ==",
+    "signature": "0x7237da83f15e187ed30534e9f62ba97142d9bde01d113e1273c07e947643c3907c3ae88745fe7793fd7f71f78994960fe0d65b7c36ef117fb376d30cd2bf7e6e1c"
+  },
+  {
+    "name": "bound-get-with-query",
+    "privateKey": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "action": "GET:/api/toolbox/a1b2c3d4-0000-1111-2222-333344445555/toolbox/files?path=%2Fhome",
+    "body": "",
+    "bodySha256": "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "resourceId": "a1b2c3d4-0000-1111-2222-333344445555",
+    "payload": {},
+    "nonce": "000102030405060708090a0b0c0d0e0f",
+    "expiresAt": 1893456000,
+    "message": "{\"action\":\"GET:/api/toolbox/a1b2c3d4-0000-1111-2222-333344445555/toolbox/files?path=%2Fhome\",\"body_sha256\":\"0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"expires_at\":1893456000,\"nonce\":\"000102030405060708090a0b0c0d0e0f\",\"payload\":{},\"resource_id\":\"a1b2c3d4-0000-1111-2222-333344445555\"}",
+    "messageB64": "eyJhY3Rpb24iOiJHRVQ6L2FwaS90b29sYm94L2ExYjJjM2Q0LTAwMDAtMTExMS0yMjIyLTMzMzM0NDQ0NTU1NS90b29sYm94L2ZpbGVzP3BhdGg9JTJGaG9tZSIsImJvZHlfc2hhMjU2IjoiMHhlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwiZXhwaXJlc19hdCI6MTg5MzQ1NjAwMCwibm9uY2UiOiIwMDAxMDIwMzA0MDUwNjA3MDgwOTBhMGIwYzBkMGUwZiIsInBheWxvYWQiOnt9LCJyZXNvdXJjZV9pZCI6ImExYjJjM2Q0LTAwMDAtMTExMS0yMjIyLTMzMzM0NDQ0NTU1NSJ9",
+    "signature": "0x0934ee8814cc0c4bae87867357e1d7485b5108ff577a0393dfc3c39c2ec4578835bf9e19df8c42b15cf95286f5dfa80730e14db814f3f6bbb68f10ff0d601b851c"
   }
 ]
