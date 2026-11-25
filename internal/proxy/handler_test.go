@@ -584,7 +584,7 @@ func TestCatchAll_StripsVolumesFromBody(t *testing.T) {
 	r := newTestEngine(dtona, &mockBilling{}, "0xOWNER")
 
 	body := `{"Volumes":[{"volumeId":"other-tenant"}],"volumes":[{"volumeId":"x"}],"keep":"me"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/sandbox/sb-1/update", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodDelete, "/api/sandbox/sb-1/ssh-access", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 

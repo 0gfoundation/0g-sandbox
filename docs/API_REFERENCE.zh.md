@@ -457,6 +457,11 @@ body 只能包含以下顶层字段(任意大小写):`snapshot`、`name`、`env`
 > `POST /api/sandbox/:id/autoarchive` 返回 `403 Forbidden` —— 这些生命周期策略
 > 由 billing 代理管理,用户不能覆盖。
 
+> **其他沙箱操作:** 除上面列出的路由外,只有
+> `GET /api/sandbox/:id/ports/:port/preview-url` 和
+> `DELETE /api/sandbox/:id/ssh-access` 会转发给 Daytona(仅限 owner;
+> 封闭沙箱返回 `403`)。其他任何 `/api/sandbox/:id/<action>` 都会被拒绝,通常是 `403 Forbidden`。
+
 ---
 
 ### 事件与 Session 端点(需认证)

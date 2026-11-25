@@ -480,6 +480,12 @@ fired (e.g., client disconnected before the 2xx response arrived).
 > `POST /api/sandbox/:id/autoarchive` return `403 Forbidden` — these lifecycle
 > policies are managed by the billing proxy and cannot be overridden by users.
 
+> **Other sandbox actions:** besides the routes above, only
+> `GET /api/sandbox/:id/ports/:port/preview-url` and
+> `DELETE /api/sandbox/:id/ssh-access` are forwarded to Daytona (owner only;
+> `403` on a sealed sandbox). Any other `/api/sandbox/:id/<action>` is refused,
+> usually with `403 Forbidden`.
+
 ---
 
 ### Event & Session Endpoints (auth required)

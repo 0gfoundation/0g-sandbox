@@ -1527,6 +1527,53 @@ func isManagedAlias(action string) bool {
 	return norm == "" || handled || blockedActions[norm]
 }
 
+// passthroughActions are the Daytona sandbox actions an owner reaches through
+// the catch-all, by method and path segments; ":port" stands for a port
+// number. The forward runs as Daytona's admin, so the catch-all is only as
+// safe as the least-guarded action it reaches. Listing what owners use keeps
+// out every other Daytona action, including any Daytona adds later; one is
+// added here only once billing and the proxy's policies account for it.
+var passthroughActions = []struct {
+	method string
+	path   []string
+}{
+	// A port's preview URL and the owner's preview token (CLAUDE.md,
+	// publicPorts). The token is the sandbox's own: it opens every port, the
+	// system ports included, and does not expire.
+	{http.MethodGet, []string{"ports", ":port", "preview-url"}},
+	// Revoke SSH access; granting it is /ssh-access in sandboxActions.
+	{http.MethodDelete, []string{"ssh-access"}},
+}
+
+// isPassthroughAction reports whether method and action name an entry of
+// passthroughActions, in its exact spelling.
+func isPassthroughAction(method, action string) bool {
+	segs := strings.Split(strings.TrimPrefix(action, "/"), "/")
+	for _, a := range passthroughActions {
+		if a.method == method && segmentsMatch(a.path, segs) {
+			return true
+		}
+	}
+	return false
+}
+
+func segmentsMatch(pattern, segs []string) bool {
+	if len(pattern) != len(segs) {
+		return false
+	}
+	for i, p := range pattern {
+		if p == ":port" {
+			n, err := strconv.Atoi(segs[i])
+			if err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != segs[i] {
+				return false
+			}
+		} else if segs[i] != p {
+			return false
+		}
+	}
+	return true
+}
+
 // firstSegment returns the leading "/segment" of p: "/autostop/30" → "/autostop".
 func firstSegment(p string) string {
 	if i := strings.IndexByte(strings.TrimPrefix(p, "/"), '/'); i >= 0 {
@@ -1561,26 +1608,29 @@ func (h *Handler) handleCatchAll(c *gin.Context) {
 		return
 	}
 
-	// ── Transparent proxy (owner check, sealed denied) ─────────────────────
-	// Everything not named above is forwarded to Daytona as admin, so this
-	// branch is only as safe as the least-guarded Daytona endpoint it reaches.
-	// On a sealed sandbox that includes port preview URLs/tokens (a path to
-	// any port, not just the attested :8080) and the public toggle (exposes
-	// every port). Sealing promises the owner no channel into the workload
-	// beyond :8080; SSH and toolbox were blocked by name, which left this
-	// catch-all open to whatever Daytona adds. Deny by default instead: the
+	// ── Transparent proxy: listed actions only (owner check, sealed denied) ─
+	// Refused before any lookup, so the answer says nothing about the sandbox.
+	// The action is matched decoded but forwarded as sent, so a path in any
+	// encoding but the plain one (RawPath set) is another spelling, refused.
+	if c.Request.URL.RawPath != "" || !isPassthroughAction(c.Request.Method, action) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "sandbox action not available through this provider"})
+		return
+	}
+	// Even the listed actions are denied on a sealed sandbox: a port preview
+	// URL or token is a path to any port, not just the attested :8080, and
+	// sealing promises the owner no channel into the workload beyond it. The
 	// lifecycle operations a sealed owner legitimately needs all have their
 	// own entries in sandboxActions and are unaffected.
 	h.withOwnerNotSealed(h.stripVolumesThenForward)(c)
 }
 
 // stripVolumesThenForward removes any caller-supplied "volumes" (any case) from
-// a JSON body before the transparent forward. The catch-all forwards arbitrary
-// sandbox-scoped actions to Daytona as admin; if the backend ever accepts
-// volume attach/modify through one of them, an unvalidated volumes array would
-// reopen the cross-tenant mount closed at create (deny-by-default until
-// per-volume ownership validation lands, #81). Non-JSON or empty bodies pass
-// through untouched.
+// a JSON body before the transparent forward. The catch-all forwards
+// sandbox-scoped actions to Daytona as admin; if one listed in
+// passthroughActions ever accepts volume attach/modify, an unvalidated volumes
+// array would reopen the cross-tenant mount closed at create (deny-by-default
+// until per-volume ownership validation lands, #81). Non-JSON or empty bodies
+// pass through untouched.
 func (h *Handler) stripVolumesThenForward(c *gin.Context) {
 	if c.Request.Body != nil && c.Request.ContentLength != 0 {
 		body, err := io.ReadAll(c.Request.Body)
