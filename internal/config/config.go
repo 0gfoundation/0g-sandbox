@@ -152,6 +152,12 @@ type UsageConfig struct {
 	VolumeCreateBlockPct float64 `mapstructure:"volume_create_block_pct"`
 	OOMKillsPerHour      int     `mapstructure:"oom_kills_per_hour"`
 	CPUPinnedHours       float64 `mapstructure:"cpu_pinned_hours"`
+	// Notices sends each running sandbox the provider's warnings through the
+	// runner (internal/notice).
+	Notices bool `mapstructure:"notices"`
+	// BalanceNoticeMin warns an owner's sandboxes when the balance runs out
+	// within this many minutes; 0 never warns.
+	BalanceNoticeMin int64 `mapstructure:"balance_notice_min"`
 }
 
 func Load() (*Config, error) {
@@ -180,6 +186,8 @@ func Load() (*Config, error) {
 	v.SetDefault("usage.volume_create_block_pct", 90)
 	v.SetDefault("usage.oom_kills_per_hour", 3)
 	v.SetDefault("usage.cpu_pinned_hours", 6)
+	v.SetDefault("usage.notices", true)
+	v.SetDefault("usage.balance_notice_min", 60)
 
 	// Config file (optional)
 	v.SetConfigName("config")
@@ -233,6 +241,8 @@ func Load() (*Config, error) {
 		"usage.volume_create_block_pct":    "VOLUME_CREATE_BLOCK_PCT",
 		"usage.oom_kills_per_hour":         "OOM_ALERT_KILLS_PER_HOUR",
 		"usage.cpu_pinned_hours":           "CPU_PINNED_ALERT_HOURS",
+		"usage.notices":                    "SANDBOX_NOTICES",
+		"usage.balance_notice_min":         "BALANCE_NOTICE_MIN",
 	}
 	for key, env := range bindings {
 		if err := v.BindEnv(key, env); err != nil {
@@ -347,6 +357,9 @@ func (c *Config) validate() error {
 		if p.v < 0 || p.v > 100 {
 			return fmt.Errorf("%s must be between 0 and 100, got %v", p.env, p.v)
 		}
+	}
+	if c.Usage.BalanceNoticeMin < 0 {
+		return fmt.Errorf("BALANCE_NOTICE_MIN must not be negative, got %d", c.Usage.BalanceNoticeMin)
 	}
 	if c.Chain.ProviderKeySource != "local" && c.Chain.ProviderKeySource != "kms" {
 		return fmt.Errorf("PROVIDER_KEY_SOURCE must be \"local\" or \"kms\", got %q", c.Chain.ProviderKeySource)

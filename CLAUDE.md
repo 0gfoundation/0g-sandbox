@@ -312,6 +312,25 @@ set, `usage.Monitor` polls them every `USAGE_POLL_SEC` and does the following:
   - **The stop handler knows no reasons.** `stopHooks` in `cmd/billing` lists the
     reasons that keep the filesystem (no archive), and the hooks to run after every
     completed stop.
+- **What the sandbox is told.** With `SANDBOX_NOTICES` (default true), every poll
+  sends the runner (`PUT /sandbox-notices`, 0g-daytona #19) the notices of each
+  running sandbox. The runner shows each sandbox its own in
+  `/run/0g/environment.json`, next to its limits and use. A sealed sandbox's owner
+  cannot get in, so only the program inside can save work or delete files, and only
+  if it knows. `internal/notice` holds the kinds:
+  - `disk_near_full`: less than `DISK_WARN_FREE_MIB` left.
+  - `disk_over_size`: past its size. The deadline is the stop: now, or the grace's
+    end after a restart. Without enforcement it has no deadline.
+  - `balance_low`: the owner's balance runs out within `BALANCE_NOTICE_MIN`
+    (default 60; 0 = off), counted as `GET /api/balance` counts it, over the
+    per-second price of the owner's running sandboxes. The estimate can be off by
+    one voucher period.
+  - `maintenance`: an admin's `PUT /api/maintenance` `{"at", "message"}`. It is
+    shown to every running sandbox until an hour after `at`.
+
+  A set lapses on the runner after three polls (5 minutes at least), so a billing
+  that stops sending leaves no stale warnings. The owner sees the same notices in
+  `GET /api/sandbox/:id/usage`.
 
 The disk a sandbox uses is `daytona_sandbox_data_bytes`: its writable layer plus the
 data it carried over from backups. A restore turns a sandbox's backup into an image
@@ -472,6 +491,7 @@ The server starts on port 8080 (`PORT` env var) and exposes:
 - `GET /api/snapshots` `POST /api/snapshots` `DELETE /api/snapshots/:id` — snapshot mgmt
   (`POST` is admin-only and refuses UUID-shaped names)
 - `GET /api/events` — on-chain VoucherSettled events
+- `GET /api/maintenance` — the provider's planned maintenance, if any
 
 Most management-plane routes use `withOwnerOrAdmin`: admins skip the owner
 check, non-admins still need to own the sandbox. Routes that read or run the
@@ -493,6 +513,7 @@ violating the workload-privacy guarantee.
 - `POST /api/queue/dlq/discard` — discard a DLQ voucher
 - `POST /api/queue/aggregate` — collapse pending vouchers for a `(user, provider)` pair
 - `GET /api/observability` — queue depth + recent alert history for the dashboard
+- `PUT /api/maintenance` `DELETE /api/maintenance` — plan or cancel maintenance; every running sandbox is told (`internal/notice`)
 
 The two `/force*` paths predate `withOwnerOrAdmin` and remain as explicit
 operator-intent endpoints so log/audit grep is unambiguous.
